@@ -263,7 +263,7 @@ async function checkSsh() {
 
   const sshDir = path.join(os.homedir(), '.ssh');
   const privateKeys = await fs.readdir(sshDir).catch(() => []);
-  const keyCandidates = privateKeys.filter(name => /^(id_|.+\.pem$)/.test(name) && !name.endsWith('.pub') && name !== 'known_hosts');
+  const keyCandidates = privateKeys.filter(name => /^(id_|.+\.pem$|xingyue_workshop_vps_)/.test(name) && !name.endsWith('.pub') && name !== 'known_hosts');
   if (keyCandidates.length) record('ok', 'ssh', 'private key', keyCandidates.join(', '));
   else record('warn', 'ssh', 'private key', 'no private key found in ~/.ssh', 'Add a VPS SSH key or use browser/server console before running --ssh.');
 
