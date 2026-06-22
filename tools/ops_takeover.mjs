@@ -16,6 +16,7 @@ const DEFAULTS = {
   vpsHost: '43.132.171.157',
   vpsUser: 'root',
   gatewayDir: '/opt/rolecard-diy-workshop/gateway',
+  gatewayContainer: 'rolecard-workshop-gateway',
 };
 
 const args = parseArgs(process.argv.slice(2));
@@ -25,6 +26,7 @@ const config = {
   vpsHost: args.vpsHost || process.env.WORKSHOP_VPS_HOST || DEFAULTS.vpsHost,
   vpsUser: args.vpsUser || process.env.WORKSHOP_VPS_USER || DEFAULTS.vpsUser,
   gatewayDir: args.gatewayDir || process.env.WORKSHOP_GATEWAY_DIR || DEFAULTS.gatewayDir,
+  gatewayContainer: args.gatewayContainer || process.env.WORKSHOP_GATEWAY_CONTAINER || DEFAULTS.gatewayContainer,
   ssh: args.ssh || process.env.WORKSHOP_SSH || '',
   adminToken: args.adminToken || process.env.ADMIN_TOKEN || '',
   corsOrigin: args.corsOrigin || args.corsorigin || process.env.CORS_ORIGIN || positionalUrl(args) || truthyNpmValue(process.env.npm_config_corsorigin) || truthyNpmValue(process.env.npm_config_cors_origin) || '',
@@ -277,9 +279,14 @@ async function checkSsh() {
     `cd ${quoteSh(config.gatewayDir)}`,
     'pwd',
     'test -f .env && echo ENV_OK || echo ENV_MISSING',
-    'node -v',
-    'npm run self-check',
-  ].join(' && ');
+    'if command -v npm >/dev/null 2>&1; then',
+    '  node -v && npm run self-check;',
+    `elif command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -qx ${quoteSh(config.gatewayContainer)}; then`,
+    `  docker exec ${quoteSh(config.gatewayContainer)} sh -lc 'cd /app && node -v && npm run self-check';`,
+    'else',
+    '  echo "NO_NODE_OR_GATEWAY_CONTAINER"; exit 127;',
+    'fi',
+  ].join('\n');
   const result = await command('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', remote, remoteScript], { timeout: 30000 });
   if (result.ok) record('ok', 'ssh', 'remote gateway', result.stdout);
   else record('fail', 'ssh', 'remote gateway', result.stderr || result.stdout, 'Confirm SSH key, remote path, and Gateway service.');
