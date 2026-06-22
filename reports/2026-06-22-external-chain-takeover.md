@@ -9,8 +9,8 @@ VPS host: 43.132.171.157
 ## Current Git State
 
 - Branch: `main`
-- Latest pushed commit: `7f59aa8469aabb970ab93a9dcfc9f7f6d22676c9`
-- Commit message: `Add workshop ops takeover checks`
+- Latest pushed commit: `81211ad5785da6ce879ab8e7644388ebfd4242bf`
+- Commit message: `Document workshop external takeover state`
 - Local working tree: clean after this report is committed
 - Repository-local Git proxy:
   - `http.proxy=http://127.0.0.1:7897`
@@ -57,7 +57,7 @@ The public takeover check reported:
 Release package prepared locally:
 
 ```text
-C:\Users\Administrator\OneDrive\ST-\角色卡工作区\rolecard-diy-workshop\dist-gateway.zip
+<workspace>\rolecard-diy-workshop\dist-gateway.zip
 ```
 
 SHA256:
@@ -119,7 +119,7 @@ Expected health response after deployment:
 ## Local Commands For Next Takeover
 
 ```powershell
-cd C:\Users\Administrator\OneDrive\ST-\角色卡工作区\rolecard-diy-workshop
+cd <workspace>\rolecard-diy-workshop
 git pull
 npm run check
 npm run ops:takeover -- --corsOrigin http://127.0.0.1:8000
