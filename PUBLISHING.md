@@ -83,3 +83,54 @@ https://workshop.example.com/admin
 - `npm run sync:public` removes it from the public folder.
 
 Do not enable `DEV_LOGIN_ENABLED=true` on a public deployment.
+
+## Fast Takeover
+
+From the repository root, run:
+
+```bash
+npm run ops:takeover
+```
+
+Useful options:
+
+```bash
+npm run ops:takeover -- --gatewayUrl https://43-132-171-157.sslip.io
+npm run ops:takeover -- --corsOrigin http://127.0.0.1:8000
+npm run ops:takeover -- --ssh --vpsUser root --vpsHost 43.132.171.157
+```
+
+The takeover check verifies:
+
+- Git remote/upstream/worktree state,
+- local static and Gateway syntax/build checks,
+- GitHub Pages public URLs,
+- Gateway public index, API-prefixed health endpoint, admin page, login state, Discord redirect, and admin route protection,
+- CORS headers for the expected front-end origin,
+- SSH known host/private key availability, and optional remote Gateway self-check.
+
+On the VPS, after deploying `dist-gateway/`, run:
+
+```bash
+cd /opt/rolecard-diy-workshop/gateway
+npm run takeover
+```
+
+The server-side takeover check verifies `.env`, required secrets, Discord OAuth/guild gate configuration, storage directories, publisher/audit privacy, Cloudreve/public-folder sync config, and live Gateway API endpoints.
+
+For the current Cloudreve-root deployment, keep Gateway health under the API prefix:
+
+```text
+https://43-132-171-157.sslip.io/api/workshop/health
+```
+
+If you also want `/health` to hit Gateway instead of Cloudreve, add an Nginx location equivalent to:
+
+```nginx
+location = /health {
+  proxy_pass http://127.0.0.1:8787/health;
+  proxy_set_header Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```

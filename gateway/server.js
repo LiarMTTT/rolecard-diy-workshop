@@ -564,7 +564,7 @@ async function route(req, res) {
   const publicBaseUrl = publicBaseFromRequest(req);
   if (req.method === 'OPTIONS') return json(req, res, 204, {});
   if ((url.pathname === '/admin' || url.pathname === '/admin/') && req.method === 'GET') return file(res, 200, ADMIN_PAGE_FILE, 'text/html; charset=utf-8');
-  if (url.pathname === '/health') return json(req, res, 200, { ok: true });
+  if (url.pathname === '/health' || url.pathname === '/api/workshop/health') return json(req, res, 200, { ok: true });
   if (url.pathname === '/api/workshop/packages' && req.method === 'GET') {
     const index = await readIndex();
     const packages = applyPackageFilters(index.packages || [], url.searchParams)

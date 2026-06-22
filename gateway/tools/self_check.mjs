@@ -24,11 +24,11 @@ async function checkUrl(pathname, options = {}) {
 
 async function checkHealth() {
   try {
-    const { res, body } = await checkUrl('/health');
-    if (res.ok && body.ok) record('ok', 'health', `${baseUrl}/health responded ok`);
+    const { res, body } = await checkUrl('/api/workshop/health');
+    if (res.ok && body.ok) record('ok', 'health', `${baseUrl}/api/workshop/health responded ok`);
     else record('fail', 'health', `unexpected health response: ${res.status}`);
   } catch (error) {
-    record('fail', 'health', `cannot reach ${baseUrl}/health: ${error.message}`);
+    record('fail', 'health', `cannot reach ${baseUrl}/api/workshop/health: ${error.message}`);
   }
 }
 

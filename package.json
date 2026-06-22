@@ -6,7 +6,8 @@
   "scripts": {
     "check": "node tools/validate_static.mjs && npm --prefix gateway run check",
     "build:pages": "node tools/build_pages.mjs",
-    "validate:static": "node tools/validate_static.mjs"
+    "validate:static": "node tools/validate_static.mjs",
+    "ops:takeover": "node tools/ops_takeover.mjs"
   },
   "engines": {
     "node": ">=20"

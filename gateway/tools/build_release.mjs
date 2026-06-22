@@ -15,6 +15,7 @@ const entries = [
   'public',
   'tools/review.mjs',
   'tools/self_check.mjs',
+  'tools/server_takeover.mjs',
   'tools/sync_public_packages.mjs',
 ];
 

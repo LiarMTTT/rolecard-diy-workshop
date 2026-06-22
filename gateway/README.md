@@ -47,6 +47,7 @@ For browser publishing with cookies, set `CORS_ORIGIN` to the exact SillyTavern/
 
 - `GET /api/workshop/packages`: public package index.
 - `GET /api/workshop/packages/:id`: public package detail.
+- `GET /api/workshop/health`: Gateway health endpoint for API-prefix reverse proxies.
 - `GET /api/workshop/me`: current login state.
 - `GET /api/workshop/me/packages`: packages owned by the logged-in publisher.
 - `POST /api/workshop/packages`: publish a package.
@@ -93,8 +94,11 @@ npm run review -- approve --id <packageId>
 npm run review -- reject --id <packageId> --reason "reason"
 npm run sync:public
 npm run self-check
+npm run takeover
 ```
 
 `sync:public` copies approved package JSON files from `PACKAGE_STORE_DIR` to `PUBLIC_PACKAGE_DIR` for Cloudreve/public static serving, and removes withdrawn or rejected files from that public directory.
 
 `self-check` checks the live health endpoint, admin API, key environment values, package storage directory, and Cloudreve/public package directory writability.
+
+`takeover` is the server-side re-entry check. It audits `.env`, required secrets, Discord OAuth/guild gate configuration, package storage, public Cloudreve sync settings, privacy-sensitive registry/audit files, and the live API-prefixed Gateway endpoints.

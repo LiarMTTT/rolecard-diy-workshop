@@ -102,6 +102,7 @@ After the service starts, run:
 
 ```bash
 npm run self-check
+npm run takeover
 ```
 
 The self-check should have no `FAIL` rows before public publishing. `WARN` rows are acceptable only when they match an intentional private-test setup.
@@ -127,9 +128,18 @@ If Cloudreve can expose or sync a local server directory, set `PUBLIC_PACKAGE_DI
 
 ```bash
 npm run sync:public
+npm run takeover
 ```
 
 This copies approved packages to the public folder and removes rejected/withdrawn files from that folder. It does not copy publisher ownership hashes.
+
+For a deployment where Cloudreve owns `/` and Gateway is mounted under `/api/workshop/`, expose Gateway health at:
+
+```text
+/api/workshop/health
+```
+
+If the reverse proxy should also serve `/health` from Gateway, add a dedicated exact-match location for `/health`.
 
 ## 5. Review Flow
 
