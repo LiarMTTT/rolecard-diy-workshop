@@ -5,3 +5,4 @@ gateway/.env
 node_modules/
 dist-pages/
 dist-gateway/
+dist-gateway.zip
