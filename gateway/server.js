@@ -216,6 +216,15 @@ function assertPackageId(id) {
   return text;
 }
 
+function publicBaseFromRequest(req) {
+  const configured = PUBLIC_BASE_URL.replace(/\/+$/, '');
+  const host = String(req?.headers?.['x-forwarded-host'] || req?.headers?.host || '').split(',')[0].trim();
+  if (!host) return configured;
+  const forwardedProto = String(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim();
+  const proto = forwardedProto || (configured.startsWith('https://') ? 'https' : 'http');
+  return `${proto}://${host}`;
+}
+
 function packageFilePath(id) {
   return path.join(PACKAGE_STORE_DIR, `${assertPackageId(id)}.json`);
 }
@@ -297,26 +306,26 @@ async function getOrCreatePublisher(discordUserHash) {
   return { ...publisher };
 }
 
-function publicPackageMeta(pkg) {
+function publicPackageMeta(pkg, baseUrl = PUBLIC_BASE_URL) {
   const { payload, ownerPublisherId, ...meta } = pkg;
   return {
     ...meta,
-    manifestUrl: `${PUBLIC_BASE_URL.replace(/\/+$/, '')}/api/workshop/packages/${encodeURIComponent(pkg.id)}`,
+    manifestUrl: `${baseUrl.replace(/\/+$/, '')}/api/workshop/packages/${encodeURIComponent(pkg.id)}`,
     storage: pkg.storage?.url ? pkg.storage : { provider: PACKAGE_PUBLIC_BASE_URL ? 'cloudreve-public-url' : 'gateway', url: packagePublicUrl(pkg.id) },
   };
 }
 
-function adminPackageMeta(pkg) {
+function adminPackageMeta(pkg, baseUrl = PUBLIC_BASE_URL) {
   const { ownerPublisherId, ...meta } = pkg;
   return {
     ...meta,
-    manifestUrl: `${PUBLIC_BASE_URL.replace(/\/+$/, '')}/api/workshop/packages/${encodeURIComponent(pkg.id)}`,
+    manifestUrl: `${baseUrl.replace(/\/+$/, '')}/api/workshop/packages/${encodeURIComponent(pkg.id)}`,
     storage: pkg.storage?.url ? pkg.storage : { provider: PACKAGE_PUBLIC_BASE_URL ? 'cloudreve-public-url' : 'gateway', url: packagePublicUrl(pkg.id) },
   };
 }
 
-function ownerPackageMeta(pkg) {
-  const meta = publicPackageMeta(pkg);
+function ownerPackageMeta(pkg, baseUrl = PUBLIC_BASE_URL) {
+  const meta = publicPackageMeta(pkg, baseUrl);
   return {
     ...meta,
     ownerPublisherId: undefined,
@@ -373,13 +382,13 @@ async function allStoredPackages() {
   return packages;
 }
 
-async function rebuildPublicIndex() {
+async function rebuildPublicIndex(baseUrl = PUBLIC_BASE_URL) {
   const packages = await allStoredPackages();
   const index = await readIndex();
   index.version = index.version || '1.0.0';
   index.packages = packages
     .filter(pkg => (pkg.reviewStatus || 'pending') === 'approved' && !pkg.withdrawnAt)
-    .map(publicPackageMeta)
+    .map(pkg => publicPackageMeta(pkg, baseUrl))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
   await writeIndex(index);
   return index;
@@ -429,11 +438,11 @@ async function savePackage(pkg, publisherId, options = {}) {
     publisherId,
     reviewStatus: stored.reviewStatus,
   });
-  await rebuildPublicIndex();
-  return ownerPackageMeta(stored);
+  await rebuildPublicIndex(options.baseUrl);
+  return ownerPackageMeta(stored, options.baseUrl);
 }
 
-async function deletePackage(id, publisherId) {
+async function deletePackage(id, publisherId, options = {}) {
   const existing = await getPackage(id);
   if (existing.ownerPublisherId !== publisherId) throw new Error('not-package-owner');
   const withdrawn = {
@@ -444,10 +453,10 @@ async function deletePackage(id, publisherId) {
   };
   await fs.writeFile(packageFilePath(id), JSON.stringify(withdrawn, null, 2));
   await appendAuditLog({ action: 'package.withdrawn', packageId: id, publisherId, reviewStatus: 'withdrawn' });
-  await rebuildPublicIndex();
+  await rebuildPublicIndex(options.baseUrl);
 }
 
-async function listPackagesForPublisher(publisherId) {
+async function listPackagesForPublisher(publisherId, baseUrl = PUBLIC_BASE_URL) {
   await ensureStore();
   const names = await fs.readdir(PACKAGE_STORE_DIR).catch(() => []);
   const packages = [];
@@ -455,22 +464,22 @@ async function listPackagesForPublisher(publisherId) {
     if (!name.endsWith('.json')) continue;
     try {
       const pkg = JSON.parse(await fs.readFile(path.join(PACKAGE_STORE_DIR, name), 'utf8'));
-      if (pkg.ownerPublisherId === publisherId) packages.push(ownerPackageMeta(pkg));
+      if (pkg.ownerPublisherId === publisherId) packages.push(ownerPackageMeta(pkg, baseUrl));
     } catch {}
   }
   return packages.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 
-async function listPackagesForReview(status = 'pending') {
+async function listPackagesForReview(status = 'pending', baseUrl = PUBLIC_BASE_URL) {
   const packages = await allStoredPackages();
   const target = String(status || 'pending');
   return packages
     .filter(pkg => target === 'all' || (pkg.reviewStatus || 'pending') === target)
-    .map(adminPackageMeta)
+    .map(pkg => adminPackageMeta(pkg, baseUrl))
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 
-async function setPackageReviewStatus(id, status, reason = '', reviewer = 'admin') {
+async function setPackageReviewStatus(id, status, reason = '', reviewer = 'admin', options = {}) {
   if (!REVIEW_STATES.has(status) || status === 'withdrawn') throw new Error('invalid review status');
   const existing = await getPackage(id);
   const next = {
@@ -487,8 +496,8 @@ async function setPackageReviewStatus(id, status, reason = '', reviewer = 'admin
     reviewStatus: status,
     reason: reviewer === 'admin' ? reason : '',
   });
-  await rebuildPublicIndex();
-  return ownerPackageMeta(next);
+  await rebuildPublicIndex(options.baseUrl);
+  return ownerPackageMeta(next, options.baseUrl);
 }
 
 function discordAuthUrl() {
@@ -543,12 +552,15 @@ async function createSessionForDiscordUser(discordUserId) {
 
 async function route(req, res) {
   const url = new URL(req.url, PUBLIC_BASE_URL);
+  const publicBaseUrl = publicBaseFromRequest(req);
   if (req.method === 'OPTIONS') return json(req, res, 204, {});
   if ((url.pathname === '/admin' || url.pathname === '/admin/') && req.method === 'GET') return file(res, 200, ADMIN_PAGE_FILE, 'text/html; charset=utf-8');
   if (url.pathname === '/health') return json(req, res, 200, { ok: true });
   if (url.pathname === '/api/workshop/packages' && req.method === 'GET') {
     const index = await readIndex();
-    return json(req, res, 200, { ...index, packages: applyPackageFilters(index.packages || [], url.searchParams) });
+    const packages = applyPackageFilters(index.packages || [], url.searchParams)
+      .map(pkg => publicPackageMeta(pkg, publicBaseUrl));
+    return json(req, res, 200, { ...index, packages });
   }
   if (url.pathname.startsWith('/api/workshop/packages/') && req.method === 'GET') {
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
@@ -556,7 +568,7 @@ async function route(req, res) {
     const session = sessionFromRequest(req);
     if (!isPublicPackage(pkg) && (!session || session.publisherId !== pkg.ownerPublisherId)) return json(req, res, 404, { error: 'not-found' });
     const { ownerPublisherId, ...publicPkg } = pkg;
-    return json(req, res, 200, publicPkg);
+    return json(req, res, 200, publicPackageMeta(publicPkg, publicBaseUrl));
   }
   if (url.pathname === '/api/workshop/me') {
     const session = sessionFromRequest(req);
@@ -565,23 +577,23 @@ async function route(req, res) {
   if (url.pathname === '/api/workshop/me/packages' && req.method === 'GET') {
     const session = sessionFromRequest(req);
     if (!session) return json(req, res, 401, { error: 'login-required' });
-    return json(req, res, 200, { packages: await listPackagesForPublisher(session.publisherId) });
+    return json(req, res, 200, { packages: await listPackagesForPublisher(session.publisherId, publicBaseUrl) });
   }
   if (url.pathname === '/api/admin/review/packages' && req.method === 'GET') {
     requireAdmin(req);
-    const packages = await listPackagesForReview(url.searchParams.get('status') || 'pending');
+    const packages = await listPackagesForReview(url.searchParams.get('status') || 'pending', publicBaseUrl);
     return json(req, res, 200, { packages: applyPackageFilters(packages, url.searchParams) });
   }
   if (url.pathname.startsWith('/api/admin/review/packages/') && req.method === 'GET') {
     requireAdmin(req);
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
-    return json(req, res, 200, adminPackageMeta(await getPackage(id)));
+    return json(req, res, 200, adminPackageMeta(await getPackage(id), publicBaseUrl));
   }
   if (url.pathname.startsWith('/api/admin/review/packages/') && req.method === 'POST') {
     requireAdmin(req);
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
     const body = JSON.parse(await readBody(req, 32 * 1024) || '{}');
-    const meta = await setPackageReviewStatus(id, String(body.status || ''), String(body.reason || ''));
+    const meta = await setPackageReviewStatus(id, String(body.status || ''), String(body.reason || ''), 'admin', { baseUrl: publicBaseUrl });
     return json(req, res, 200, meta);
   }
   if (url.pathname === '/api/workshop/packages' && req.method === 'POST') {
@@ -589,7 +601,7 @@ async function route(req, res) {
     if (!session) return json(req, res, 401, { error: 'login-required' });
     const input = JSON.parse(await readBody(req));
     const pkg = validatePackage(input);
-    const meta = await savePackage(pkg, session.publisherId, { expectedRevision: expectedRevisionFromRequest(req, input) });
+    const meta = await savePackage(pkg, session.publisherId, { expectedRevision: expectedRevisionFromRequest(req, input), baseUrl: publicBaseUrl });
     return json(req, res, 200, meta);
   }
   if (url.pathname.startsWith('/api/workshop/packages/') && req.method === 'PUT') {
@@ -599,14 +611,14 @@ async function route(req, res) {
     const input = JSON.parse(await readBody(req));
     const pkg = validatePackage(input);
     if (pkg.id !== id) return json(req, res, 400, { error: 'package-id-mismatch' });
-    const meta = await savePackage(pkg, session.publisherId, { expectedRevision: expectedRevisionFromRequest(req, input) });
+    const meta = await savePackage(pkg, session.publisherId, { expectedRevision: expectedRevisionFromRequest(req, input), baseUrl: publicBaseUrl });
     return json(req, res, 200, meta);
   }
   if (url.pathname.startsWith('/api/workshop/packages/') && req.method === 'DELETE') {
     const session = sessionFromRequest(req);
     if (!session) return json(req, res, 401, { error: 'login-required' });
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
-    await deletePackage(id, session.publisherId);
+    await deletePackage(id, session.publisherId, { baseUrl: publicBaseUrl });
     return json(req, res, 200, { ok: true });
   }
   if (url.pathname === '/auth/discord/login') {
