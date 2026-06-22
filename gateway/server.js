@@ -315,6 +315,15 @@ function publicPackageMeta(pkg, baseUrl = PUBLIC_BASE_URL) {
   };
 }
 
+function publicPackageDetail(pkg, baseUrl = PUBLIC_BASE_URL) {
+  const { ownerPublisherId, ...publicPkg } = pkg;
+  return {
+    ...publicPkg,
+    manifestUrl: `${baseUrl.replace(/\/+$/, '')}/api/workshop/packages/${encodeURIComponent(pkg.id)}`,
+    storage: pkg.storage?.url ? pkg.storage : { provider: PACKAGE_PUBLIC_BASE_URL ? 'cloudreve-public-url' : 'gateway', url: packagePublicUrl(pkg.id) },
+  };
+}
+
 function adminPackageMeta(pkg, baseUrl = PUBLIC_BASE_URL) {
   const { ownerPublisherId, ...meta } = pkg;
   return {
@@ -567,8 +576,7 @@ async function route(req, res) {
     const pkg = await getPackage(id);
     const session = sessionFromRequest(req);
     if (!isPublicPackage(pkg) && (!session || session.publisherId !== pkg.ownerPublisherId)) return json(req, res, 404, { error: 'not-found' });
-    const { ownerPublisherId, ...publicPkg } = pkg;
-    return json(req, res, 200, publicPackageMeta(publicPkg, publicBaseUrl));
+    return json(req, res, 200, publicPackageDetail(pkg, publicBaseUrl));
   }
   if (url.pathname === '/api/workshop/me') {
     const session = sessionFromRequest(req);
