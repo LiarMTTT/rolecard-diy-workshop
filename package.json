@@ -1,0 +1,14 @@
+{
+  "name": "rolecard-diy-workshop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node tools/validate_static.mjs && npm --prefix gateway run check",
+    "build:pages": "node tools/build_pages.mjs",
+    "validate:static": "node tools/validate_static.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

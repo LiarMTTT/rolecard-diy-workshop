@@ -1,0 +1,17 @@
+{
+  "name": "rolecard-diy-workshop-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check tools/review.mjs && node --check tools/sync_public_packages.mjs && node --check tools/self_check.mjs && node --check tools/build_release.mjs",
+    "review": "node tools/review.mjs",
+    "sync:public": "node tools/sync_public_packages.mjs",
+    "self-check": "node tools/self_check.mjs",
+    "build:release": "node tools/build_release.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

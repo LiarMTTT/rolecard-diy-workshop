@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Workshop Review</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --line: #d9dee7;
+      --text: #18202f;
+      --muted: #667085;
+      --accent: #1f6feb;
+      --danger: #b42318;
+      --ok: #067647;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    .wrap {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+    header .wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 64px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+    main {
+      padding: 20px 0 36px;
+    }
+    .toolbar,
+    .detail,
+    .package {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1.1fr 160px 150px 120px auto;
+      gap: 10px;
+      padding: 12px;
+      margin-bottom: 14px;
+    }
+    input,
+    select,
+    textarea,
+    button {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 7px 9px;
+    }
+    textarea {
+      min-height: 76px;
+      resize: vertical;
+    }
+    button {
+      padding: 7px 12px;
+      cursor: pointer;
+    }
+    button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    button.good {
+      border-color: var(--ok);
+      background: var(--ok);
+      color: #fff;
+    }
+    button.danger {
+      border-color: var(--danger);
+      background: var(--danger);
+      color: #fff;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 390px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+    .package {
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      text-align: left;
+    }
+    .package[aria-selected="true"] {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+    .title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 700;
+    }
+    .meta,
+    .small {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: #f9fafb;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .detail {
+      min-height: 360px;
+      padding: 14px;
+    }
+    .detail h2 {
+      margin: 0 0 4px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 12px 0;
+    }
+    pre {
+      overflow: auto;
+      max-height: 460px;
+      margin: 12px 0 0;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #101828;
+      color: #f8fafc;
+      font-size: 12px;
+    }
+    .notice {
+      min-height: 24px;
+      margin: 10px 0 0;
+      color: var(--muted);
+    }
+    .notice.error { color: var(--danger); }
+    .notice.ok { color: var(--ok); }
+    @media (max-width: 850px) {
+      .toolbar,
+      .layout {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Workshop Review</h1>
+      <span class="small">No Discord profile fields are displayed or stored here.</span>
+    </div>
+  </header>
+  <main class="wrap">
+    <section class="toolbar" aria-label="Review filters">
+      <input id="adminToken" type="password" autocomplete="off" placeholder="Admin token">
+      <select id="status">
+        <option value="pending">pending</option>
+        <option value="approved">approved</option>
+        <option value="rejected">rejected</option>
+        <option value="withdrawn">withdrawn</option>
+        <option value="all">all</option>
+      </select>
+      <select id="type">
+        <option value="">all types</option>
+        <option value="character">character</option>
+        <option value="user_identity">user_identity</option>
+        <option value="world_factor">world_factor</option>
+        <option value="shop_item">shop_item</option>
+        <option value="blueprint">blueprint</option>
+        <option value="recipe">recipe</option>
+        <option value="skill">skill</option>
+        <option value="function">function</option>
+      </select>
+      <input id="query" type="search" placeholder="Search">
+      <button id="refresh" class="primary" type="button">Refresh</button>
+    </section>
+    <section class="layout">
+      <div>
+        <div id="list" class="list" aria-live="polite"></div>
+        <div id="notice" class="notice"></div>
+      </div>
+      <article id="detail" class="detail">
+        <h2>Select a package</h2>
+        <p class="meta">Pending packages are hidden from the public index until approved.</p>
+      </article>
+    </section>
+  </main>
+  <script>
+    const state = {
+      packages: [],
+      selected: null,
+    };
+    const $ = id => document.getElementById(id);
+    const savedToken = localStorage.getItem('xyWorkshopAdminToken') || '';
+    $('adminToken').value = savedToken;
+
+    function setNotice(message, kind = '') {
+      $('notice').textContent = message || '';
+      $('notice').className = `notice ${kind}`.trim();
+    }
+
+    function tokenHeaders() {
+      const token = $('adminToken').value.trim();
+      if (token) localStorage.setItem('xyWorkshopAdminToken', token);
+      return {
+        authorization: `Bearer ${token}`,
+      };
+    }
+
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+        ...options,
+        headers: {
+          ...tokenHeaders(),
+          ...(options.body ? { 'content-type': 'application/json' } : {}),
+          ...(options.headers || {}),
+        },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `request failed: ${res.status}`);
+      return data;
+    }
+
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[ch]));
+    }
+
+    function renderList() {
+      const list = $('list');
+      if (!state.packages.length) {
+        list.innerHTML = '<div class="package"><strong>No packages</strong><span class="meta">Adjust filters or refresh.</span></div>';
+        return;
+      }
+      list.innerHTML = state.packages.map(pkg => `
+        <button class="package" type="button" data-id="${esc(pkg.id)}" aria-selected="${state.selected?.id === pkg.id}">
+          <span class="title">
+            <span>${esc(pkg.title)}</span>
+            <span class="pill">${esc(pkg.reviewStatus)}</span>
+          </span>
+          <span class="meta">${esc(pkg.id)}</span>
+          <span class="meta">${esc(pkg.type)} · ${esc(pkg.cardScope)} · ${esc(pkg.rating)} · rev ${esc(pkg.revision || 0)}</span>
+          <span class="small">${esc(pkg.summary || '')}</span>
+        </button>
+      `).join('');
+      list.querySelectorAll('button[data-id]').forEach(button => {
+        button.addEventListener('click', () => selectPackage(button.dataset.id));
+      });
+    }
+
+    function renderDetail(pkg) {
+      state.selected = pkg;
+      renderList();
+      if (!pkg) return;
+      const disabled = pkg.reviewStatus === 'withdrawn' ? 'disabled' : '';
+      $('detail').innerHTML = `
+        <h2>${esc(pkg.title)}</h2>
+        <div class="meta">${esc(pkg.id)} · ${esc(pkg.type)} · ${esc(pkg.cardScope)} · rev ${esc(pkg.revision || 0)}</div>
+        <p>${esc(pkg.summary || '')}</p>
+        <div class="meta">rating: ${esc(pkg.rating)} · language: ${esc(pkg.language)} · updated: ${esc(pkg.updatedAt || '')}</div>
+        <div class="meta">tags: ${(pkg.tags || []).map(tag => `<span class="pill">${esc(tag)}</span>`).join(' ') || 'none'}</div>
+        <div class="actions">
+          <button id="approve" class="good" type="button" ${disabled}>Approve</button>
+          <button id="reject" class="danger" type="button" ${disabled}>Reject</button>
+          <button id="copyId" type="button">Copy ID</button>
+        </div>
+        <textarea id="reason" placeholder="Reject reason"></textarea>
+        <pre>${esc(JSON.stringify(pkg, null, 2))}</pre>
+      `;
+      $('approve').addEventListener('click', () => review(pkg.id, 'approved'));
+      $('reject').addEventListener('click', () => review(pkg.id, 'rejected', $('reason').value));
+      $('copyId').addEventListener('click', async () => {
+        await navigator.clipboard.writeText(pkg.id);
+        setNotice('Package ID copied.', 'ok');
+      });
+    }
+
+    async function selectPackage(id) {
+      try {
+        const data = await api(`/api/admin/review/packages/${encodeURIComponent(id)}`);
+        renderDetail(data);
+      } catch (error) {
+        setNotice(error.message, 'error');
+      }
+    }
+
+    async function refresh() {
+      const params = new URLSearchParams();
+      params.set('status', $('status').value);
+      if ($('type').value) params.set('type', $('type').value);
+      if ($('query').value.trim()) params.set('q', $('query').value.trim());
+      try {
+        const data = await api(`/api/admin/review/packages?${params}`);
+        state.packages = data.packages || [];
+        state.selected = null;
+        renderList();
+        $('detail').innerHTML = '<h2>Select a package</h2><p class="meta">Choose one item to inspect payload and review metadata.</p>';
+        setNotice(`${state.packages.length} package(s) loaded.`, 'ok');
+      } catch (error) {
+        setNotice(error.message, 'error');
+      }
+    }
+
+    async function review(id, status, reason = '') {
+      try {
+        const data = await api(`/api/admin/review/packages/${encodeURIComponent(id)}`, {
+          method: 'POST',
+          body: JSON.stringify({ status, reason }),
+        });
+        setNotice(`${id} is now ${data.reviewStatus}.`, 'ok');
+        await refresh();
+        await selectPackage(id);
+      } catch (error) {
+        setNotice(error.message, 'error');
+      }
+    }
+
+    $('refresh').addEventListener('click', refresh);
+    $('status').addEventListener('change', refresh);
+    $('type').addEventListener('change', refresh);
+    $('query').addEventListener('keydown', event => {
+      if (event.key === 'Enter') refresh();
+    });
+  </script>
+</body>
+</html>

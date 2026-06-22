@@ -1,0 +1,7 @@
+data/
+gateway/data/
+.env
+gateway/.env
+node_modules/
+dist-pages/
+dist-gateway/

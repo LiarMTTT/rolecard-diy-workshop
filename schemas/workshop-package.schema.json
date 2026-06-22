@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/LiarMTTT/rolecard-diy-workshop/schemas/workshop-package.schema.json",
+  "title": "Rolecard DIY Workshop Package",
+  "description": "A content package imported as worldbook/lorebook entries. It must not directly patch MVU save variables.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["packageVersion", "id", "type", "cardScope", "title", "payload"],
+  "properties": {
+    "packageVersion": {
+      "type": "string",
+      "minLength": 1,
+      "default": "1.0.0"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 120,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["character", "user_identity", "world_factor", "shop_item", "blueprint", "recipe", "skill", "function"]
+    },
+    "cardScope": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "examples": ["xingyue", "terminal-city", "shared"]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 600
+    },
+    "authorName": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "rating": {
+      "type": "string",
+      "enum": ["general", "mature", "restricted"],
+      "default": "general"
+    },
+    "language": {
+      "type": "string",
+      "default": "zh-CN"
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "string",
+        "maxLength": 40
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Gateway-managed revision used for optimistic conflict checks."
+    },
+    "contentHash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "Gateway-managed SHA-256 hash of package content fields."
+    },
+    "reviewStatus": {
+      "type": "string",
+      "enum": ["pending", "approved", "rejected", "withdrawn"],
+      "description": "Gateway-managed review state. Only approved packages are public."
+    },
+    "rejectionReason": {
+      "type": "string",
+      "maxLength": 600
+    },
+    "withdrawnAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}
