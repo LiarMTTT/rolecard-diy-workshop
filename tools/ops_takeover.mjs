@@ -229,7 +229,7 @@ async function checkGateway() {
   }
 
   try {
-    const res = await fetch(`${config.gatewayUrl}/api/admin/review/packages?status=pending`, {
+    const { res } = await fetchText(`${config.gatewayUrl}/api/admin/review/packages?status=pending`, {
       headers: config.adminToken ? { authorization: `Bearer ${config.adminToken}` } : {},
     });
     if (config.adminToken && res.ok) record('ok', 'gateway', 'admin api', 'ADMIN_TOKEN accepted');
