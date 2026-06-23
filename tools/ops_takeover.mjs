@@ -92,6 +92,23 @@ async function fetchJson(url, options = {}) {
   throw lastError;
 }
 
+async function fetchJsonCli(url) {
+  let result = null;
+  if (process.platform === 'win32') {
+    const script = [
+      '$ErrorActionPreference = "Stop"',
+      `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
+      `$r = Invoke-WebRequest -Uri ${JSON.stringify(url)} -UseBasicParsing -TimeoutSec 30`,
+      'Write-Output $r.Content',
+    ].join('; ');
+    result = await command('powershell.exe', ['-NoProfile', '-Command', script], { timeout: 45000 });
+  } else {
+    result = await command('curl', ['-fsSL', '--max-time', '30', url], { timeout: 45000 });
+  }
+  if (!result.ok) throw new Error(result.stderr || result.stdout || 'CLI fetch failed');
+  return JSON.parse(result.stdout);
+}
+
 async function command(name, argsForCommand, options = {}) {
   try {
     const { stdout, stderr } = await execFileAsync(name, argsForCommand, {
@@ -162,7 +179,12 @@ async function checkPages() {
       if (res.ok && body) record('ok', 'github-pages', suffix, `HTTP ${res.status}`);
       else record('fail', 'github-pages', suffix, `HTTP ${res.status}`, 'Check GitHub Pages workflow and repository Pages settings.');
     } catch (error) {
-      record('fail', 'github-pages', suffix, error.message);
+      try {
+        await fetchJsonCli(url);
+        record('ok', 'github-pages', suffix, `HTTP 200 via CLI fallback after ${error.message}`);
+      } catch (fallbackError) {
+        record('fail', 'github-pages', suffix, `${error.message}; fallback: ${fallbackError.message}`);
+      }
     }
   }
 }
@@ -236,19 +258,65 @@ async function fetchText(url, options = {}) {
   throw lastError;
 }
 
-async function checkCors() {
-  const origin = config.corsOrigin || 'http://127.0.0.1:8000';
-  try {
-    const res = await fetch(`${config.gatewayUrl}/api/workshop/packages`, { headers: { origin } });
-    const allowOrigin = res.headers.get('access-control-allow-origin') || '';
-    const allowCredentials = res.headers.get('access-control-allow-credentials') || '';
-    if (allowOrigin === origin && allowCredentials === 'true') {
-      record('ok', 'cors', 'origin', `${origin} is allowed with credentials`);
-    } else {
-      record('warn', 'cors', 'origin', `requested ${origin}; server returned ${allowOrigin || '(empty)'}`, 'Set CORS_ORIGIN on the VPS to the exact SillyTavern/front-end origin.');
+async function fetchCorsHeadersCli(url, origin) {
+  let result = null;
+  if (process.platform === 'win32') {
+    const script = [
+      '$ErrorActionPreference = "Stop"',
+      `[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12`,
+      `$r = Invoke-WebRequest -Uri ${JSON.stringify(url)} -UseBasicParsing -TimeoutSec 30 -Headers @{ Origin = ${JSON.stringify(origin)} }`,
+      '$h = $r.Headers',
+      '$out = @{',
+      '  status = [int]$r.StatusCode',
+      '  allowOrigin = [string]$h["Access-Control-Allow-Origin"]',
+      '  allowCredentials = [string]$h["Access-Control-Allow-Credentials"]',
+      '}',
+      '$out | ConvertTo-Json -Compress',
+    ].join('; ');
+    result = await command('powershell.exe', ['-NoProfile', '-Command', script], { timeout: 45000 });
+  } else {
+    result = await command('curl', ['-fsSI', '--max-time', '30', '-H', `Origin: ${origin}`, url], { timeout: 45000 });
+    if (result.ok) {
+      const headers = Object.fromEntries(result.stdout.split(/\r?\n/).map(line => {
+        const index = line.indexOf(':');
+        if (index < 0) return null;
+        return [line.slice(0, index).trim().toLowerCase(), line.slice(index + 1).trim()];
+      }).filter(Boolean));
+      return {
+        status: 200,
+        allowOrigin: headers['access-control-allow-origin'] || '',
+        allowCredentials: headers['access-control-allow-credentials'] || '',
+      };
     }
-  } catch (error) {
-    record('fail', 'cors', 'origin', error.message);
+  }
+  if (!result.ok) throw new Error(result.stderr || result.stdout || 'CLI CORS check failed');
+  return JSON.parse(result.stdout);
+}
+
+async function checkCors() {
+  const origins = String(config.corsOrigin || 'http://127.0.0.1:8000').split(',').map(item => item.trim()).filter(Boolean);
+  for (const origin of origins) {
+    let allowOrigin = '';
+    let allowCredentials = '';
+    try {
+      const { res } = await fetchText(`${config.gatewayUrl}/api/workshop/packages`, { headers: { origin } });
+      allowOrigin = res.headers.get('access-control-allow-origin') || '';
+      allowCredentials = res.headers.get('access-control-allow-credentials') || '';
+    } catch (error) {
+      try {
+        const fallback = await fetchCorsHeadersCli(`${config.gatewayUrl}/api/workshop/packages`, origin);
+        allowOrigin = fallback.allowOrigin || '';
+        allowCredentials = fallback.allowCredentials || '';
+      } catch (fallbackError) {
+        record('fail', 'cors', origin, `${error.message}; fallback: ${fallbackError.message}`);
+        continue;
+      }
+    }
+    if (allowOrigin === origin && allowCredentials === 'true') {
+      record('ok', 'cors', origin, 'allowed with credentials');
+    } else {
+      record('warn', 'cors', origin, `server returned ${allowOrigin || '(empty)'}`, 'Set CORS_ORIGIN on the VPS to the exact SillyTavern/front-end origin.');
+    }
   }
 }
 
@@ -265,7 +333,7 @@ async function checkSsh() {
 
   const sshDir = path.join(os.homedir(), '.ssh');
   const privateKeys = await fs.readdir(sshDir).catch(() => []);
-  const keyCandidates = privateKeys.filter(name => /^(id_|.+\.pem$|xingyue_workshop_vps_)/.test(name) && !name.endsWith('.pub') && name !== 'known_hosts');
+  const keyCandidates = privateKeys.filter(name => /^(id_|.+\.pem$|xingyue_workshop_vps_|rolecard_workshop_vps_)/.test(name) && !name.endsWith('.pub') && name !== 'known_hosts');
   if (keyCandidates.length) record('ok', 'ssh', 'private key', keyCandidates.join(', '));
   else record('warn', 'ssh', 'private key', 'no private key found in ~/.ssh', 'Add a VPS SSH key or use browser/server console before running --ssh.');
 

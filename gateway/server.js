@@ -10,6 +10,7 @@ const PORT = Number(env.PORT || 8787);
 const PUBLIC_BASE_URL = env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 const COOKIE_SECURE = PUBLIC_BASE_URL.startsWith('https://');
 const COOKIE_SAME_SITE = env.COOKIE_SAME_SITE || (COOKIE_SECURE ? 'None' : 'Lax');
+const SESSION_COOKIE_NAME = env.SESSION_COOKIE_NAME || 'rc_workshop_session';
 const LOGIN_SUCCESS_REDIRECT = env.LOGIN_SUCCESS_REDIRECT || '/';
 const SESSION_SECRET = env.SESSION_SECRET || 'dev-session-secret';
 const HASH_SECRET = env.HASH_SECRET || 'dev-hash-secret';
@@ -21,6 +22,8 @@ const PUBLISHER_FILE = env.PUBLISHER_FILE || './data/publishers.json';
 const AUDIT_LOG_FILE = env.AUDIT_LOG_FILE || './data/audit-log.jsonl';
 const REQUIRE_REVIEW = env.REQUIRE_REVIEW !== 'false';
 const PACKAGE_PUBLIC_BASE_URL = String(env.PACKAGE_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+const PUBLIC_PACKAGE_DIR = env.PUBLIC_PACKAGE_DIR || '';
+const PUBLIC_SYNC_REPORT_FILE = env.PUBLIC_SYNC_REPORT_FILE || './data/public-sync-report.json';
 const CORS_ORIGIN = env.CORS_ORIGIN || '*';
 const SUPPORTED_TYPES = new Set(['character', 'user_identity', 'world_factor', 'shop_item', 'blueprint', 'recipe', 'skill', 'function']);
 const BLOCKED_TYPES = new Set(['opening_pack', 'prompt_patch', 'ui_theme']);
@@ -108,7 +111,8 @@ function verifySessionCookie(value) {
 }
 
 function sessionFromRequest(req) {
-  return verifySessionCookie(parseCookies(req).xy_workshop_session);
+  const cookies = parseCookies(req);
+  return verifySessionCookie(cookies[SESSION_COOKIE_NAME] || cookies.xy_workshop_session);
 }
 
 function requireAdmin(req) {
@@ -403,6 +407,54 @@ async function rebuildPublicIndex(baseUrl = PUBLIC_BASE_URL) {
   return index;
 }
 
+async function syncApprovedPackagesToPublicDir() {
+  if (!PUBLIC_PACKAGE_DIR) return null;
+  await fs.mkdir(PUBLIC_PACKAGE_DIR, { recursive: true });
+  await fs.mkdir(path.dirname(PUBLIC_SYNC_REPORT_FILE), { recursive: true });
+
+  const packages = await allStoredPackages();
+  const approved = packages.filter(pkg => isPublicPackage(pkg));
+  const approvedIds = new Set(approved.map(pkg => pkg.id));
+  const copied = [];
+  const removed = [];
+
+  for (const pkg of approved) {
+    const publicPkg = { ...pkg };
+    delete publicPkg.ownerPublisherId;
+    await fs.writeFile(
+      path.join(PUBLIC_PACKAGE_DIR, `${assertPackageId(pkg.id)}.json`),
+      `${JSON.stringify(publicPkg, null, 2)}\n`,
+      'utf8',
+    );
+    copied.push(pkg.id);
+  }
+
+  for (const name of await fs.readdir(PUBLIC_PACKAGE_DIR).catch(() => [])) {
+    if (!name.endsWith('.json')) continue;
+    const id = name.slice(0, -5);
+    if (!approvedIds.has(id)) {
+      await fs.rm(path.join(PUBLIC_PACKAGE_DIR, name), { force: true });
+      removed.push(id);
+    }
+  }
+
+  const report = {
+    syncedAt: new Date().toISOString(),
+    publicPackageDir: PUBLIC_PACKAGE_DIR,
+    approved: approved.length,
+    copied,
+    removed,
+  };
+  await fs.writeFile(PUBLIC_SYNC_REPORT_FILE, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  return report;
+}
+
+async function refreshPublicOutputs(baseUrl = PUBLIC_BASE_URL) {
+  const index = await rebuildPublicIndex(baseUrl);
+  await syncApprovedPackagesToPublicDir();
+  return index;
+}
+
 async function getPackage(id) {
   const file = packageFilePath(id);
   return JSON.parse(await fs.readFile(file, 'utf8'));
@@ -447,7 +499,7 @@ async function savePackage(pkg, publisherId, options = {}) {
     publisherId,
     reviewStatus: stored.reviewStatus,
   });
-  await rebuildPublicIndex(options.baseUrl);
+  await refreshPublicOutputs(options.baseUrl);
   return ownerPackageMeta(stored, options.baseUrl);
 }
 
@@ -462,7 +514,7 @@ async function deletePackage(id, publisherId, options = {}) {
   };
   await fs.writeFile(packageFilePath(id), JSON.stringify(withdrawn, null, 2));
   await appendAuditLog({ action: 'package.withdrawn', packageId: id, publisherId, reviewStatus: 'withdrawn' });
-  await rebuildPublicIndex(options.baseUrl);
+  await refreshPublicOutputs(options.baseUrl);
 }
 
 async function listPackagesForPublisher(publisherId, baseUrl = PUBLIC_BASE_URL) {
@@ -505,7 +557,7 @@ async function setPackageReviewStatus(id, status, reason = '', reviewer = 'admin
     reviewStatus: status,
     reason: reviewer === 'admin' ? reason : '',
   });
-  await rebuildPublicIndex(options.baseUrl);
+  await refreshPublicOutputs(options.baseUrl);
   return ownerPackageMeta(next, options.baseUrl);
 }
 
@@ -638,7 +690,7 @@ async function route(req, res) {
     const { sessionId } = await createSessionForDiscordUser(`dev:${url.searchParams.get('id') || 'local'}`);
     const secureAttr = COOKIE_SECURE ? ' Secure;' : '';
     res.writeHead(302, {
-      'set-cookie': `xy_workshop_session=${encodeURIComponent(signSession(sessionId))}; HttpOnly;${secureAttr} SameSite=${COOKIE_SAME_SITE}; Path=/; Max-Age=2592000`,
+      'set-cookie': `${SESSION_COOKIE_NAME}=${encodeURIComponent(signSession(sessionId))}; HttpOnly;${secureAttr} SameSite=${COOKIE_SAME_SITE}; Path=/; Max-Age=2592000`,
       location: LOGIN_SUCCESS_REDIRECT,
     });
     return res.end();
@@ -652,7 +704,7 @@ async function route(req, res) {
     const { sessionId } = await createSessionForDiscordUser(me.id);
     const secureAttr = COOKIE_SECURE ? ' Secure;' : '';
     res.writeHead(302, {
-      'set-cookie': `xy_workshop_session=${encodeURIComponent(signSession(sessionId))}; HttpOnly;${secureAttr} SameSite=${COOKIE_SAME_SITE}; Path=/; Max-Age=2592000`,
+      'set-cookie': `${SESSION_COOKIE_NAME}=${encodeURIComponent(signSession(sessionId))}; HttpOnly;${secureAttr} SameSite=${COOKIE_SAME_SITE}; Path=/; Max-Age=2592000`,
       location: LOGIN_SUCCESS_REDIRECT,
     });
     return res.end();

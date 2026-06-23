@@ -92,6 +92,21 @@ From the repository root, run:
 npm run ops:takeover
 ```
 
+For the P1 external-chain acceptance pass, use the single bundled check instead of repeating partial checks:
+
+```bash
+npm run ops:p1
+```
+
+This runs local static/Gateway syntax checks once, verifies GitHub Pages, the public Gateway, Discord OAuth redirect, admin protection, SSH takeover, the remote Gateway self-check, and the common local preview/SillyTavern CORS origins:
+
+```text
+http://127.0.0.1:8000
+http://localhost:8000
+http://127.0.0.1:8766
+http://localhost:8766
+```
+
 Useful options:
 
 ```bash
@@ -117,6 +132,14 @@ npm run takeover
 ```
 
 The server-side takeover check verifies `.env`, required secrets, Discord OAuth/guild gate configuration, storage directories, publisher/audit privacy, Cloudreve/public-folder sync config, and live Gateway API endpoints.
+
+For the current Docker deployment, rebuild the Gateway container from the repository root with:
+
+```bash
+npm run deploy:gateway-docker
+```
+
+The deploy helper reuses the existing VPS `.env`, backs it up, appends the standard local preview CORS origins if they are missing, recreates the `rolecard-workshop-gateway` container with the existing bind mounts, checks `https://43-132-171-157.sslip.io/api/workshop/health`, and automatically restores the old container if the health check fails. It does not store or print Discord secrets, admin token, session secret, hash secret, or private SSH key content.
 
 For the current Cloudreve-root deployment, keep Gateway health under the API prefix:
 
