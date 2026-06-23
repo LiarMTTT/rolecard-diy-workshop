@@ -42,12 +42,14 @@ if (!local.ok) {
 
 const takeover = await run('node', [
   'tools/ops_takeover.mjs',
-  ...(adminToken ? ['--adminToken', adminToken] : []),
   '--corsOrigin',
   origins.join(','),
   '--ssh',
   'rolecard-workshop-vps',
-], { timeout: 180000 });
+], {
+  timeout: 180000,
+  env: adminToken ? { ...process.env, ADMIN_TOKEN: adminToken } : process.env,
+});
 console.log(takeover.stdout);
 if (!takeover.ok) {
   console.error(takeover.stderr || takeover.stdout);
