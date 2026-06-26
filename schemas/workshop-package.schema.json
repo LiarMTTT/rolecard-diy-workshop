@@ -92,5 +92,104 @@
     "payload": {
       "type": "object"
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["type"], "properties": { "type": { "const": "character" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": true,
+            "properties": {
+              "name": { "type": "string", "minLength": 1, "maxLength": 80, "description": "角色名" },
+              "profile": { "type": "object", "description": "自由键值设定（身份/与user关系等）", "additionalProperties": { "type": "string" } },
+              "appearance": { "type": "object", "description": "结构化外貌（身高/三围/整体印象/体型等），蓝本=世界书苏锦瑶条目", "additionalProperties": { "type": "string" } },
+              "personality": { "type": "string", "maxLength": 2000 },
+              "dialogueStyle": { "type": "string", "maxLength": 1000 },
+              "behavior": {
+                "type": "object",
+                "description": "行事风格与行为应对（角色编辑器对照编辑核心字段）",
+                "properties": {
+                  "行事风格": { "type": "string", "maxLength": 4000 },
+                  "行为应对": { "type": "string", "maxLength": 4000 }
+                }
+              },
+              "relationships": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "target": { "type": "string" },
+                    "type": { "type": "string" },
+                    "note": { "type": "string" }
+                  }
+                }
+              },
+              "media": {
+                "type": "object",
+                "description": "媒体引用：值为媒体库 key（type=bond,name=角色名）或图床 URL，不内嵌图片数据",
+                "properties": {
+                  "portraits": {
+                    "type": "object",
+                    "properties": {
+                      "normal": { "type": "string", "description": "正常立绘媒体库 key" },
+                      "nude": { "type": "string", "description": "赤裸立绘媒体库 key" }
+                    }
+                  },
+                  "avatar": { "type": "string", "description": "头像媒体库 key；状态栏与对话气泡共用同一头像，气泡显示名=name" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "required": ["type"], "properties": { "type": { "const": "world_factor" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["worldFactors"],
+            "additionalProperties": true,
+            "properties": {
+              "worldFactors": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["title", "content"],
+                  "properties": {
+                    "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+                    "content": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "required": ["type"], "properties": { "type": { "const": "user_identity" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["identity"],
+            "additionalProperties": true,
+            "properties": {
+              "identity": { "type": "string", "minLength": 1, "maxLength": 80 },
+              "callname": { "type": "string", "maxLength": 80 },
+              "background": { "type": "string" },
+              "avatar": { "type": "string", "description": "头像媒体引用（统一卡内 identityDraftAsPackage）" },
+              "core_attributes": { "type": "object", "description": "核心属性（统一卡内）", "additionalProperties": true }
+            }
+          }
+        }
+      }
+    }
+  ]
 }
