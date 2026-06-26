@@ -11,7 +11,7 @@ const PUBLIC_BASE_URL = env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 const COOKIE_SECURE = PUBLIC_BASE_URL.startsWith('https://');
 const COOKIE_SAME_SITE = env.COOKIE_SAME_SITE || (COOKIE_SECURE ? 'None' : 'Lax');
 const SESSION_COOKIE_NAME = env.SESSION_COOKIE_NAME || 'rc_workshop_session';
-const LOGIN_SUCCESS_REDIRECT = env.LOGIN_SUCCESS_REDIRECT || '/';
+const LOGIN_SUCCESS_REDIRECT = env.LOGIN_SUCCESS_REDIRECT || '/api/workshop/login-success';
 const SESSION_SECRET = env.SESSION_SECRET || 'dev-session-secret';
 const HASH_SECRET = env.HASH_SECRET || 'dev-hash-secret';
 const ADMIN_TOKEN = env.ADMIN_TOKEN || '';
@@ -19,6 +19,7 @@ const DEV_LOGIN_ENABLED = env.DEV_LOGIN_ENABLED === 'true';
 const PACKAGE_STORE_DIR = env.PACKAGE_STORE_DIR || './data/packages';
 const INDEX_FILE = env.INDEX_FILE || './data/index.json';
 const PUBLISHER_FILE = env.PUBLISHER_FILE || './data/publishers.json';
+const VOTES_FILE = env.VOTES_FILE || './data/votes.json';
 const AUDIT_LOG_FILE = env.AUDIT_LOG_FILE || './data/audit-log.jsonl';
 const REQUIRE_REVIEW = env.REQUIRE_REVIEW !== 'false';
 const PACKAGE_PUBLIC_BASE_URL = String(env.PACKAGE_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
@@ -29,7 +30,8 @@ const SUPPORTED_TYPES = new Set(['character', 'user_identity', 'world_factor', '
 const BLOCKED_TYPES = new Set(['opening_pack', 'prompt_patch', 'ui_theme']);
 const REVIEW_STATES = new Set(['pending', 'approved', 'rejected', 'withdrawn']);
 const ADMIN_PAGE_FILE = path.join(GATEWAY_ROOT, 'public', 'admin.html');
-const sessions = new Map();
+const LOGIN_SUCCESS_PAGE_FILE = path.join(GATEWAY_ROOT, 'public', 'login-success.html');
+const SESSION_TTL_MS = Number(env.SESSION_TTL_MS) || 30 * 24 * 60 * 60 * 1000; // 会话 token 有效期，默认 30 天
 
 function corsHeaders(req, headers = {}) {
   const requestOrigin = String(req?.headers?.origin || '');
@@ -80,6 +82,16 @@ function statusForError(message) {
   return 500;
 }
 
+// Egress sanitization: never leak raw internal error text (e.g. ENOENT filesystem
+// paths) to clients. Deliberately-thrown known codes (validation / conflict / auth
+// / config) keep their status-specific message; a 404 collapses to a generic
+// not-found, and the unexpected-500 bucket is masked to internal-error.
+function clientErrorMessage(message, status) {
+  if (status === 404) return 'not-found';
+  if (status === 500) return 'internal-error';
+  return message;
+}
+
 function parseCookies(req) {
   return Object.fromEntries(String(req.headers.cookie || '').split(';').map(part => {
     const index = part.indexOf('=');
@@ -96,23 +108,51 @@ function hashDiscordUserId(id) {
   return crypto.createHmac('sha256', HASH_SECRET).update(String(id)).digest('hex');
 }
 
-function signSession(sessionId) {
-  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(sessionId).digest('base64url');
-  return `${sessionId}.${sig}`;
+// —— 无状态会话 Token（HMAC 签名，载荷含 publisherId + 过期）——
+// 取代旧的「内存 Map + 签名 sessionId」：容器重启/部署不再登出所有人；
+// 卡片可存 localStorage 走 Authorization: Bearer，绕开第三方 Cookie 淘汰。
+function issueToken(publisher) {
+  const payload = { pid: publisher.publisherId, exp: Date.now() + SESSION_TTL_MS };
+  const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
 }
 
-function verifySessionCookie(value) {
-  const [sessionId, sig] = String(value || '').split('.');
-  if (!sessionId || !sig) return null;
-  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(sessionId).digest('base64url');
+function verifyToken(value) {
+  const [body, sig] = String(value || '').split('.');
+  if (!body || !sig) return null;
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
   if (Buffer.byteLength(sig) !== Buffer.byteLength(expected)) return null;
   if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-  return sessions.get(sessionId) || null;
+  let payload;
+  try { payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')); } catch { return null; }
+  if (!payload || !payload.pid || typeof payload.exp !== 'number' || Date.now() > payload.exp) return null;
+  return { publisherId: payload.pid };
 }
 
 function sessionFromRequest(req) {
+  // 优先 Authorization: Bearer（卡片 / Web 工作台跨域用），回退 Cookie（admin 同源页兼容）
+  const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
+  if (bearer) { const viaHeader = verifyToken(bearer[1].trim()); if (viaHeader) return viaHeader; }
   const cookies = parseCookies(req);
-  return verifySessionCookie(cookies[SESSION_COOKIE_NAME] || cookies.xy_workshop_session);
+  return verifyToken(cookies[SESSION_COOKIE_NAME] || cookies.xy_workshop_session);
+}
+
+// 登录成功：种 token cookie（admin 同源兼容）+ 跳转登录成功交接页；token 放 URL 片段（不上送服务器/不进日志），交接页用 postMessage 回传卡片
+function finishLogin(res, sessionToken, publicBaseUrl, returnUrl, identity) {
+  const secureAttr = COOKIE_SECURE ? ' Secure;' : '';
+  const dest = new URL(LOGIN_SUCCESS_REDIRECT, publicBaseUrl || PUBLIC_BASE_URL);
+  let frag = 'token=' + encodeURIComponent(sessionToken);
+  if (returnUrl) frag += '&return=' + encodeURIComponent(returnUrl); // 交接页据此提供「跳回 ST」（仅本地地址生效）
+  // B4：身份随片段透传，仅供卡片内存展示；不落 cookie、不入库、不进日志
+  if (identity && identity.name) frag += '&name=' + encodeURIComponent(identity.name);
+  if (identity && identity.avatar) frag += '&avatar=' + encodeURIComponent(identity.avatar);
+  dest.hash = frag;
+  res.writeHead(302, {
+    'set-cookie': `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionToken)}; HttpOnly;${secureAttr} SameSite=${COOKIE_SAME_SITE}; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
+    location: dest.toString(),
+  });
+  return res.end();
 }
 
 function requireAdmin(req) {
@@ -288,6 +328,49 @@ async function readPublishers() {
 async function writePublishers(registry) {
   registry.updatedAt = new Date().toISOString();
   await fs.writeFile(PUBLISHER_FILE, JSON.stringify(registry, null, 2));
+}
+
+async function readVotes() {
+  await ensureStore();
+  try {
+    const data = JSON.parse(await fs.readFile(VOTES_FILE, 'utf8'));
+    if (!data.votes || typeof data.votes !== 'object') data.votes = {};
+    return data;
+  } catch (_error) {
+    return { votes: {}, updatedAt: '' };
+  }
+}
+
+async function writeVotes(data) {
+  data.updatedAt = new Date().toISOString();
+  await fs.writeFile(VOTES_FILE, JSON.stringify(data, null, 2));
+}
+
+function voteTally(data, id) {
+  const entry = (data.votes && data.votes[id]) || { voters: {} };
+  let up = 0;
+  let down = 0;
+  for (const v of Object.values(entry.voters || {})) {
+    if (v === 'up') up += 1;
+    else if (v === 'down') down += 1;
+  }
+  return { up, down };
+}
+
+function myVoteOf(data, id, publisherId) {
+  if (!publisherId) return 'none';
+  const entry = (data.votes && data.votes[id]) || { voters: {} };
+  return (entry.voters && entry.voters[publisherId]) || 'none';
+}
+
+async function setVote(id, publisherId, vote) {
+  const data = await readVotes();
+  if (!data.votes[id]) data.votes[id] = { voters: {} };
+  const voters = data.votes[id].voters || (data.votes[id].voters = {});
+  if (vote === 'up' || vote === 'down') voters[publisherId] = vote;
+  else delete voters[publisherId];
+  await writeVotes(data);
+  return { ...voteTally(data, id), myVote: voters[publisherId] || 'none' };
 }
 
 async function getOrCreatePublisher(discordUserHash) {
@@ -561,12 +644,13 @@ async function setPackageReviewStatus(id, status, reason = '', reviewer = 'admin
   return ownerPackageMeta(next, options.baseUrl);
 }
 
-function discordAuthUrl() {
+function discordAuthUrl(state) {
   const url = new URL('https://discord.com/oauth2/authorize');
   url.searchParams.set('client_id', env.DISCORD_CLIENT_ID || '');
   url.searchParams.set('redirect_uri', env.DISCORD_REDIRECT_URI || `${PUBLIC_BASE_URL}/auth/discord/callback`);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', 'identify guilds.members.read');
+  if (state) url.searchParams.set('state', state); // 透传卡片传来的 return（ST origin），回调原样取回
   return url.toString();
 }
 
@@ -605,10 +689,8 @@ async function assertGuildMember(accessToken) {
 }
 
 async function createSessionForDiscordUser(discordUserId) {
-  const sessionId = randomId('sess');
-  const session = await getOrCreatePublisher(hashDiscordUserId(discordUserId));
-  sessions.set(sessionId, session);
-  return { sessionId, session: sessions.get(sessionId) };
+  const publisher = await getOrCreatePublisher(hashDiscordUserId(discordUserId));
+  return { token: issueToken(publisher), publisher };
 }
 
 async function route(req, res) {
@@ -616,23 +698,33 @@ async function route(req, res) {
   const publicBaseUrl = publicBaseFromRequest(req);
   if (req.method === 'OPTIONS') return json(req, res, 204, {});
   if ((url.pathname === '/admin' || url.pathname === '/admin/') && req.method === 'GET') return file(res, 200, ADMIN_PAGE_FILE, 'text/html; charset=utf-8');
+  if (url.pathname === '/api/workshop/login-success' && req.method === 'GET') return file(res, 200, LOGIN_SUCCESS_PAGE_FILE, 'text/html; charset=utf-8');
   if (url.pathname === '/health' || url.pathname === '/api/workshop/health') return json(req, res, 200, { ok: true });
   if (url.pathname === '/api/workshop/packages' && req.method === 'GET') {
     const index = await readIndex();
+    const votes = await readVotes();
+    const session = sessionFromRequest(req);
     const packages = applyPackageFilters(index.packages || [], url.searchParams)
-      .map(pkg => publicPackageMeta(pkg, publicBaseUrl));
+      .map(pkg => ({ ...publicPackageMeta(pkg, publicBaseUrl), votes: voteTally(votes, pkg.id), myVote: myVoteOf(votes, pkg.id, session?.publisherId) }));
     return json(req, res, 200, { ...index, packages });
   }
-  if (url.pathname.startsWith('/api/workshop/packages/') && req.method === 'GET') {
+  if (url.pathname.startsWith('/api/workshop/packages/') && !url.pathname.endsWith('/vote') && req.method === 'GET') {
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
     const pkg = await getPackage(id);
     const session = sessionFromRequest(req);
     if (!isPublicPackage(pkg) && (!session || session.publisherId !== pkg.ownerPublisherId)) return json(req, res, 404, { error: 'not-found' });
-    return json(req, res, 200, publicPackageDetail(pkg, publicBaseUrl));
+    const votes = await readVotes();
+    return json(req, res, 200, { ...publicPackageDetail(pkg, publicBaseUrl), votes: voteTally(votes, id), myVote: myVoteOf(votes, id, session?.publisherId) });
   }
   if (url.pathname === '/api/workshop/me') {
     const session = sessionFromRequest(req);
     return json(req, res, session ? 200 : 401, session ? { loggedIn: true, publisherId: session.publisherId } : { loggedIn: false });
+  }
+  if (url.pathname === '/api/workshop/logout' && req.method === 'POST') {
+    // #5a：清会话 cookie（含旧名兼容），让 Bearer+Cookie 双通道都登出；无状态 Token 自身靠客户端丢弃即失效。
+    const secureAttr = COOKIE_SECURE ? ' Secure;' : '';
+    const clear = name => `${name}=; HttpOnly;${secureAttr} SameSite=${COOKIE_SAME_SITE}; Path=/; Max-Age=0`;
+    return json(req, res, 200, { loggedIn: false }, { 'set-cookie': [clear(SESSION_COOKIE_NAME), clear('xy_workshop_session')] });
   }
   if (url.pathname === '/api/workshop/me/packages' && req.method === 'GET') {
     const session = sessionFromRequest(req);
@@ -681,42 +773,72 @@ async function route(req, res) {
     await deletePackage(id, session.publisherId, { baseUrl: publicBaseUrl });
     return json(req, res, 200, { ok: true });
   }
+  if (/^\/api\/workshop\/packages\/[^/]+\/vote$/.test(url.pathname) && req.method === 'POST') {
+    const session = sessionFromRequest(req);
+    if (!session) return json(req, res, 401, { error: 'login-required' });
+    const id = decodeURIComponent(url.pathname.split('/')[4] || '');
+    const body = JSON.parse(await readBody(req, 4 * 1024) || '{}');
+    const vote = ['up', 'down', 'none'].includes(body.vote) ? body.vote : 'none';
+    const result = await setVote(id, session.publisherId, vote);
+    return json(req, res, 200, result);
+  }
   if (url.pathname === '/auth/discord/login') {
-    res.writeHead(302, { location: discordAuthUrl() });
+    res.writeHead(302, { location: discordAuthUrl(url.searchParams.get('return') || '') });
     return res.end();
   }
   if (url.pathname === '/auth/dev/login') {
     if (!DEV_LOGIN_ENABLED) return json(req, res, 404, { error: 'not-found' });
-    const { sessionId } = await createSessionForDiscordUser(`dev:${url.searchParams.get('id') || 'local'}`);
-    const secureAttr = COOKIE_SECURE ? ' Secure;' : '';
-    res.writeHead(302, {
-      'set-cookie': `${SESSION_COOKIE_NAME}=${encodeURIComponent(signSession(sessionId))}; HttpOnly;${secureAttr} SameSite=${COOKIE_SAME_SITE}; Path=/; Max-Age=2592000`,
-      location: LOGIN_SUCCESS_REDIRECT,
-    });
-    return res.end();
+    const { token: sessionToken } = await createSessionForDiscordUser(`dev:${url.searchParams.get('id') || 'local'}`);
+    return finishLogin(res, sessionToken, publicBaseUrl, url.searchParams.get('return') || '');
   }
   if (url.pathname === '/auth/discord/callback') {
     const code = url.searchParams.get('code');
     if (!code) return text(res, 400, 'missing code');
-    const token = await discordToken(code);
-    await assertGuildMember(token.access_token);
-    const me = await discordMe(token.access_token);
-    const { sessionId } = await createSessionForDiscordUser(me.id);
-    const secureAttr = COOKIE_SECURE ? ' Secure;' : '';
-    res.writeHead(302, {
-      'set-cookie': `${SESSION_COOKIE_NAME}=${encodeURIComponent(signSession(sessionId))}; HttpOnly;${secureAttr} SameSite=${COOKIE_SAME_SITE}; Path=/; Max-Age=2592000`,
-      location: LOGIN_SUCCESS_REDIRECT,
-    });
-    return res.end();
+    const discordTok = await discordToken(code);
+    await assertGuildMember(discordTok.access_token);
+    const me = await discordMe(discordTok.access_token);
+    const { token: sessionToken } = await createSessionForDiscordUser(me.id);
+    // B4：身份(昵称/头像)只透传给交接页(URL 片段)→postMessage 回卡片在内存展示；Gateway 不持久化、不种 cookie、不进日志（隐私铁律）
+    const identity = {
+      name: String(me.global_name || me.username || '').slice(0, 64),
+      avatar: me.avatar ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=64` : '',
+    };
+    return finishLogin(res, sessionToken, publicBaseUrl, url.searchParams.get('state') || '', identity);
   }
   return json(req, res, 404, { error: 'not-found' });
 }
 
+// 启动期配置校验：所有数据文件路径所在目录必须可写（容器内须落 /data 可写卷）。
+// 杜绝 VOTES_FILE 那类「默认 ./data → /app/data 只读 → 运行时 ENOENT」的静默故障，改为启动即 fail-fast。
+async function assertDataPathsWritable() {
+  const checks = [
+    ['PACKAGE_STORE_DIR', PACKAGE_STORE_DIR],
+    ['INDEX_FILE', path.dirname(INDEX_FILE)],
+    ['PUBLISHER_FILE', path.dirname(PUBLISHER_FILE)],
+    ['VOTES_FILE', path.dirname(VOTES_FILE)],
+    ['AUDIT_LOG_FILE', path.dirname(AUDIT_LOG_FILE)],
+    ['PUBLIC_SYNC_REPORT_FILE', path.dirname(PUBLIC_SYNC_REPORT_FILE)],
+  ];
+  for (const [name, dir] of checks) {
+    try {
+      await fs.mkdir(dir, { recursive: true });
+      const probe = path.join(dir, `.write-probe-${process.pid}`);
+      await fs.writeFile(probe, 'ok');
+      await fs.rm(probe, { force: true });
+    } catch (error) {
+      throw new Error(`[config] ${name} 指向不可写路径 ${dir} —— 数据文件必须落在可写卷（容器内 /data）。请在 .env 显式设置该路径。底层: ${error.message}`);
+    }
+  }
+}
+
+await assertDataPathsWritable();
 await ensureStore();
 http.createServer((req, res) => {
   route(req, res).catch(error => {
     const message = String(error && error.message || error);
-    json(req, res, statusForError(message), { error: message });
+    const status = statusForError(message);
+    if (status >= 500) console.error('[gateway] unhandled error:', error);
+    json(req, res, status, { error: clientErrorMessage(message, status) });
   });
 }).listen(PORT, () => {
   console.log(`Workshop Gateway listening on ${PORT}`);
