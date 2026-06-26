@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { readdirSync } from 'node:fs';
+import path from 'node:path';
 
 const args = parseArgs(process.argv.slice(2));
 const sshTarget = args.ssh || process.env.WORKSHOP_SSH || 'rolecard-workshop-vps';
 const gatewayDir = args.gatewayDir || '/opt/rolecard-diy-workshop/gateway';
+const localGatewayDir = args.localGateway || fileURLToPath(new URL('../gateway/', import.meta.url));
+const skipScp = args['no-scp'] === 'true' || process.env.WORKSHOP_NO_SCP === '1';
 const container = args.container || 'rolecard-workshop-gateway';
 const image = args.image || 'node:20-alpine';
 const port = args.port || '8787';
@@ -101,11 +106,42 @@ printf 'health=ok\\n'
 }
 
 async function main() {
+  if (skipScp) {
+    console.log('[scp] 跳过代码同步（--no-scp），仅更新 .env 并重建容器');
+  } else {
+    await syncCode();
+  }
   const script = remoteScript();
   const result = await runSshScript(script);
   if (result.stderr.trim()) console.error(result.stderr.trim());
   console.log(result.stdout.trim());
   if (result.code) process.exit(result.code);
+}
+
+async function syncCode() {
+  const serverJs = path.join(localGatewayDir, 'server.js');
+  const publicDir = path.join(localGatewayDir, 'public');
+  console.log('[scp] 同步 server.js + public/* → ' + sshTarget + ':' + gatewayDir);
+  // 单文件精确路径，避免 scp -r 在远程已有 public 目录时嵌套成 public/public
+  await runScp([serverJs], gatewayDir + '/server.js');
+  const publicFiles = readdirSync(publicDir, { withFileTypes: true }).filter(entry => entry.isFile()).map(entry => entry.name);
+  for (const name of publicFiles) {
+    await runScp([path.join(publicDir, name)], gatewayDir + '/public/' + name);
+  }
+  console.log('[scp] 代码同步完成（public: ' + (publicFiles.join(', ') || '无') + '）');
+}
+
+function runScp(scpArgs, remoteDest) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('scp', [...scpArgs, sshTarget + ':' + remoteDest], { windowsHide: true });
+    let stderr = '';
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code) reject(new Error('scp 失败(code ' + code + '): ' + stderr.trim()));
+      else resolve();
+    });
+  });
 }
 
 main().catch(error => {
