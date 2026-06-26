@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>星月创意工坊 · 创作工作台</title>
+<!--
+  Track B 创意工坊「创作模式」独立 Web 工作台 — MVP1 地基骨架（Phase 5）。
+  设计依据：记忆 xingyue-workshop-creation-mode（路线 B：脱离 ST 沙箱、挂 Gateway、复用认证/存储/发布）。
+  闭环：卡外创作 → 工坊发布或导出包 → 卡内开局页一键组装注入世界书（复用 control_center.js importPackage）。
+
+  本骨架已立起：Token 鉴权(复用 Phase 0)、双栏创作布局、角色创作模块(以卡内 P10 为蓝本)、
+  LLM/绘图代理「桩」(用户 key 走 Gateway 代理、禁前端暴露 — 红线)、世界书条目双栏、导出 character 包、发布入口。
+  待后续 MVP：2 Gateway LLM 代理正文细化 · 3 绘图代理立绘入库 · 4 世界书创作模块 · 5 卡内一键组装联调。
+
+  红线（勿违反）：① 用户 LLM/绘图 key 必须走 Gateway 代理，前端不出现明文 key；
+  ② 成人向绘图选 NovelAI / 自部署 SD，非云商用 API；③ 同人资料只“打开参考链接”不自动抓取。
+  导出包 schema 需与 control_center.js 的 importPackage 对齐：本骨架用 STUDIO_PACKAGE_SCHEMA 占位，集成时核对。
+-->
+<style>
+  :root{
+    --xy-night:#161320; --xy-panel:rgba(38,32,54,.72); --xy-panel-2:rgba(46,38,64,.55);
+    --xy-line:rgba(180,150,210,.20); --xy-ink:#ece6f5; --xy-dim:#b3a9c6;
+    --xy-lilith:#e7a6cf; --xy-gold:#e7c38a; --xy-good:#7fd6a0; --xy-warn:#e9b06a; --xy-red:#e57a86;
+    --xy-radius:10px; --xy-radius-s:7px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    color:var(--xy-ink);background:
+      radial-gradient(1200px 600px at 80% -10%,rgba(120,80,150,.30),transparent 60%),
+      radial-gradient(900px 500px at -10% 110%,rgba(70,90,150,.25),transparent 55%),
+      var(--xy-night);min-height:100vh}
+  a{color:var(--xy-lilith)}
+  header.studio-top{display:flex;align-items:center;gap:12px;padding:10px 16px;
+    border-bottom:1px solid var(--xy-line);background:rgba(22,19,32,.78);
+    position:sticky;top:0;z-index:5;backdrop-filter:blur(8px)}
+  .brand{font-weight:700;letter-spacing:.5px}
+  .brand em{font-style:normal;color:var(--xy-gold)}
+  .top-spacer{flex:1}
+  .pill{font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--xy-line);
+    background:var(--xy-panel-2);color:var(--xy-dim)}
+  .pill.ok{color:var(--xy-good);border-color:rgba(127,214,160,.4)}
+  button{font:inherit;color:var(--xy-ink);background:var(--xy-panel);border:1px solid var(--xy-line);
+    border-radius:var(--xy-radius-s);padding:6px 12px;cursor:pointer;transition:.15s}
+  button:hover{border-color:var(--xy-lilith)}
+  button.primary{background:linear-gradient(135deg,rgba(231,166,207,.30),rgba(231,195,138,.22));
+    border-color:rgba(231,166,207,.5)}
+  button.ghost{background:transparent}
+  main{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:14px;
+    padding:14px;max-width:1280px;margin:0 auto}
+  @media(max-width:900px){main{grid-template-columns:1fr}}
+  .col{display:flex;flex-direction:column;gap:12px;min-width:0}
+  .card{background:var(--xy-panel);border:1px solid var(--xy-line);border-radius:var(--xy-radius);padding:12px 13px}
+  .card h3{margin:0 0 9px;font-size:13px;color:var(--xy-gold);display:flex;align-items:center;gap:7px}
+  .card h3 .tag{font-size:11px;color:var(--xy-dim);font-weight:400}
+  label.field{display:block;margin:8px 0}
+  label.field>span{display:block;font-size:12px;color:var(--xy-dim);margin-bottom:3px}
+  input,textarea,select{width:100%;background:rgba(20,17,28,.6);border:1px solid var(--xy-line);
+    border-radius:var(--xy-radius-s);color:var(--xy-ink);padding:7px 9px;font:inherit}
+  textarea{resize:vertical;min-height:62px}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .row>label.field{flex:1;min-width:120px}
+  .attrs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+  .attr{background:var(--xy-panel-2);border:1px solid var(--xy-line);border-radius:var(--xy-radius-s);padding:6px 8px}
+  .attr span{font-size:11px;color:var(--xy-dim)}
+  .attr input{padding:3px 6px;margin-top:2px}
+  .attr-total{font-size:12px;color:var(--xy-dim);margin-top:6px}
+  .attr-total b{color:var(--xy-lilith)}
+  .ai-row{display:flex;gap:7px;margin-top:7px;flex-wrap:wrap}
+  .ai-row button{font-size:12px;padding:5px 10px}
+  .preview-entry{background:rgba(20,17,28,.5);border:1px solid var(--xy-line);border-radius:var(--xy-radius-s);
+    padding:8px 10px;margin-bottom:8px}
+  .preview-entry .c{font-size:12px;color:var(--xy-gold);margin-bottom:3px}
+  .preview-entry pre{margin:0;white-space:pre-wrap;word-break:break-word;font-size:12px;color:var(--xy-dim);
+    max-height:160px;overflow:auto}
+  .foot{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 14px;border-top:1px solid var(--xy-line)}
+  .muted{color:var(--xy-dim);font-size:12px}
+  .note{font-size:11px;color:var(--xy-warn);background:rgba(233,176,106,.08);
+    border:1px solid rgba(233,176,106,.25);border-radius:var(--xy-radius-s);padding:6px 9px;margin-top:8px}
+  .seg{display:flex;gap:4px;background:var(--xy-panel-2);border:1px solid var(--xy-line);
+    border-radius:999px;padding:3px}
+  .seg button{border:none;background:transparent;border-radius:999px;padding:4px 12px;font-size:12px;color:var(--xy-dim)}
+  .seg button.active{background:rgba(231,166,207,.25);color:var(--xy-ink)}
+</style>
+</head>
+<body>
+<header class="studio-top">
+  <div class="brand">星月创意工坊 · <em>创作工作台</em></div>
+  <span class="pill" data-build>MVP1 地基</span>
+  <div class="top-spacer"></div>
+  <div class="seg" data-module-switch>
+    <button data-module="character" class="active">角色创作</button>
+    <button data-module="worldbook">世界因子</button>
+  </div>
+  <span class="pill" data-auth-pill>未登录</span>
+  <button class="ghost" data-login>Discord 登录</button>
+</header>
+
+<main>
+  <!-- 左栏：创作表单 -->
+  <section class="col" data-pane="character">
+    <div class="card">
+      <h3>身份设定 <span class="tag">对齐卡内 P9/P10 · 写入开局世界书</span></h3>
+      <div class="row">
+        <label class="field"><span>角色名 / {{user}} 称谓</span><input data-f="name" placeholder="如：苏锦瑶 / 主角"></label>
+        <label class="field" style="max-width:120px"><span>性别</span><input data-f="gender" placeholder="女"></label>
+        <label class="field" style="max-width:120px"><span>年龄</span><input data-f="age" placeholder="17"></label>
+      </div>
+      <label class="field"><span>身份 / 背景</span><textarea data-f="background" placeholder="出身、身份、与星月学院的关系…"></textarea></label>
+      <label class="field"><span>外貌描写</span><textarea data-f="appearance" placeholder="身高、三围、整体印象、体型、发色瞳色…"></textarea></label>
+    </div>
+
+    <div class="card">
+      <h3>核心属性 <span class="tag">30 点分配 · 与卡内雷达图同源</span></h3>
+      <div class="attrs" data-attrs></div>
+      <div class="attr-total">已分配 <b data-attr-used>0</b> / 30 · 剩余 <b data-attr-left>30</b></div>
+    </div>
+
+    <div class="card">
+      <h3>天赋技能</h3>
+      <label class="field"><span>技能 / 天赋（每行一条）</span><textarea data-f="skills" placeholder="格斗术 Lv1&#10;夜视&#10;…"></textarea></label>
+    </div>
+
+    <div class="card">
+      <h3>立绘与气泡 <span class="tag">绘图代理 → 媒体库 upsertAsset</span></h3>
+      <div class="row">
+        <label class="field"><span>正常立绘 URL</span><input data-f="portrait" placeholder="https:// 或绘图生成"></label>
+        <label class="field"><span>气泡头像 URL</span><input data-f="avatar" placeholder="共用 avatar 绑定"></label>
+      </div>
+      <div class="ai-row">
+        <button data-ai="portrait">⚿ 生成立绘（绘图代理桩）</button>
+        <button data-ai="refine">✦ LLM 细化外貌（代理桩）</button>
+      </div>
+      <div class="note">绘图/LLM 走 Gateway 代理，用户 key 不出现在前端（红线）。当前为桩：调 /api/workshop/llm·/image，未接真实后端。</div>
+    </div>
+  </section>
+
+  <!-- 左栏备选：世界因子（双栏对照创作占位） -->
+  <section class="col" data-pane="worldbook" hidden>
+    <div class="card">
+      <h3>世界因子创作 <span class="tag">写入 [世界因子]当前设定</span></h3>
+      <label class="field"><span>因子名称</span><input data-f="wf_name" placeholder="如：星月夜间通行规则"></label>
+      <label class="field"><span>因子内容</span><textarea data-f="wf_content" style="min-height:140px" placeholder="结构化描述该世界设定…"></textarea></label>
+      <div class="ai-row"><button data-ai="wf_expand">✦ LLM 扩写（代理桩）</button></div>
+      <div class="note">世界书双栏对照创作（左编辑 / 右预览）为 MVP4 完整模块；本骨架先打通单因子 → 包 → 卡内 importPackage。</div>
+    </div>
+  </section>
+
+  <!-- 右栏：实时预览 + 导出 -->
+  <section class="col">
+    <div class="card">
+      <h3>实时预览 <span class="tag">将写入卡内的世界书条目</span></h3>
+      <div data-preview><div class="muted">填写左侧后此处实时生成世界书条目预览…</div></div>
+    </div>
+    <div class="card">
+      <h3>导出 / 发布 <span class="tag">卡内 importPackage 直接吃</span></h3>
+      <div class="muted">导出的 character 包结构对齐 control_center.js importPackage（STUDIO_PACKAGE_SCHEMA）。</div>
+      <div class="ai-row" style="margin-top:10px">
+        <button class="primary" data-export>⬇ 导出 .json 包</button>
+        <button data-publish>☁ 发布到工坊（需登录）</button>
+      </div>
+      <div class="note" data-status hidden></div>
+    </div>
+  </section>
+</main>
+
+<div class="foot">
+  <span class="muted">星月创意工坊 · 创作工作台 — Phase 5 地基。复用 Gateway Token 鉴权（无状态 Bearer）。</span>
+  <div class="top-spacer" style="flex:1"></div>
+  <span class="muted" data-gateway></span>
+</div>
+
+<script>
+"use strict";
+/* ---- 配置：复用 Phase 0 鉴权（与卡内 control_center.js 一致）---- */
+const GATEWAY_BASE = (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
+  ? location.origin
+  : 'https://43-132-171-157.sslip.io';
+const TOKEN_KEY = 'xingyue-workshop-token';          // 与卡内 setWorkshopToken 同 key
+const ATTRIBUTE_KEYS = ['格斗','平衡','反应','感知','技巧','精神']; // 与 control_center.js 同源
+const ATTR_TOTAL = 30;
+
+/* 导出包占位 schema —— 集成时须与 control_center.js importPackage 核对字段名 */
+const STUDIO_PACKAGE_SCHEMA = {
+  schema: 'xingyue-workshop-package@1',
+  type: 'character',            // character | world_factor | shop_item | blueprint | recipe | skill | function
+  title: '', author: '',
+  worldbookEntries: [],         // [{ comment, keys, content }] → 卡内 upsertEntries
+  media: [],                    // [{ name, dataUrl|url }] → 媒体库 upsertAsset
+  meta: {}
+};
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const draft = { attrs: Object.fromEntries(ATTRIBUTE_KEYS.map(k => [k, 0])) };
+
+/* ---- 鉴权（Bearer，复用 Phase 0；本骨架只读 token + 展示，OAuth 弹窗联调留 MVP）---- */
+function getToken(){ try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } }
+function authHeaders(){ const t = getToken(); return t ? { Authorization: 'Bearer ' + t } : {}; }
+function refreshAuthPill(){
+  const t = getToken();
+  const pill = $('[data-auth-pill]');
+  pill.textContent = t ? '已登录' : '未登录';
+  pill.classList.toggle('ok', !!t);
+}
+$('[data-login]').addEventListener('click', () => {
+  // 复用 Phase 0：开新窗到 Gateway OAuth，交接页 postMessage 回传 token（与 control_center captureWorkshopLogin 同协议）
+  const ret = encodeURIComponent(location.origin + location.pathname);
+  window.open(GATEWAY_BASE + '/auth/discord/login?return=' + ret, 'xy-studio-login', 'width=520,height=720');
+});
+window.addEventListener('message', (e) => {
+  if (!e.data || typeof e.data !== 'object') return;
+  if (e.data.type === 'xingyue-workshop-token' && e.data.token) {
+    try { localStorage.setItem(TOKEN_KEY, e.data.token); } catch {}
+    refreshAuthPill();
+    setStatus('登录成功', 'ok');
+  }
+});
+
+/* ---- 模块切换 ---- */
+$$('[data-module-switch] button').forEach(btn => btn.addEventListener('click', () => {
+  $$('[data-module-switch] button').forEach(b => b.classList.toggle('active', b === btn));
+  const mod = btn.dataset.module;
+  $('[data-pane="character"]').hidden = mod !== 'character';
+  $('[data-pane="worldbook"]').hidden = mod !== 'worldbook';
+  renderPreview();
+}));
+
+/* ---- 核心属性 30 点 ---- */
+function renderAttrs(){
+  const wrap = $('[data-attrs]');
+  wrap.innerHTML = '';
+  ATTRIBUTE_KEYS.forEach(k => {
+    const el = document.createElement('div');
+    el.className = 'attr';
+    el.innerHTML = `<span>${k}</span><input type="number" min="0" max="30" value="${draft.attrs[k]}" data-attr="${k}">`;
+    wrap.appendChild(el);
+  });
+  wrap.addEventListener('input', onAttrInput);
+  updateAttrTotal();
+}
+function onAttrInput(e){
+  if (e.target.dataset.attr){
+    const k = e.target.dataset.attr;
+    let v = Math.max(0, Math.min(30, Number(e.target.value) || 0));
+    const others = ATTRIBUTE_KEYS.reduce((s, key) => key === k ? s : s + (draft.attrs[key] || 0), 0);
+    if (others + v > ATTR_TOTAL) v = ATTR_TOTAL - others;     // 30 点上限约束（与卡内 totalWithout+next>30 同规则）
+    e.target.value = v; draft.attrs[k] = v;
+    updateAttrTotal(); renderPreview();
+  }
+}
+function updateAttrTotal(){
+  const used = ATTRIBUTE_KEYS.reduce((s, k) => s + (draft.attrs[k] || 0), 0);
+  $('[data-attr-used]').textContent = used;
+  $('[data-attr-left]').textContent = ATTR_TOTAL - used;
+}
+
+/* ---- 表单 → draft ---- */
+$$('[data-f]').forEach(inp => inp.addEventListener('input', () => { draft[inp.dataset.f] = inp.value; renderPreview(); }));
+
+/* ---- 生成世界书条目（角色 / 世界因子）---- */
+function buildEntries(){
+  const entries = [];
+  if (!$('[data-pane="character"]').hidden || (draft.name || draft.background)){
+    const lines = [];
+    lines.push('<角色设定>');
+    if (draft.name) lines.push(`核心身份: 名称=${draft.name} 性别=${draft.gender||''} 年龄=${draft.age||''}`);
+    if (draft.background) lines.push(`背景: ${draft.background}`);
+    if (draft.appearance) lines.push(`外貌描写: ${draft.appearance}`);
+    const used = ATTRIBUTE_KEYS.filter(k => draft.attrs[k]);
+    if (used.length) lines.push(`核心属性: ${used.map(k => `${k}=${draft.attrs[k]}`).join(' ')}`);
+    if (draft.skills) lines.push(`天赋技能: ${draft.skills.split(/\n+/).filter(Boolean).join('、')}`);
+    lines.push('</角色设定>');
+    entries.push({ comment: `[星月开局]${draft.name || '{{user}}'}身份设定`, keys: [draft.name || '主角'], content: lines.join('\n') });
+  }
+  if (draft.wf_name || draft.wf_content){
+    entries.push({ comment: '[世界因子]当前设定', keys: [draft.wf_name || '世界因子'], content: `【${draft.wf_name||''}】\n${draft.wf_content||''}` });
+  }
+  return entries;
+}
+function renderPreview(){
+  const box = $('[data-preview]');
+  const entries = buildEntries();
+  if (!entries.length){ box.innerHTML = '<div class="muted">填写左侧后此处实时生成世界书条目预览…</div>'; return; }
+  box.innerHTML = entries.map(en =>
+    `<div class="preview-entry"><div class="c">${en.comment}</div><pre>${escapeHtml(en.content)}</pre></div>`).join('');
+}
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+/* ---- AI 代理（桩：走 Gateway 代理，前端无 key — 红线）---- */
+async function callProxy(kind, payload){
+  setStatus(`调用 ${kind} 代理…`, '');
+  try {
+    const res = await fetch(`${GATEWAY_BASE}/api/workshop/${kind}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch (err) {
+    setStatus(`${kind} 代理桩未接后端（${err.message}）— 待 MVP2/3 实现 Gateway /api/workshop/${kind}`, 'warn');
+    return null;
+  }
+}
+$$('[data-ai]').forEach(btn => btn.addEventListener('click', () => {
+  const k = btn.dataset.ai;
+  if (k === 'portrait') callProxy('image', { prompt: draft.appearance || draft.name, target: 'portrait' });
+  else if (k === 'refine') callProxy('llm', { task: 'refine-appearance', text: draft.appearance });
+  else if (k === 'wf_expand') callProxy('llm', { task: 'expand-worldfactor', text: draft.wf_content });
+}));
+
+/* ---- 导出 / 发布 ---- */
+function buildPackage(){
+  const pkg = JSON.parse(JSON.stringify(STUDIO_PACKAGE_SCHEMA));
+  pkg.type = $('[data-pane="character"]').hidden ? 'world_factor' : 'character';
+  pkg.title = draft.name || draft.wf_name || '未命名创作';
+  pkg.worldbookEntries = buildEntries();
+  if (draft.portrait) pkg.media.push({ name: `${pkg.title}-立绘`, url: draft.portrait });
+  if (draft.avatar) pkg.media.push({ name: `${pkg.title}-气泡头像`, url: draft.avatar });
+  pkg.meta = { createdWith: 'workshop-studio', schemaNote: '集成时核对 control_center.js importPackage 字段' };
+  return pkg;
+}
+$('[data-export]').addEventListener('click', () => {
+  const pkg = buildPackage();
+  const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${pkg.title}.xingyue-package.json`;
+  a.click(); URL.revokeObjectURL(a.href);
+  setStatus('已导出包 — 可在卡内开局页「导入工坊包」直接吃', 'ok');
+});
+$('[data-publish]').addEventListener('click', async () => {
+  if (!getToken()){ setStatus('请先 Discord 登录再发布', 'warn'); return; }
+  const pkg = buildPackage();
+  setStatus('发布中…', '');
+  try {
+    const res = await fetch(`${GATEWAY_BASE}/api/workshop/publish`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(pkg)
+    });
+    setStatus(res.ok ? '发布成功（待审核）' : '发布失败 HTTP ' + res.status, res.ok ? 'ok' : 'warn');
+  } catch (err) { setStatus('发布请求失败：' + err.message, 'warn'); }
+});
+
+function setStatus(msg, kind){
+  const el = $('[data-status]');
+  el.hidden = false; el.textContent = msg;
+  el.style.color = kind === 'ok' ? 'var(--xy-good)' : kind === 'warn' ? 'var(--xy-warn)' : 'var(--xy-dim)';
+}
+
+/* ---- init ---- */
+$('[data-gateway]').textContent = 'Gateway: ' + GATEWAY_BASE;
+renderAttrs(); renderPreview(); refreshAuthPill();
+</script>
+</body>
+</html>
