@@ -5573,5 +5573,30 @@
     <div class="tab-content" id="tab-events"><div class="section-title">近期事件</div><div id="tab-content-events"><div class="no-data">[ 无近期事件 ]</div></div></div>
   </div>
 </div>
+<script>
+/* #2(2.9.8) 远程挂载后 document.write 异步加载会让 TH 的 iframe 自动量高失效 → 内容溢出出现滚动条（2.5.0 内联渲染无此问题）。
+   这里从 iframe 内部把宿主 iframe 高度同步到内容真实高度，使状态栏按内容铺满、不再内部滚动。 */
+(function(){
+  function sync(){
+    try{
+      var fe = window.frameElement;
+      if(!fe) return;
+      var h = Math.max(
+        document.documentElement ? document.documentElement.scrollHeight : 0,
+        document.body ? document.body.scrollHeight : 0
+      );
+      if(h > 0 && Math.abs((parseInt(fe.style.height, 10) || 0) - h) > 2){
+        fe.style.height = h + 'px';
+        fe.style.minHeight = h + 'px';
+        try{ fe.setAttribute('height', String(h)); }catch(_){}
+      }
+    }catch(_){}
+  }
+  sync();
+  window.addEventListener('load', sync);
+  [60, 200, 500, 1200, 2500].forEach(function(t){ setTimeout(sync, t); });
+  try{ if(document.body) new ResizeObserver(sync).observe(document.body); }catch(_){}
+})();
+</script>
 </body>
 </html>
