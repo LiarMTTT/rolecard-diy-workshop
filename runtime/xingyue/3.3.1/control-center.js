@@ -949,8 +949,10 @@
     const msg = api.get(range)?.[0];
     if (!msg) return false;
     const text = String(msg.message || '');
-    const m = text.match(/<UpdateVariable>([\s\S]*?)<\/UpdateVariable>/i);
-    if (!m) return appendUpdateBlockToFloor(raw, floorId);
+    // 以最后一个块为主块（读数以最新为准的语义，与「按预分析重算」append 的新块自洽——审查 minor 修复）
+    const all = [...text.matchAll(/<UpdateVariable>([\s\S]*?)<\/UpdateVariable>/gi)];
+    if (!all.length) return appendUpdateBlockToFloor(raw, floorId);
+    const m = all[all.length - 1];
     let oldPatch = null;
     try { oldPatch = JSON.parse(m[1].replace(/<\/?JSONPatch>/gi, '').trim()); } catch (_) { oldPatch = null; }
     if (!Array.isArray(oldPatch)) return appendUpdateBlockToFloor(raw, floorId);
@@ -961,7 +963,9 @@
       if (i >= 0) merged[i] = entry; else merged.push(entry);
     }
     const mergedBlock = '<UpdateVariable>\n' + JSON.stringify(merged, null, 2) + '\n</UpdateVariable>';
-    await api.set([{ message_id: msg.message_id, message: text.replace(m[0], () => mergedBlock) }], { refresh: 'affected' });
+    // 按 index 精确替换（多块下 String.replace 会误中第一处同文块）
+    const newText = text.slice(0, m.index) + mergedBlock + text.slice(m.index + m[0].length);
+    await api.set([{ message_id: msg.message_id, message: newText }], { refresh: 'affected' });
     return true;
   }
   function extractAnalysis(text) {
@@ -1439,7 +1443,9 @@
   let petOrbRenderer = null;
   let petBubbleTimer = null;
   let petBubbleHideTimer = null;
+  let petBubbleBootTimer = null;
   let petOrbDragRafCancel = null;
+  let ensureSidebarRetryTimer = null; // 启动 1.5s 重试 timer——destroy 必清,否则切卡窗口期球被重建（审查 minor）
   // 3.3.1 自由浮动模型（总监拍板）：初始=页面中心、全屏拖放、靠边(<24px)才吸附贴边；fx/fy=视口比例坐标
   const sidebarState = { side: 'right', top: 0.42, open: false, dockDepth: 'half', fx: 0.5, fy: 0.5, docked: false };
   function loadSidebarState() {
@@ -1727,7 +1733,7 @@
     { id: 'map', icon: '🗺️', label: '地图' },
   ];
   function calcRadialPositions(center, side) {
-    const rPx = 84;
+    const rPx = 108; // ≥28/|cos75°| 保证最近角按钮不与球(半径28)重叠（审查 minor 修复）
     const startDeg = side === 'left' ? 75 : 105;
     const endDeg = side === 'left' ? -75 : 255;
     return RADIAL_BUTTONS.map((btn, i) => {
@@ -2029,6 +2035,7 @@
     function settleAfterDrag() {
       const vw = hw().innerWidth || 1200, vh = hw().innerHeight || 800;
       const edgeDist = Math.min(dragCX - ORB_SIZE / 2, vw - dragCX - ORB_SIZE / 2);
+      // top 与 fy 有意保持同步 = 上次拖停的 Y（吸附态用 top、浮空态用 fy，模式切换不跳变）
       sidebarState.top = Math.min(1, Math.max(0, dragCY / vh));
       sidebarState.fy = sidebarState.top;
       if (edgeDist < DOCK_SNAP_PX) {
@@ -2106,7 +2113,8 @@
     disposers.push(() => { try { doc.removeEventListener('click', onDocClick); } catch (_) {} });
     // 时段气泡：开机 8s 后首查，此后每 10 分钟巡检跨桶（节流规则在 shouldShowBubble 内）
     if (petBubbleTimer) { clearInterval(petBubbleTimer); petBubbleTimer = null; }
-    setTimeout(() => { try { showPetBubble(); } catch (_) {} }, 8000);
+    if (petBubbleBootTimer) { clearTimeout(petBubbleBootTimer); petBubbleBootTimer = null; }
+    petBubbleBootTimer = setTimeout(() => { try { showPetBubble(); } catch (_) {} }, 8000);
     petBubbleTimer = setInterval(() => { try { showPetBubble(); } catch (_) {} }, 10 * 60 * 1000);
     positionSidebarBall();
   }
@@ -3946,6 +3954,8 @@
     petOrbRenderer = null;
     if (petBubbleTimer) { clearInterval(petBubbleTimer); petBubbleTimer = null; }
     if (petBubbleHideTimer) { clearTimeout(petBubbleHideTimer); petBubbleHideTimer = null; }
+    if (petBubbleBootTimer) { clearTimeout(petBubbleBootTimer); petBubbleBootTimer = null; }
+    if (ensureSidebarRetryTimer) { clearTimeout(ensureSidebarRetryTimer); ensureSidebarRetryTimer = null; }
     try { petOrbDragRafCancel?.(); } catch (_) {}
     petOrbDragRafCancel = null;
     // HUD 顶层单例面板（P-C-0）清理：面板/样式/Blob URL/顶层桥
@@ -4020,5 +4030,5 @@
   bindAnalysisEntries();
   loadSidebarState();
   ensureSidebar();
-  setTimeout(ensureSidebar, 1500);
+  ensureSidebarRetryTimer = setTimeout(ensureSidebar, 1500);
 })();
