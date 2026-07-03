@@ -1584,10 +1584,11 @@
   }
   // ── 点阵球渲染器（pet_orb_renderer 定稿参数嵌入版·D2 密·数据网 · 单色淡蓝）────────────
   // 与原型差异：修「burst-in 完成后粒子不重散布」bug（原型把 _burstPhase 置 null 后再读它判 dir，恒 false）；加 renderOnce() 供 reduced-motion 静态帧。
-  const XY_ORB_CFG = { n: 34, linkDist: 31, speed: 0.26, glowIntensity: 1.0, colorTokens: { particle: '#6bc7f2', bright: '#4be4ff', highlight: '#cdf3ff' }, radius: 0 };
+  const XY_ORB_CFG = { n: 46, linkDist: 33, speed: 0.3, glowIntensity: 1.08, tailRatio: 0.58, dragShear: 1.28, colorTokens: { particle: '#6bc7f2', bright: '#4be4ff', highlight: '#cdf3ff' }, radius: 0 };
   const XY_ORB_STATES = {
     'idle': { speedMul: 1.0, linkDistMul: 1.0, glowMul: 1.0 },
     'hover': { speedMul: 1.8, linkDistMul: 1.4, glowMul: 1.6 },
+    'drag': { speedMul: 2.35, linkDistMul: 1.62, glowMul: 1.95 },
     'edge-left': { speedMul: 0.5, linkDistMul: 0.8, glowMul: 0.6 },
     'edge-right': { speedMul: 0.5, linkDistMul: 0.8, glowMul: 0.6 },
   };
@@ -1600,6 +1601,7 @@
       this._state = 'idle'; this._running = false; this._rafId = null;
       this._particles = []; this._lastTs = null; this._burstPhase = null;
       this._tailDrag = false; // ⑧c 数据史莱姆：拖动中=弹簧松（甩尾），松手=刚度加倍（加速追上归位）
+      this._dragEnergy = 0; this._dragDX = 0; this._dragDY = 0;
       const w = hostWindow();
       this._raf = (w.requestAnimationFrame ? w.requestAnimationFrame.bind(w) : (cb => setTimeout(cb, 16)));
       this._caf = (w.cancelAnimationFrame ? w.cancelAnimationFrame.bind(w) : clearTimeout);
@@ -1609,14 +1611,29 @@
     stop() { this._running = false; if (this._rafId != null) { this._caf(this._rafId); this._rafId = null; } }
     renderOnce() { this._update(16); this._draw(); }
     setState(state) { if (XY_ORB_STATES[state]) this._state = state; }
-    setTailDrag(on) { this._tailDrag = !!on; }
+    setTailDrag(on) {
+      this._tailDrag = !!on;
+      if (!on) this._dragEnergy = Math.max(this._dragEnergy, 0.32);
+    }
     nudge(dx, dy) {
       // ⑧c：外壳直写跟手，滞后下沉到点阵——tail 粒子按各自 lag 反向甩出（CSS px→2x 物理 px），弹簧回中
+      const mag = Math.sqrt(dx * dx + dy * dy);
+      if (mag > 0.01) {
+        const nx = dx / mag, ny = dy / mag;
+        this._dragEnergy = Math.min(1, this._dragEnergy + mag / 30);
+        this._dragDX = xyOrbLerp(this._dragDX || 0, nx, 0.42);
+        this._dragDY = xyOrbLerp(this._dragDY || 0, ny, 0.42);
+      }
       const cap = this._effectiveRadius() * 0.9;
       for (const p of this._particles) {
-        if (!p.tail) continue;
-        p.sx = Math.max(-cap, Math.min(cap, p.sx - dx * 2 * p.lag));
-        p.sy = Math.max(-cap, Math.min(cap, p.sy - dy * 2 * p.lag));
+        const pull = p.tail ? p.lag : 0.12;
+        const shear = p.tail ? this._cfg.dragShear : 0.28;
+        p.sx = Math.max(-cap, Math.min(cap, p.sx - dx * 2 * pull * shear));
+        p.sy = Math.max(-cap, Math.min(cap, p.sy - dy * 2 * pull * shear));
+        if (p.tail) {
+          p.svx -= dx * 0.035 * p.lag;
+          p.svy -= dy * 0.035 * p.lag;
+        }
       }
     }
     playBurstOut(onDone) {
@@ -1643,8 +1660,8 @@
       const cx = this._canvas.width / 2, cy = this._canvas.height / 2, r = this._effectiveRadius();
       for (let i = 0; i < this._cfg.n; i++) {
         const angle = Math.random() * Math.PI * 2, dist = Math.sqrt(Math.random()) * r;
-        // ⑧c：约 10/34 个粒子标记为 tail（数据史莱姆拖尾），每粒随机刚度/阻尼/滞后系数（欠阻尼弹簧带个体抖动）
-        this._particles.push({ x: cx + Math.cos(angle) * dist, y: cy + Math.sin(angle) * dist, vx: (Math.random() * 2 - 1) * this._cfg.speed, vy: (Math.random() * 2 - 1) * this._cfg.speed, blink: Math.random(), blinkSpeed: 0.3 + Math.random() * 0.5, isHighlight: Math.random() < 0.18, tail: Math.random() < (10 / this._cfg.n), sx: 0, sy: 0, svx: 0, svy: 0, springK: 0.05 + Math.random() * 0.04, springD: 0.86 + Math.random() * 0.07, lag: 0.35 + Math.random() * 0.45 });
+        // ⑧c：过半粒子参与拖尾（数据史莱姆），每粒随机刚度/阻尼/滞后系数（欠阻尼弹簧带个体抖动）
+        this._particles.push({ x: cx + Math.cos(angle) * dist, y: cy + Math.sin(angle) * dist, vx: (Math.random() * 2 - 1) * this._cfg.speed, vy: (Math.random() * 2 - 1) * this._cfg.speed, blink: Math.random(), blinkSpeed: 0.3 + Math.random() * 0.5, isHighlight: Math.random() < 0.2, tail: Math.random() < this._cfg.tailRatio, sx: 0, sy: 0, svx: 0, svy: 0, springK: 0.045 + Math.random() * 0.04, springD: 0.87 + Math.random() * 0.08, lag: 0.32 + Math.random() * 0.58 });
       }
     }
     _loop(timestamp) {
@@ -1656,15 +1673,17 @@
     }
     _update(dt) {
       const stateP = XY_ORB_STATES[this._state];
-      const speed = this._cfg.speed * stateP.speedMul;
-      const cx = this._canvas.width / 2, cy = this._canvas.height / 2, r = this._effectiveRadius();
       const dtFrac = dt / 16;
+      this._dragEnergy *= Math.pow(this._tailDrag ? 0.94 : 0.86, dtFrac);
+      if (this._dragEnergy < 0.01) this._dragEnergy = 0;
+      const speed = this._cfg.speed * stateP.speedMul * (1 + this._dragEnergy * 0.72);
+      const cx = this._canvas.width / 2, cy = this._canvas.height / 2, r = this._effectiveRadius();
       for (const p of this._particles) {
         p.blink += p.blinkSpeed * dtFrac * 0.04; if (p.blink > 1) p.blink -= 1;
         if (p.tail && (p.sx || p.sy || p.svx || p.svy)) {
           // ⑧c 欠阻尼弹簧：拉回中心偏移，松手刚度 x2.4 加速追上；收敛后清零避免残余漂移
-          const k = p.springK * (this._tailDrag ? 1 : 2.4);
-          const damp = Math.pow(p.springD, dtFrac);
+          const k = p.springK * (this._tailDrag ? 0.62 : 2.8);
+          const damp = Math.pow(this._tailDrag ? Math.min(0.985, p.springD + 0.045) : p.springD, dtFrac);
           p.svx = (p.svx - k * p.sx * dtFrac) * damp;
           p.svy = (p.svy - k * p.sy * dtFrac) * damp;
           p.sx += p.svx * dtFrac; p.sy += p.svy * dtFrac;
@@ -1710,12 +1729,33 @@
       for (const p of ps) { p.rx = p.x + (p.sx || 0); p.ry = p.y + (p.sy || 0); } // ⑧c 渲染坐标=物理位置+弹簧偏移
       const breathPhase = (Date.now() % 3000) / 3000;
       const cx = canvas.width / 2, cy = canvas.height / 2, r = this._effectiveRadius();
+      const dragE = Math.max(0, Math.min(1, this._dragEnergy || 0));
       ctx.save();
-      ctx.globalAlpha = (0.06 + 0.04 * Math.sin(breathPhase * Math.PI * 2)) * glow;
+      ctx.globalAlpha = (0.06 + 0.04 * Math.sin(breathPhase * Math.PI * 2) + dragE * 0.1) * glow;
+      if (dragE > 0.02 && (this._dragDX || this._dragDY)) {
+        const angle = Math.atan2(this._dragDY || 0, this._dragDX || 1);
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+        ctx.scale(1 + dragE * 0.12, 1 - dragE * 0.05);
+        ctx.translate(-cx, -cy);
+      }
       const grad = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r);
       grad.addColorStop(0, 'rgba(' + br2 + ',' + bg2 + ',' + bb2 + ',0.3)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
+      if (dragE > 0.03 && (this._dragDX || this._dragDY)) {
+        const dx = this._dragDX || 0, dy = this._dragDY || 0;
+        ctx.save();
+        ctx.lineCap = 'round';
+        for (const p of ps) {
+          if (!p.tail) continue;
+          const len = (8 + 18 * p.lag) * dragE * (canvas.width / 56);
+          ctx.strokeStyle = 'rgba(' + br2 + ',' + bg2 + ',' + bb2 + ',' + (0.12 + 0.2 * dragE).toFixed(3) + ')';
+          ctx.lineWidth = (0.65 + 0.9 * p.lag) * (canvas.width / 56);
+          ctx.beginPath(); ctx.moveTo(p.rx - dx * len, p.ry - dy * len); ctx.lineTo(p.rx, p.ry); ctx.stroke();
+        }
+        ctx.restore();
+      }
       ctx.save();
       for (let i = 0; i < ps.length; i++) {
         for (let j = i + 1; j < ps.length; j++) {
@@ -2078,16 +2118,16 @@
     // iframe 内做无效）；✕ 移入真身 header（经 blob 注入），外壳不再挂骑角 ✕；拖动条只留命中区不再有辉光带；
     // 缩放 L 形角标保留=缩放唯一视觉提示。
     style.textContent = [
-      '#xingyue-hud-panel{position:fixed;z-index:2147483540;background:rgba(6,10,16,.6);backdrop-filter:blur(14px) saturate(1.12);-webkit-backdrop-filter:blur(14px) saturate(1.12);border:none;border-radius:12px;transform-origin:center center;transition:transform .22s cubic-bezier(.34,1.56,.64,1),opacity .18s;}',
+      '#xingyue-hud-panel{--xy-hud-cut:14px;position:fixed;z-index:2147483540;background:rgba(6,10,16,.6);backdrop-filter:blur(14px) saturate(1.12);-webkit-backdrop-filter:blur(14px) saturate(1.12);border:none;border-radius:0;clip-path:polygon(var(--xy-hud-cut) 0,100% 0,100% calc(100% - var(--xy-hud-cut)),calc(100% - var(--xy-hud-cut)) 100%,0 100%,0 var(--xy-hud-cut));transform-origin:center center;transition:transform .22s cubic-bezier(.34,1.56,.64,1),opacity .18s;}',
       '@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){#xingyue-hud-panel{background:rgba(6,10,16,.92);}}',
       '#xingyue-hud-panel .xy-hud-body{position:absolute;inset:0;}',
       '#xingyue-hud-panel .xy-hud-body iframe{position:absolute;inset:0;width:100%;height:100%;border:0;}',
       '#xingyue-hud-panel.xy-hud-busy .xy-hud-body iframe{pointer-events:none;}',
       '#xingyue-hud-panel .xy-hud-drag{position:absolute;top:0;left:0;width:calc(100% - 170px);height:26px;cursor:move;z-index:3;background:transparent;touch-action:none;}',
       '#xingyue-hud-panel.xy-hud-collapsed{background:transparent !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}',
-      '#xingyue-hud-panel .xy-hud-resize{position:absolute;right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize;z-index:3;opacity:0;transition:opacity .15s;border-right:2px solid rgba(75,228,255,.75);border-bottom:2px solid rgba(75,228,255,.75);border-radius:0 0 8px 0;touch-action:none;}',
+      '#xingyue-hud-panel .xy-hud-resize{position:absolute;right:2px;bottom:2px;width:24px;height:24px;cursor:nwse-resize;z-index:3;opacity:0;transition:opacity .15s;border:none;border-radius:0;background:linear-gradient(135deg,transparent 0%,transparent 46%,rgba(75,228,255,.78) 47%,rgba(75,228,255,.78) 54%,transparent 55%,transparent 100%);touch-action:none;}',
       '#xingyue-hud-panel:hover .xy-hud-resize{opacity:1;}',
-      '#xingyue-hud-panel .xy-hud-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6f9daf;font:12px/1.6 Consolas,monospace;letter-spacing:1px;background:rgba(4,8,14,.9);border:1px solid rgba(107,199,242,.3);border-radius:12px;}',
+      '#xingyue-hud-panel .xy-hud-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6f9daf;font:12px/1.6 Consolas,monospace;letter-spacing:1px;background:rgba(4,8,14,.9);border:1px solid rgba(107,199,242,.3);border-radius:0;clip-path:inherit;}',
     ].join('');
     (doc.head || doc.body).appendChild(style);
   }
@@ -2289,7 +2329,7 @@
         dragBaseL = fr.left; dragBaseT = fr.top;
         dragLastL = fr.left; dragLastT = fr.top;
         startX = e.clientX; startY = e.clientY;
-        if (petOrbRenderer) { petOrbRenderer.setState('hover'); if (!orbReducedMotion()) petOrbRenderer.setTailDrag(true); }
+        if (petOrbRenderer) { petOrbRenderer.setState('drag'); if (!orbReducedMotion()) petOrbRenderer.setTailDrag(true); }
       }
       if (!moved) return;
       // ⑧c：主体直写跟手，位移增量喂给点阵 tail 粒子做甩尾（reduced-motion 下不喂）
