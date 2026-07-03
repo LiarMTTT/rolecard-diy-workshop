@@ -1949,7 +1949,7 @@
 
 /* ---- (3) 底部滚动进度条：发光 + 无需滚动时默认满显 ---- */
 .hud-scroll-progress {
-  height: 4px; margin: 6px 4px 2px; border-radius: 3px; overflow: hidden;
+  height: 4px; margin: 6px 34px 2px 4px; border-radius: 3px; overflow: hidden;
   background: var(--hud-bg-soft); border: 1px solid var(--hud-grid-line);
 }
 .hud-scroll-progress-bar {
@@ -1960,13 +1960,13 @@
 }
 
 /* ---- (4) tab 定宽不换行：收窄外框，按页宽自适应换行成多行 ---- */
-.hud-body .tab-bar { justify-content: center; gap: 4px 5px; padding-left: 2px; padding-right: 2px; }
+.hud-body .tab-bar { justify-content: center; gap: 4px; padding-left: 2px; padding-right: 2px; }
 .hud-body .tab-bar .tab-btn {
-  flex: 0 0 clamp(74px, calc(var(--hud-base-font) * 5.35 + 18px), 88px) !important;
-  width: clamp(74px, calc(var(--hud-base-font) * 5.35 + 18px), 88px) !important;
-  max-width: clamp(74px, calc(var(--hud-base-font) * 5.35 + 18px), 88px);
+  flex: 0 0 clamp(54px, calc(var(--hud-base-font) * 3.85 + 4px), 60px) !important;
+  width: clamp(54px, calc(var(--hud-base-font) * 3.85 + 4px), 60px) !important;
+  max-width: clamp(54px, calc(var(--hud-base-font) * 3.85 + 4px), 60px);
   min-width: 0;
-  padding: 2px 6px;
+  padding: 2px 3px;
   white-space: nowrap;
 }
 

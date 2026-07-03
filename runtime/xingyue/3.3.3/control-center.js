@@ -1,15 +1,15 @@
 (() => {
-  const VERSION = '3.3.2';
-  const BUTTON_NAME = '星月私立高等学院 控制中心 v3.3.2';
+  const VERSION = '3.3.3';
+  const BUTTON_NAME = '星月私立高等学院 控制中心 v3.3.3';
   // 任务3.3：单一真相源 RUNTIME_BASE_URL；media_library.js/status_bar_regex.html 从 window.XY_RT_BASE 读（降级保留内联硬编码）
   const RUNTIME_BASE_URL = 'https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.0.2';
   // 任务3.4：开局草稿 localStorage key 提顶层常量，版本 bump 只改这一处（bindOpeningPage 内层 STORAGE_KEY 须与此保持同步）
-  const OPENING_DRAFT_KEY = 'xingyue-opening-draft-v291';
+  const OPENING_DRAFT_KEY = 'xingyue-opening-draft-v333';
   const CONTROL_PANEL_ID = 'xingyue-control-center-panel';
   const CONTROL_PANEL_STYLE_ID = 'xingyue-control-center-style';
   const WAND_CONTAINER_ID = 'xingyue-control-center-wand-container';
   const WAND_BUTTON_ID = 'xingyue-control-center-wand-button';
-  const STORAGE_KEY = 'xingyue-academy-control-center-settings-v291';
+  const STORAGE_KEY = 'xingyue-academy-control-center-settings-v333';
   const STATIC_INDEX_URL = 'https://liarmttt.github.io/rolecard-diy-workshop/cards/xingyue/index.json';
   const DEFAULT_GATEWAY_URL = 'https://43-132-171-157.sslip.io';
   const SUPPORTED_TYPES = ['character','user_identity','world_factor','shop_item','blueprint','recipe','skill','function'];
@@ -962,7 +962,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.2 的当前楼变量重算器，只输出一个 <UpdateVariable> 块，不生成正文。' },
+        { role: 'system', content: '你是星月 3.3.3 的当前楼变量重算器，只输出一个 <UpdateVariable> 块，不生成正文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim();
@@ -995,7 +995,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.2 的变量定点修正器，只输出一个最小 <UpdateVariable> 块，不生成正文。' },
+        { role: 'system', content: '你是星月 3.3.3 的变量定点修正器，只输出一个最小 <UpdateVariable> 块，不生成正文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim();
@@ -1125,7 +1125,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.2 的当前楼变量重算器，依据玩家给定的变量预分析与正文，只输出一个 <UpdateVariable> 块，不生成正文、不输出 analysis。' },
+        { role: 'system', content: '你是星月 3.3.3 的当前楼变量重算器，依据玩家给定的变量预分析与正文，只输出一个 <UpdateVariable> 块，不生成正文、不输出 analysis。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim();
@@ -1198,7 +1198,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.2 的变量格式修复器，只输出一个最小 <UpdateVariable> 块，只修格式不改语义。' },
+        { role: 'system', content: '你是星月 3.3.3 的变量格式修复器，只输出一个最小 <UpdateVariable> 块，只修格式不改语义。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim();
@@ -2471,7 +2471,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.2 的楼层内临时旁观视角生成器。结果只供玩家娱乐阅读，不进入后续上下文。' },
+        { role: 'system', content: '你是星月 3.3.3 的楼层内临时旁观视角生成器。结果只供玩家娱乐阅读，不进入后续上下文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim();
@@ -2483,7 +2483,7 @@
     renderPanel();
     return lastNpcPerspective;
   }
-  // 3.3.2:制造/NPC 面板 UI 已删,结算链在 07_craft,TA 浮窗在 12_npc_view
+  // 3.3.3:制造/NPC 面板 UI 已删,结算链在 07_craft,TA 浮窗在 12_npc_view
 
   function ensurePanel() {
     const doc = hostDocument();
@@ -2715,7 +2715,7 @@
       }
     } catch (_xyPxErr) {}
 
-  const STORAGE_KEY = 'xingyue-opening-draft-v291';
+  const STORAGE_KEY = 'xingyue-opening-draft-v333';
   const TYPE_LABELS = { character:'角色范本', user_identity:'身份模板', world_factor:'世界因子', shop_item:'商店道具', blueprint:'蓝图', recipe:'配方', skill:'技能', function:'功能' };
   const ATTRIBUTE_KEYS = ['格斗','平衡','反应','感知','技巧','精神'];
   const DEFAULT_ATTRIBUTES = { 格斗:0, 平衡:0, 反应:0, 感知:0, 技巧:0, 精神:0 };
@@ -3997,7 +3997,7 @@
         render();
       }
       if (action === 'export-opening-draft') {
-        downloadJson('xingyue-opening-draft-v3.3.2.json', readDraft());
+        downloadJson('xingyue-opening-draft-v3.3.3.json', readDraft());
       }
       if (action === 'clear-opening-draft' && confirm('确认清空当前开局草稿？')) {
         localStorage.removeItem(STORAGE_KEY);
