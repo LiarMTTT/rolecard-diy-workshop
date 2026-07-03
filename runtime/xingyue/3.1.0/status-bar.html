@@ -1959,12 +1959,14 @@
   transition: width .1s linear;
 }
 
-/* ---- (4) tab 定宽不换行：固定 ~4.5 字符宽、文字绝不换行，按页宽自适应换行成多行 ---- */
-.hud-body .tab-bar { justify-content: center; }
+/* ---- (4) tab 定宽不换行：收窄外框，按页宽自适应换行成多行 ---- */
+.hud-body .tab-bar { justify-content: center; gap: 4px 5px; padding-left: 2px; padding-right: 2px; }
 .hud-body .tab-bar .tab-btn {
-  flex: 0 0 auto;
-  width: calc(var(--hud-base-font) * 4.5 + 20px);
+  flex: 0 0 clamp(74px, calc(var(--hud-base-font) * 5.35 + 18px), 88px) !important;
+  width: clamp(74px, calc(var(--hud-base-font) * 5.35 + 18px), 88px) !important;
+  max-width: clamp(74px, calc(var(--hud-base-font) * 5.35 + 18px), 88px);
   min-width: 0;
+  padding: 2px 6px;
   white-space: nowrap;
 }
 

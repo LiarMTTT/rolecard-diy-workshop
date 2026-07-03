@@ -2116,7 +2116,7 @@
     style.id = 'xingyue-hud-panel-style';
     // 3.3.1 S1 深黑玻璃浮窗（总监拍板）：外壳深黑半透底+磨砂（磨浮窗底下聊天正文，必须在外壳层做，
     // iframe 内做无效）；✕ 移入真身 header（经 blob 注入），外壳不再挂骑角 ✕；拖动条只留命中区不再有辉光带；
-    // 缩放 L 形角标保留=缩放唯一视觉提示。
+    // 缩放命中区保留，但可见提示改为同款切角斜边，避免 L 形角标与右下切角视觉打架。
     style.textContent = [
       '#xingyue-hud-panel{--xy-hud-cut:14px;position:fixed;z-index:2147483540;background:rgba(6,10,16,.6);backdrop-filter:blur(14px) saturate(1.12);-webkit-backdrop-filter:blur(14px) saturate(1.12);border:none;border-radius:0;clip-path:polygon(var(--xy-hud-cut) 0,100% 0,100% calc(100% - var(--xy-hud-cut)),calc(100% - var(--xy-hud-cut)) 100%,0 100%,0 var(--xy-hud-cut));transform-origin:center center;transition:transform .22s cubic-bezier(.34,1.56,.64,1),opacity .18s;}',
       '@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){#xingyue-hud-panel{background:rgba(6,10,16,.92);}}',
@@ -2125,7 +2125,9 @@
       '#xingyue-hud-panel.xy-hud-busy .xy-hud-body iframe{pointer-events:none;}',
       '#xingyue-hud-panel .xy-hud-drag{position:absolute;top:0;left:0;width:calc(100% - 170px);height:26px;cursor:move;z-index:3;background:transparent;touch-action:none;}',
       '#xingyue-hud-panel.xy-hud-collapsed{background:transparent !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}',
-      '#xingyue-hud-panel .xy-hud-resize{position:absolute;right:2px;bottom:2px;width:24px;height:24px;cursor:nwse-resize;z-index:3;opacity:0;transition:opacity .15s;border:none;border-radius:0;background:linear-gradient(135deg,transparent 0%,transparent 46%,rgba(75,228,255,.78) 47%,rgba(75,228,255,.78) 54%,transparent 55%,transparent 100%);touch-action:none;}',
+      '#xingyue-hud-panel .xy-hud-resize{position:absolute;right:0;bottom:0;width:32px;height:32px;cursor:nwse-resize;z-index:3;opacity:0;transition:opacity .15s;border:none;border-radius:0;background:transparent;touch-action:none;}',
+      '#xingyue-hud-panel .xy-hud-resize::before{content:"";position:absolute;right:3px;bottom:3px;width:24px;height:24px;background:rgba(75,228,255,.76);clip-path:polygon(100% 0,100% 6px,6px 100%,0 100%,0 calc(100% - 3px),calc(100% - 3px) 0);filter:drop-shadow(0 0 6px rgba(75,228,255,.38));}',
+      '#xingyue-hud-panel .xy-hud-resize::after{content:"";position:absolute;right:9px;bottom:9px;width:13px;height:13px;background:rgba(207,243,255,.34);clip-path:polygon(100% 0,100% 3px,3px 100%,0 100%,0 calc(100% - 2px),calc(100% - 2px) 0);}',
       '#xingyue-hud-panel:hover .xy-hud-resize{opacity:1;}',
       '#xingyue-hud-panel .xy-hud-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6f9daf;font:12px/1.6 Consolas,monospace;letter-spacing:1px;background:rgba(4,8,14,.9);border:1px solid rgba(107,199,242,.3);border-radius:0;clip-path:inherit;}',
     ].join('');
