@@ -73,7 +73,7 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.3.3-ui-hud-20260703';
+  const GIT_RUNTIME_REVISION = '3.3.3-hotfix-bridge-20260707';
   const GIT_RUNTIME_REVISION_KEY = 'xingyue-control-center-runtime-revision';
   function notifyGitRuntimeRevision() {
     try {
@@ -2050,7 +2050,7 @@
     const host = hostWindow();
     const fns = {};
     // XingyueHudSettings/CrossedZoneHudSettings：设置持久化对象（缺了真机报 timeout、齿轮设置不保存——3.3.0 实锤）
-    ['eventOn', 'eventOff', 'eventEmit', 'errorCatched', 'updateVariablesWith', 'toastr', 'TavernHelper', 'XingyueHudSettings', 'CrossedZoneHudSettings'].forEach((k) => {
+    ['eventOn', 'eventOff', 'eventEmit', 'errorCatched', 'updateVariablesWith', 'replaceVariables', 'toastr', 'TavernHelper', 'XingyueHudSettings', 'CrossedZoneHudSettings'].forEach((k) => {
       try { if (typeof window[k] !== 'undefined') fns[k] = window[k]; else if (typeof host[k] !== 'undefined') fns[k] = host[k]; } catch (_) {}
     });
     // getMvu 动态取(非快照)——早开面板时 Mvu 可能未就绪,快照 null 会让真身事件绑定失效(审查 minor)
@@ -2083,8 +2083,12 @@
       + 'Object.keys(B.fns||{}).forEach(function(k){try{if(typeof window[k]==="undefined")window[k]=B.fns[k];}catch(e){}});'
       + 'var getM=function(){try{return (B.getMvu&&B.getMvu())||B.Mvu||null;}catch(e){return B.Mvu||null;}};'
       + 'try{Object.defineProperty(window,"Mvu",{configurable:true,get:getM});}catch(e){window.Mvu=getM();}'
-      + 'window.getCurrentMessageId=function(){try{return B.curId();}catch(e){return "latest";}};'
-      + 'window.getVariables=function(o){try{return getM().getMvuData({type:"message",message_id:B.curId()});}catch(e){return {stat_data:{}};}};'
+      + 'var cur=function(){try{return (B.curId&&B.curId())||"latest";}catch(e){return "latest";}};'
+      + 'var clone=function(v){try{return JSON.parse(JSON.stringify(v));}catch(e){return v;}};'
+      + 'var emitVar=function(next,old){try{var m=getM();var ev=(m&&m.events&&m.events.VARIABLE_UPDATE_ENDED)||"mag_variable_update_ended";var fn=window.eventEmit||(B.fns&&B.fns.eventEmit);if(typeof fn==="function")return Promise.resolve(fn(ev,next,old==null?next:old));}catch(e){}return Promise.resolve();};'
+      + 'window.getCurrentMessageId=function(){return cur();};'
+      + 'window.getVariables=function(o){try{return getM().getMvuData({type:"message",message_id:cur()});}catch(e){return {stat_data:{}};}};'
+      + 'var nativeUpdate=window.updateVariablesWith;window.updateVariablesWith=function(updater,o){o=o||{};if(o.type&&o.type!=="message"&&typeof nativeUpdate==="function")return nativeUpdate(updater,o);var m=getM();if(!m||!m.getMvuData||!m.replaceMvuData){if(typeof nativeUpdate==="function")return nativeUpdate(updater,o);throw new Error("MVU 写入接口尚未就绪");}var opt={type:"message",message_id:o.message_id==null?cur():o.message_id};var old=m.getMvuData(opt)||{stat_data:{}};var next=clone(old)||{stat_data:{}};return Promise.resolve(updater(next)).then(function(ret){if(ret!==undefined)next=ret;return Promise.resolve(m.replaceMvuData(next,opt)).then(function(){return emitVar(next,old).then(function(){return next;});});});};'
       + 'window.waitGlobalInitialized=function(n){return new Promise(function(res){var k=0;(function c(){if(window[n]||k>20)return res();k++;setTimeout(c,50);})();});};'
       + 'var LIFT={"--hud-bg-panel":[18,52,40,72],"--hud-bg-panel-2":[22,60,46,78],"--hud-bg-card":[10,22,32,56],"--hud-control-bg":[18,44,40,68]};var liftLast={};'
       + 'var liftSurface=function(){try{var root=document.documentElement;if(String(getComputedStyle(root).getPropertyValue("--hud-surface-mode")||"").trim()!=="transparent")return;Object.keys(LIFT).forEach(function(p){try{var v=(root.style.getPropertyValue(p)||"").trim();if(!v||v===liftLast[p]||v.indexOf("rgba(")!==0)return;var i=v.lastIndexOf(",");var j=v.lastIndexOf(")");if(i<5||j<i)return;var a=Math.round(parseFloat(v.slice(i+1,j))*100);if(!isFinite(a))return;var c=LIFT[p];if(a<c[0]||a>c[1])return;var y=c[2]+(a-c[0])*(c[3]-c[2])/(c[1]-c[0]);var nv=v.slice(0,i+1)+(y/100).toFixed(2)+")";liftLast[p]=nv;root.style.setProperty(p,nv);}catch(e){}});}catch(e){}};'
@@ -2189,6 +2193,7 @@
   }
   function closeHudPanel() {
     if (!hudPanel) return;
+    hudPanel.dataset.xyHudOpen = '0';
     hudPanel.style.transform = 'scale(0.88)';
     hudPanel.style.opacity = '0';
     hudPanel.style.pointerEvents = 'none';
@@ -2198,16 +2203,18 @@
     ensureHudPanelStyle(doc);
     const geo = hudPanelGeometry();
     if (hudPanel && hudPanel.isConnected) {
-      const isHidden = hudPanel.style.opacity === '0';
+      const isHidden = hudPanel.dataset.xyHudOpen === '0' || hudPanel.style.opacity === '0';
       if (!isHidden) { closeHudPanel(); return; } // 再点收回
       hudPanel.style.left = geo.left + 'px'; hudPanel.style.top = geo.top + 'px';
       hudPanel.style.width = geo.w + 'px'; hudPanel.style.height = geo.h + 'px';
+      hudPanel.dataset.xyHudOpen = '1';
       hudPanel.style.transform = 'scale(1)'; hudPanel.style.opacity = '1'; hudPanel.style.pointerEvents = 'auto';
       if (hudLoadState === 'failed') fetchHudBody(); // 上次失败重试
       return;
     }
     hudPanel = doc.createElement('div');
     hudPanel.id = 'xingyue-hud-panel';
+    hudPanel.dataset.xyHudOpen = '0';
     hudPanel.style.cssText = 'left:' + geo.left + 'px;top:' + geo.top + 'px;width:' + geo.w + 'px;height:' + geo.h + 'px;transform:scale(0.88);opacity:0;';
     hudPanel.innerHTML = '<div class="xy-hud-body"><div class="xy-hud-loading">〔 OMNI-NEXUS 〕状态栏加载中…</div></div>'
       + '<div class="xy-hud-drag" title="拖动移动"></div>'
@@ -2249,7 +2256,7 @@
       el.addEventListener('pointerup', onHudUp);
       el.addEventListener('pointercancel', onHudUp);
     });
-    (hostWindow().requestAnimationFrame || requestAnimationFrame)(() => { try { hudPanel.style.transform = 'scale(1)'; hudPanel.style.opacity = '1'; hudPanel.style.pointerEvents = 'auto'; } catch (_) {} });
+    (hostWindow().requestAnimationFrame || requestAnimationFrame)(() => { try { hudPanel.dataset.xyHudOpen = '1'; hudPanel.style.transform = 'scale(1)'; hudPanel.style.opacity = '1'; hudPanel.style.pointerEvents = 'auto'; } catch (_) {} });
     publishHudBridge();
     fetchHudBody();
   }
@@ -2495,15 +2502,17 @@
       panel.hidden = true;
       doc.body.appendChild(panel);
       panel.addEventListener('click', async event => {
-        const action = event.target?.getAttribute?.('data-xy-action');
+        const actionNode = event.target?.closest?.('[data-xy-action]');
+        if (!actionNode || !panel.contains(actionNode)) return;
+        const action = actionNode.getAttribute('data-xy-action');
         if (!action) return;
-        if (action === 'close') togglePanel(false);
+        if (action === 'close') { togglePanel(false); return; }
         if (action === 'toggle-setting') {
-          const key = event.target?.closest?.('[data-key]')?.getAttribute?.('data-key');
+          const key = actionNode.closest?.('[data-key]')?.getAttribute?.('data-key');
           if (key && Object.prototype.hasOwnProperty.call(settings, key)) saveSettings({ [key]: !settings[key] });
         }
         if (action === 'news-mode') {
-          const mode = event.target?.getAttribute?.('data-mode') === 'round' ? 'round' : 'time';
+          const mode = actionNode.getAttribute('data-mode') === 'round' ? 'round' : 'time';
           saveSettings({ newsRefreshMode: mode });
         }
         if (action === 'reroll-variables') {
@@ -3538,7 +3547,7 @@
       state.workshopCatalog = [];
       state.myPackages = [];
       state.workshopLoading = false;
-      state.lastWorkshopError = '控制中心工坊 API 未就绪';
+      state.lastWorkshopError = '在线创意工坊暂未开放，可继续使用本地 JSON 和本地示例';
       renderWorkshop();
       return [];
     }
@@ -3720,9 +3729,24 @@
       if (action === 'prev-step') setStep(state.step - 1);
       if (action === 'next-step') setStep(state.step + 1);
       if (action === 'open-workshop') {
+        const previousView = state.view || 'boot';
+        const hasWorkshopView = !!root.querySelector('[data-xy-view="workshop"]')
+          && !!root.querySelector('[data-xy-workshop-tabs]')
+          && !!root.querySelector('[data-xy-workshop-grid]')
+          && !!root.querySelector('[data-xy-workshop-status]');
+        if (!hasWorkshopView) { toast('warn', '创意工坊界面暂未挂载，请继续使用本地 JSON。'); return; }
         state.returnView = state.view === 'wizard' ? 'wizard' : 'boot';
         if (button.dataset.xyWorkshopTab) state.workshopTab = button.dataset.xyWorkshopTab;
-        setView('workshop');
+        try { setView('workshop'); } catch (viewError) { try { setView(previousView); } catch (_) {} throw viewError; }
+        if (!controlCenter()?.refreshWorkshop) {
+          state.workshopCatalog = [];
+          state.myPackages = [];
+          state.workshopLoading = false;
+          state.lastWorkshopError = '在线创意工坊暂未开放，可继续使用本地 JSON 和本地示例';
+          renderWorkshop();
+          toast('info', '在线创意工坊暂未开放；本地 JSON 和本地示例仍可使用。');
+          return;
+        }
         refreshWorkshop().catch(error => toast('error', error.message || String(error)));
       }
       if (action === 'login-discord') {
