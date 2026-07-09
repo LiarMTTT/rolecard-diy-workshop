@@ -79,7 +79,7 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.3.7-status-drawer-placement-20260709';
+  const GIT_RUNTIME_REVISION = '3.3.7-opening-viewport-20260709';
   const GIT_RUNTIME_REVISION_KEY = 'xingyue-control-center-runtime-revision';
   function notifyGitRuntimeRevision() {
     try {
@@ -3350,6 +3350,62 @@
       }
     } catch (_xyPxErr) {}
 
+    try {
+      if (!root.__xyOpeningViewportCleanup) {
+        const doc = root.ownerDocument || document;
+        const win = doc.defaultView || hostWindow() || window;
+        const docEl = doc.documentElement || document.documentElement;
+        const cleanup = [];
+        let frame = 0;
+        const syncViewport = () => {
+          frame = 0;
+          try {
+            const rect = root.getBoundingClientRect ? root.getBoundingClientRect() : { width: 0 };
+            const vv = win.visualViewport;
+            const width = Math.max(280, Math.round((vv && vv.width) || win.innerWidth || docEl.clientWidth || rect.width || 390));
+            const height = Math.max(320, Math.round((vv && vv.height) || win.innerHeight || docEl.clientHeight || 720));
+            const rootWidth = Math.max(280, Math.round(rect.width || width));
+            const scale = Math.max(.76, Math.min(1, Math.min(rootWidth / 420, height / 760)));
+            root.style.setProperty('--xy-visible-w', width + 'px');
+            root.style.setProperty('--xy-visible-h', height + 'px');
+            root.style.setProperty('--xy-page-scale', scale.toFixed(3));
+            root.dataset.xyShortViewport = height < 700 ? '1' : '0';
+          } catch (_e) {}
+        };
+        const scheduleViewportSync = () => {
+          try { if (frame) win.cancelAnimationFrame(frame); } catch (_e) {}
+          try { frame = win.requestAnimationFrame(syncViewport); } catch (_e) { syncViewport(); }
+        };
+        const listen = (target, type) => {
+          try {
+            target.addEventListener(type, scheduleViewportSync, { passive: true });
+            cleanup.push(() => target.removeEventListener(type, scheduleViewportSync));
+          } catch (_e) {}
+        };
+        listen(win, 'resize');
+        listen(win, 'orientationchange');
+        if (win.visualViewport) {
+          listen(win.visualViewport, 'resize');
+          listen(win.visualViewport, 'scroll');
+        }
+        try {
+          const RO = win.ResizeObserver || window.ResizeObserver;
+          if (RO) {
+            const ro = new RO(scheduleViewportSync);
+            ro.observe(root);
+            cleanup.push(() => ro.disconnect());
+          }
+        } catch (_e) {}
+        root.__xyOpeningViewportCleanup = () => {
+          try { if (frame) win.cancelAnimationFrame(frame); } catch (_e) {}
+          while (cleanup.length) { try { cleanup.pop()?.(); } catch (_e) {} }
+          try { delete root.__xyOpeningViewportCleanup; } catch (_e) {}
+        };
+        disposers.push(root.__xyOpeningViewportCleanup);
+        scheduleViewportSync();
+      }
+    } catch (_viewportErr) {}
+
   const STORAGE_KEY = 'xingyue-opening-draft-v333';
   const TYPE_LABELS = { character:'角色范本', user_identity:'身份模板', world_factor:'世界因子', shop_item:'商店道具', blueprint:'蓝图', recipe:'配方', skill:'技能', function:'功能' };
   const ATTRIBUTE_KEYS = ['格斗','平衡','反应','感知','技巧','精神'];
@@ -4742,10 +4798,11 @@
   // first_mes 仅放 [data-xy-opening-remote] 短标记；控制中心 fetch 远程开局页 + 注入 + 绑定（display-only，绝不进 LLM）。
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
+  const OPENING_PAGE_REVISION = '20260709-337-opening-viewport';
   const OPENING_PAGE_SOURCES = [
-    RUNTIME_BASE_URL + '/opening-page.html',
-    'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.7/opening-page.html',
-    'https://43-132-171-157.sslip.io/runtime/xingyue/3.3.7/opening-page.html',
+    RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
+    'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.7/opening-page.html?v=' + OPENING_PAGE_REVISION,
+    'https://43-132-171-157.sslip.io/runtime/xingyue/3.3.7/opening-page.html?v=' + OPENING_PAGE_REVISION,
   ];
   function loadRemoteOpeningPages(doc) {
     try {

@@ -504,6 +504,58 @@
 .xy-vote-bar{display:flex;gap:6px;margin:6px 0}
 .xy-vote{display:inline-flex;align-items:center;gap:3px;padding:2px 9px;border-radius:6px;border:1px solid rgba(224,178,123,.28);background:rgba(0,0,0,.2);color:#cfe;cursor:pointer;font:inherit}
 .xy-vote.on{border-color:rgba(255,212,122,.7);background:rgba(255,212,122,.12);color:#ffd47a}
+/* ===== 3.3.7 mobile visible-viewport pass ===== */
+.xy-opening-page{--xy-visible-w:100vw;--xy-visible-h:100dvh;--xy-page-scale:1;--xy-boot-target-h:min(760px,calc(var(--xy-visible-h,100dvh) - 8px));--xy-boot-min-h:460px}
+.xy-opening-page .xy-boot{width:100%!important;aspect-ratio:auto!important;min-height:min(var(--xy-boot-min-h),var(--xy-boot-target-h))!important;height:auto!important;max-height:none!important}
+.xy-opening-page .xy-boot .xy-boot-console{max-height:calc(var(--xy-boot-target-h) - 24px);overflow:visible}
+@supports (height:100dvh){.xy-opening-page{--xy-visible-h:100dvh}}
+@media (max-width:560px),(max-height:700px){
+.xy-opening-page{padding:clamp(6px,2.2vw,10px)!important;--xy-boot-target-h:calc(var(--xy-visible-h,100dvh) - 12px);--xy-boot-min-h:0px}
+.xy-opening-shell{gap:10px!important}
+.xy-opening-page .xy-boot{min-height:0!important;height:clamp(430px,var(--xy-boot-target-h),680px)!important;margin:0!important}
+.xy-opening-page .xy-boot .xy-cover-focus{background-position:center 10%!important}
+.xy-opening-page .xy-boot .xy-boot-console{gap:calc(8px * var(--xy-page-scale,1))!important;padding:calc(10px * var(--xy-page-scale,1))!important;max-height:calc(var(--xy-boot-target-h) - 16px)}
+.xy-opening-page .xy-boot .xy-brand-line{font-size:9.5px!important;padding:3px 8px!important}
+.xy-opening-page .xy-boot .xy-title{font-size:clamp(22px,8cqw,30px)!important;line-height:1.1!important;letter-spacing:1px!important}
+.xy-opening-page .xy-boot .xy-title::before{top:10%;bottom:10%;width:3px}
+.xy-opening-page .xy-boot .xy-sub{font-size:clamp(11px,3.2cqw,12px)!important;line-height:1.28!important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.xy-opening-page .xy-boot .xy-boot-status{padding:8px 10px!important}
+.xy-opening-page .xy-boot .xy-compact-checks .xy-panel-head{margin-bottom:5px!important}
+.xy-opening-page .xy-boot .xy-compact-checks h3{font-size:10px!important;letter-spacing:1px!important}
+.xy-opening-page .xy-boot .xy-compact-checks .xy-dep-list{gap:4px!important}
+.xy-opening-page .xy-boot .xy-compact-checks .xy-dep-item{padding:3px 7px!important;font-size:10.5px!important}
+.xy-opening-page .xy-boot .xy-hero-meter{margin-top:6px!important;padding-top:6px!important;gap:4px!important}
+.xy-opening-page .xy-meter-row{font-size:10.5px!important}
+.xy-opening-page .xy-meter-row strong{font-size:12px!important}
+.xy-opening-page .xy-boot .xy-agreement{padding:8px 10px!important}
+.xy-opening-page .xy-agreement-text{margin-bottom:6px!important;font-size:10px!important;line-height:1.36!important}
+.xy-opening-page .xy-agreement-check span{font-size:11px!important}
+.xy-opening-page .xy-boot .xy-boot-actions{gap:6px!important}
+.xy-opening-page .xy-boot .xy-boot-actions .xy-btn,.xy-opening-page .xy-boot .xy-boot-actions .xy-btn.primary{min-height:36px!important;padding:7px 10px!important;font-size:12px!important;letter-spacing:1px!important;max-width:100%;white-space:normal!important}
+}
+@media (max-height:620px){
+.xy-opening-page{--xy-boot-target-h:calc(var(--xy-visible-h,100dvh) - 10px)}
+.xy-opening-page .xy-boot{height:clamp(360px,var(--xy-boot-target-h),560px)!important}
+.xy-opening-page .xy-boot .xy-boot-console{gap:6px!important;padding:8px!important}
+.xy-opening-page .xy-boot .xy-brand-line{display:none!important}
+.xy-opening-page .xy-boot .xy-sub{-webkit-line-clamp:1}
+.xy-opening-page .xy-boot .xy-title{font-size:clamp(20px,7.2cqw,26px)!important}
+.xy-opening-page .xy-boot .xy-boot-status{padding:7px 9px!important}
+.xy-opening-page .xy-boot .xy-compact-checks .xy-dep-list{display:flex!important;flex-wrap:wrap!important}
+.xy-opening-page .xy-boot .xy-hero-meter{display:none!important}
+.xy-opening-page .xy-agreement-text{display:none!important}
+.xy-opening-page .xy-boot .xy-boot-actions .xy-btn{min-height:34px!important}
+}
+@media (max-height:520px){
+.xy-opening-page .xy-boot{height:calc(var(--xy-visible-h,100dvh) - 8px)!important}
+.xy-opening-page .xy-boot .xy-boot-status{display:none!important}
+.xy-opening-page .xy-boot .xy-agreement{padding:6px 8px!important}
+}
+@container (min-width:980px){
+.xy-opening-page .xy-boot{width:min(100%,calc((var(--xy-visible-h,100dvh) - 4px) * 16 / 9))!important;aspect-ratio:16/9!important;height:auto!important;min-height:0!important}
+}
+.xy-opening-page .xy-view[data-xy-view="wizard"]{min-height:clamp(380px,calc(var(--xy-visible-h,100dvh) * .46),520px)!important}
+.xy-opening-page .xy-view[data-xy-view="workshop"]>.xy-panel{min-height:clamp(500px,calc(var(--xy-visible-h,100dvh) * .64),700px);height:min(820px,calc(var(--xy-visible-h,100dvh) * .9))!important}
 </style>
 
 <div class="xy-opening-loading" data-xy-loading><div class="xy-loading-core"><span class="xy-loading-ring"></span><span class="xy-loading-text">星月学园 · 载入中</span></div></div>
@@ -921,6 +973,41 @@
   </div>
 </div>
 <input type="file" accept="application/json,.json" data-xy-hidden-file hidden>
+<script>
+(() => {
+  const root = (document.currentScript && document.currentScript.closest && document.currentScript.closest('.xy-opening-page')) || document.querySelector('.xy-opening-page');
+  if (!root || root.dataset.xyViewportBound) return;
+  root.dataset.xyViewportBound = '1';
+  let frame = 0;
+  function syncViewport() {
+    frame = 0;
+    const rect = root.getBoundingClientRect ? root.getBoundingClientRect() : { width: 0 };
+    const vv = window.visualViewport;
+    const width = Math.max(280, Math.round((vv && vv.width) || window.innerWidth || document.documentElement.clientWidth || rect.width || 390));
+    const height = Math.max(320, Math.round((vv && vv.height) || window.innerHeight || document.documentElement.clientHeight || 720));
+    const rootWidth = Math.max(280, Math.round(rect.width || width));
+    const scale = Math.max(.76, Math.min(1, Math.min(rootWidth / 420, height / 760)));
+    root.style.setProperty('--xy-visible-w', width + 'px');
+    root.style.setProperty('--xy-visible-h', height + 'px');
+    root.style.setProperty('--xy-page-scale', scale.toFixed(3));
+    root.dataset.xyShortViewport = height < 700 ? '1' : '0';
+  }
+  function scheduleViewportSync() {
+    if (frame) cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(syncViewport);
+  }
+  scheduleViewportSync();
+  try { window.addEventListener('resize', scheduleViewportSync, { passive: true }); } catch (_e) {}
+  try { window.addEventListener('orientationchange', scheduleViewportSync, { passive: true }); } catch (_e) {}
+  try {
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', scheduleViewportSync, { passive: true });
+      window.visualViewport.addEventListener('scroll', scheduleViewportSync, { passive: true });
+    }
+  } catch (_e) {}
+  try { if (window.ResizeObserver) new ResizeObserver(scheduleViewportSync).observe(root); } catch (_e) {}
+})();
+</script>
 <script>
 (() => {
   const root = document.currentScript && document.currentScript.closest('.xy-opening-page');
