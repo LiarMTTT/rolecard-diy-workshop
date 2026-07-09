@@ -1,8 +1,8 @@
 (() => {
-  const VERSION = '3.3.6';
-  const BUTTON_NAME = '星月私立高等学院 控制中心 v3.3.6';
+  const VERSION = '3.3.7';
+  const BUTTON_NAME = '星月私立高等学院 控制中心 v3.3.7';
   // 任务3.3：单一真相源 RUNTIME_BASE_URL；media_library.js/status_bar_regex.html 从 window.XY_RT_BASE 读（降级保留内联硬编码）
-  const RUNTIME_BASE_URL = 'https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.6';
+  const RUNTIME_BASE_URL = 'https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.7';
   // 任务3.4：开局草稿 localStorage key 提顶层常量，版本 bump 只改这一处（bindOpeningPage 内层 STORAGE_KEY 须与此保持同步）
   const OPENING_DRAFT_KEY = 'xingyue-opening-draft-v333';
   const CONTROL_PANEL_ID = 'xingyue-control-center-panel';
@@ -79,7 +79,7 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.3.6-status-drawer-placement-20260709';
+  const GIT_RUNTIME_REVISION = '3.3.7-status-drawer-placement-20260709';
   const GIT_RUNTIME_REVISION_KEY = 'xingyue-control-center-runtime-revision';
   function notifyGitRuntimeRevision() {
     try {
@@ -1255,7 +1255,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.6 的当前楼变量重算器，只输出一个内含 <analysis> 和 <JSONPatch> 的 <UpdateVariable> 块，不生成正文。' },
+        { role: 'system', content: '你是星月 3.3.7 的当前楼变量重算器，只输出一个内含 <analysis> 和 <JSONPatch> 的 <UpdateVariable> 块，不生成正文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim(), '整楼重算：依据当前楼正文重新推导本楼变量变化。');
@@ -1289,7 +1289,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.6 的变量定点修正器，只输出一个内含 <analysis> 和 <JSONPatch> 的最小 <UpdateVariable> 块，不生成正文。' },
+        { role: 'system', content: '你是星月 3.3.7 的变量定点修正器，只输出一个内含 <analysis> 和 <JSONPatch> 的最小 <UpdateVariable> 块，不生成正文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim(), '定点修正：按玩家要求只更新指定变量。');
@@ -1421,7 +1421,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.6 的当前楼变量重算器，依据玩家给定的变量预分析与正文，只输出一个内含 <analysis> 和 <JSONPatch> 的 <UpdateVariable> 块，不生成正文。' },
+        { role: 'system', content: '你是星月 3.3.7 的当前楼变量重算器，依据玩家给定的变量预分析与正文，只输出一个内含 <analysis> 和 <JSONPatch> 的 <UpdateVariable> 块，不生成正文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim(), analysis || '按玩家编辑后的预分析重算本楼变量。');
@@ -1494,7 +1494,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.6 的变量格式修复器，只输出一个内含 <analysis> 和 <JSONPatch> 的最小 <UpdateVariable> 块，只修格式不改语义。' },
+        { role: 'system', content: '你是星月 3.3.7 的变量格式修复器，只输出一个内含 <analysis> 和 <JSONPatch> 的最小 <UpdateVariable> 块，只修格式不改语义。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim(), 'LLM 格式修复：只修正变量结构和类型问题，不改变语义。');
@@ -2332,8 +2332,8 @@
   // 真身 status-bar.html 从 git runtime 拉取(双源回退)，Blob iframe 挂进顶层居中面板(绝对像素·绕 transform 劫持)。
   // 桥：CC 先在顶层窗口放 __XY_HUD_BRIDGE 函数包(函数与文档无关可跨窗)，blob 内同步引导脚本在**解析期**
   // 取包装桥(与 3.2.0 已证变量桥同模式、无 load 竞态)；getVariables 走 Mvu+最新楼强取(N4 数据源切 latest)。
-  const HUD_RT_BASE = 'https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.6';
-  const HUD_RT_BASE_CF = 'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.6';
+  const HUD_RT_BASE = 'https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.7';
+  const HUD_RT_BASE_CF = 'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.7';
   let hudPanel = null;
   let hudDrawer = null;
   let hudBlobUrl = null;
@@ -3082,7 +3082,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.6 的楼层内临时旁观视角生成器。结果只供玩家娱乐阅读，不进入后续上下文。' },
+        { role: 'system', content: '你是星月 3.3.7 的楼层内临时旁观视角生成器。结果只供玩家娱乐阅读，不进入后续上下文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim();
@@ -3094,7 +3094,7 @@
     renderPanel();
     return lastNpcPerspective;
   }
-  // 3.3.6:制造/NPC 面板 UI 已删,结算链在 07_craft,TA 浮窗在 12_npc_view
+  // 3.3.7:制造/NPC 面板 UI 已删,结算链在 07_craft,TA 浮窗在 12_npc_view
 
   function ensurePanel() {
     const doc = hostDocument();
@@ -4647,7 +4647,7 @@
         render();
       }
       if (action === 'export-opening-draft') {
-        downloadJson('xingyue-opening-draft-v3.3.6.json', readDraft());
+        downloadJson('xingyue-opening-draft-v3.3.7.json', readDraft());
       }
       if (action === 'clear-opening-draft' && confirm('确认清空当前开局草稿？')) {
         localStorage.removeItem(STORAGE_KEY);
@@ -4744,8 +4744,8 @@
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html',
-    'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.6/opening-page.html',
-    'https://43-132-171-157.sslip.io/runtime/xingyue/3.3.6/opening-page.html',
+    'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.7/opening-page.html',
+    'https://43-132-171-157.sslip.io/runtime/xingyue/3.3.7/opening-page.html',
   ];
   function loadRemoteOpeningPages(doc) {
     try {
