@@ -89,14 +89,17 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.3.8-stability-r6-20260710';
+  const GIT_RUNTIME_REVISION = '3.3.8-stability-r7-20260710';
   const GIT_RUNTIME_REVISION_KEY = 'xingyue-control-center-runtime-revision';
   const OMNI_FLAT_STYLE_ID = 'xingyue-omni-flat-style';
   const OMNI_FLAT_CSS = [
     '[data-xy-omni="done"] .xy-omni-body{background:transparent!important;border:0!important;}',
-    '[data-xy-omni="done"] .xy-omni-result,[data-xy-omni="done"] .xy-omni-analysis,[data-xy-omni="done"] .xy-omni-result-head,[data-xy-omni="done"] .xy-omni-patch,[data-xy-omni="done"] .xy-omni-validation,[data-xy-omni="done"] .xy-omni-valid-note,[data-xy-omni="done"] .xy-omni-errors{background:transparent!important;border:0!important;box-shadow:none!important;outline:0!important;}',
-    '[data-xy-omni="done"] .xy-omni-result,[data-xy-omni="done"] .xy-omni-analysis,[data-xy-omni="done"] .xy-omni-patch,[data-xy-omni="done"] .xy-omni-validation,[data-xy-omni="done"] .xy-omni-complete{padding:0!important;}',
+    '[data-xy-omni="done"] .xy-omni-result,[data-xy-omni="done"] .xy-omni-stream,[data-xy-omni="done"] .xy-omni-analysis,[data-xy-omni="done"] .xy-omni-analysis-text,[data-xy-omni="done"] .xy-omni-result-head,[data-xy-omni="done"] .xy-omni-patch,[data-xy-omni="done"] .xy-omni-validation,[data-xy-omni="done"] .xy-omni-valid-note,[data-xy-omni="done"] .xy-omni-errors{background:transparent!important;border:0!important;box-shadow:none!important;outline:0!important;}',
+    '[data-xy-omni="done"] .xy-omni-result,[data-xy-omni="done"] .xy-omni-stream,[data-xy-omni="done"] .xy-omni-analysis,[data-xy-omni="done"] .xy-omni-analysis-text,[data-xy-omni="done"] .xy-omni-patch,[data-xy-omni="done"] .xy-omni-validation,[data-xy-omni="done"] .xy-omni-complete{padding:0!important;}',
+    '[data-xy-omni="done"] .xy-omni-stream{min-width:0!important;max-height:360px!important;overflow:auto!important;}',
     '[data-xy-omni="done"] .xy-omni-analysis{color:#a9c0cd!important;}',
+    '[data-xy-omni="done"] .xy-omni-analysis-text,[data-xy-omni="done"] .xy-omni-patch{max-width:100%!important;max-height:none!important;overflow:visible!important;white-space:pre-wrap!important;overflow-wrap:anywhere!important;word-break:break-word!important;}',
+    '@media(max-width:620px){[data-xy-omni="done"] .xy-omni-stream{max-height:260px!important;}}',
     '[data-xy-omni="done"] .xy-omni-complete{background:transparent!important;border:0!important;box-shadow:none!important;}',
     '[data-xy-omni="done"] .xy-omni-grid{display:block!important;background:transparent!important;border:0!important;box-shadow:none!important;}',
     '[data-xy-omni="done"] .xy-omni-cell{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;}',
@@ -551,15 +554,16 @@
     const valid = result.state === 'ok';
     const analysisText = result.analysis || '未解析到 <analysis> 内容';
     const patchText = result.displayJson || result.jsonText || '未解析到 <JSONPatch> 数组';
-    const feedback = result.messages.length
+    const feedback = !valid && result.messages.length
       ? '<div class="xy-omni-errors"><ul>' + result.messages.map(item => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul></div>'
-      : '<div class="xy-omni-valid-note">JSONPatch 格式正确</div>';
+      : '';
     return '<div class="xy-omni-result ' + (valid ? 'is-ok' : 'is-error') + '" data-xy-omni-state="' + result.state + '">'
-      + '<section class="xy-omni-analysis"><span class="xy-omni-analysis-label">预分析</span><pre class="xy-omni-analysis-text">' + escapeHtml(analysisText) + '</pre></section>'
-      + '<div class="xy-omni-result-head"><h4>JSONPatch</h4><span class="xy-omni-validation">' + (valid ? 'VALID' : 'INVALID') + '</span></div>'
+      + '<div class="xy-omni-stream">'
+      + '<pre class="xy-omni-analysis-text">' + escapeHtml(analysisText) + '</pre>'
       + '<pre class="xy-omni-patch">' + escapeHtml(patchText) + '</pre>'
+      + '<span class="xy-omni-validation">' + (valid ? 'VALID' : 'INVALID') + '</span>'
       + feedback
-      + '</div>';
+      + '</div></div>';
   }
   function assertOptionalString(value, name, maxLength) {
     if (value === undefined || value === null) return;
