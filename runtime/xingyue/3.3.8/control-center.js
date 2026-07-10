@@ -5242,7 +5242,7 @@
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.8/opening-page.html?v=' + OPENING_PAGE_REVISION,
-    'https://43-132-171-157.sslip.io/runtime/xingyue/3.3.8/opening-page.html?v=' + OPENING_PAGE_REVISION,
+    'https://raw.githubusercontent.com/LiarMTTT/rolecard-diy-workshop/main/runtime/xingyue/3.3.8/opening-page.html?v=' + OPENING_PAGE_REVISION,
   ];
   function safeOpeningUrl(value) {
     const url = String(value || '').trim();
