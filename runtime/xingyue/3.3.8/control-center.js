@@ -89,7 +89,7 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.3.8-stability-r3-20260710';
+  const GIT_RUNTIME_REVISION = '3.3.8-stability-r4-20260710';
   const GIT_RUNTIME_REVISION_KEY = 'xingyue-control-center-runtime-revision';
   function notifyGitRuntimeRevision() {
     try {
@@ -517,11 +517,13 @@
   function renderOmniDoneContent(rawInput, floorId, blockIndex) {
     const result = analyzeOmniUpdateBlock(rawInput, floorId, blockIndex);
     const valid = result.state === 'ok';
+    const analysisText = result.analysis || '未解析到 <analysis> 内容';
     const patchText = result.displayJson || result.jsonText || '未解析到 <JSONPatch> 数组';
     const feedback = result.messages.length
       ? '<div class="xy-omni-errors"><ul>' + result.messages.map(item => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul></div>'
       : '<div class="xy-omni-valid-note">JSONPatch 格式正确</div>';
     return '<div class="xy-omni-result ' + (valid ? 'is-ok' : 'is-error') + '" data-xy-omni-state="' + result.state + '">'
+      + '<section class="xy-omni-analysis"><span class="xy-omni-analysis-label">预分析</span><pre class="xy-omni-analysis-text">' + escapeHtml(analysisText) + '</pre></section>'
       + '<div class="xy-omni-result-head"><h4>JSONPatch</h4><span class="xy-omni-validation">' + (valid ? 'VALID' : 'INVALID') + '</span></div>'
       + '<pre class="xy-omni-patch">' + escapeHtml(patchText) + '</pre>'
       + feedback
