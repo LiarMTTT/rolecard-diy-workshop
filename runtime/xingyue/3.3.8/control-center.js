@@ -89,7 +89,7 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.3.8-stability-20260710';
+  const GIT_RUNTIME_REVISION = '3.3.8-stability-r2-20260710';
   const GIT_RUNTIME_REVISION_KEY = 'xingyue-control-center-runtime-revision';
   function notifyGitRuntimeRevision() {
     try {
@@ -3802,6 +3802,7 @@
             root.style.setProperty('--xy-device-pixel-ratio', dpr.toFixed(3));
             root.style.setProperty('--xy-page-scale', pageScale.toFixed(3));
             root.dataset.xyViewportTier = tier;
+            root.dataset.xyHostTight = tier === 'compact' && rootWidth < 280 && visibleHeight < 520 ? '1' : '0';
             root.dataset.xyShortViewport = visibleHeight < 700 ? '1' : '0';
           } catch (_e) {}
         };
@@ -5237,8 +5238,8 @@
   // first_mes 仅放 [data-xy-opening-remote] 短标记；控制中心 fetch 远程开局页 + 注入 + 绑定（display-only，绝不进 LLM）。
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
-  const OPENING_PAGE_REVISION = '20260710-338-opening-safe-viewport';
-  const OPENING_PAGE_SHA256 = '1fa528fe671fbc8a97f32411d6f6e593ae8a029d3604f686165c90e3c650313c';
+  const OPENING_PAGE_REVISION = '20260710-338-opening-host-tight';
+  const OPENING_PAGE_SHA256 = 'e9fa36cf4e7e0ad0a72390740d9790d46964d1fe14e545a926c9eb89bc4d1f68';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.8/opening-page.html?v=' + OPENING_PAGE_REVISION,
