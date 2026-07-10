@@ -1,44 +1,40 @@
 <div style="width:95%;margin:12px auto;">
-<details class="omni-sync-done" open style="
-    background:linear-gradient(180deg,#0a1422 0%,#050912 100%);
-    border:1px solid #2a4858;
-    border-left:3px solid #4fd97a;
-    box-shadow:0 0 12px rgba(80,217,122,0.15),inset 0 0 20px rgba(0,0,0,0.5);
-    overflow:hidden;
-    clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
-">
-    <summary style="padding:10px 14px;color:#d4dde2;cursor:pointer;list-style:none;font-weight:bold;display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,rgba(80,217,122,0.06) 0%,transparent 100%);font-family:'Consolas',monospace;letter-spacing:2px;">
-        <span style="color:#4fd97a;font-size:.9em;text-shadow:0 0 8px #4fd97a;">●</span>
-        <span style="flex:1;">〔 OMNI-NEXUS // VARIABLE STREAM 〕</span>
-        <span style="font-size:.7em;color:#4fd97a;border:1px solid #4fd97a;padding:1px 6px;letter-spacing:1px;">COMPLETE</span>
-    </summary>
-    <div class="xy-omni-body">
-        {{CONTENT}}
-    </div>
-</details></div>
+<details class="omni-sync-done" open style="background:linear-gradient(180deg,#0a1422 0%,#050912 100%);border:1px solid #2a4858;border-left:3px solid #4fd97a;box-shadow:0 0 12px rgba(80,217,122,.15),inset 0 0 20px rgba(0,0,0,.5);overflow:hidden;clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);">
+  <summary class="xy-omni-summary">
+    <span class="xy-omni-led">●</span>
+    <span class="xy-omni-title">〔 OMNI-NEXUS // VARIABLE STREAM 〕</span>
+    <span class="xy-omni-complete">COMPLETE</span>
+    <span class="xy-omni-tools">
+      <button type="button" data-xy-analysis-edit title="查看或编辑本楼预分析">预分析</button>
+      <button type="button" data-xy-var-tune title="微调本楼变量">微调</button>
+    </span>
+  </summary>
+  <div class="xy-omni-body">{{CONTENT}}</div>
+</details>
+</div>
 <style>
 .omni-sync-done summary::marker{display:none}
 .omni-sync-done summary::-webkit-details-marker{display:none}
+.xy-omni-summary{padding:10px 14px;color:#d4dde2;cursor:pointer;list-style:none;font-weight:bold;display:flex;align-items:center;gap:8px;background:linear-gradient(90deg,rgba(80,217,122,.06),transparent);font-family:Consolas,monospace;letter-spacing:0}
+.xy-omni-led{color:#4fd97a;font-size:.9em;text-shadow:0 0 8px #4fd97a}
+.xy-omni-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xy-omni-complete{font-size:.7em;color:#4fd97a;border:1px solid #4fd97a;padding:2px 6px;letter-spacing:0}
+.xy-omni-tools{display:flex;gap:6px;flex:0 0 auto}
+.xy-omni-tools button{min-height:32px;padding:4px 10px;border-radius:3px;font:inherit;font-size:12px;letter-spacing:0;cursor:pointer;background:rgba(80,217,122,.08);color:#d4f5e0;border:1px solid rgba(80,217,122,.5)}
+.xy-omni-tools button[data-xy-analysis-edit]{color:#cdeef7;background:rgba(79,208,230,.08);border-color:rgba(79,208,230,.55)}
+.xy-omni-tools button:hover{background:rgba(80,217,122,.18)}
+.xy-omni-tools button[data-xy-analysis-edit]:hover{background:rgba(79,208,230,.18)}
 .xy-omni-body{padding:10px 12px;background:#050912;border-top:1px solid rgba(42,72,88,.6);font-family:Consolas,monospace;color:#8b9aac}
-.xy-omni-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;align-items:stretch}
-.xy-omni-pane{min-width:0;border:1px solid rgba(42,72,88,.72);background:rgba(255,255,255,.025);padding:8px;display:flex;flex-direction:column;gap:7px}
-.xy-omni-pane h4{margin:0;color:#d4dde2;font-size:12px;letter-spacing:1px;font-weight:bold}
-.xy-omni-pane pre{margin:0;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;color:#9dadbf;font-size:12px;line-height:1.5}
-.xy-omni-op-list{display:flex;flex-direction:column;gap:5px;max-height:220px;overflow:auto}
-.xy-omni-op{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px;align-items:start;border-left:3px solid currentColor;background:rgba(255,255,255,.025);padding:5px 6px;font-size:12px;line-height:1.45}
-.xy-omni-op code{white-space:pre-wrap;word-break:break-word;color:inherit;font-family:inherit}
-.xy-omni-op.is-ok{color:#4fd97a;background:rgba(80,217,122,.08)}
-.xy-omni-op.is-error,.xy-omni-empty.is-error{color:#e07b7b;background:rgba(224,123,123,.1)}
-.xy-omni-op.is-warn,.xy-omni-empty.is-warn{color:#e0b27b;background:rgba(224,178,123,.1)}
-.xy-omni-empty{border-left:3px solid currentColor;padding:6px;font-size:12px;white-space:pre-wrap;word-break:break-word}
-.xy-omni-status{border:1px solid currentColor;border-left-width:3px;padding:6px 8px;background:rgba(255,255,255,.03);font-size:12px}
-.xy-omni-status--ok{color:#4fd97a}
-.xy-omni-status--error{color:#e07b7b}
-.xy-omni-status--warn{color:#e0b27b}
-.xy-omni-pane ul{margin:0;padding-left:16px;display:grid;gap:4px;font-size:12px;line-height:1.45;color:#9dadbf}
-.xy-omni-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}
-.xy-omni-actions button{font:inherit;font-size:12px;color:#d4f5e0;background:rgba(80,217,122,.09);border:1px solid rgba(80,217,122,.46);padding:3px 8px;cursor:pointer;border-radius:3px}
-.xy-omni-analysis-pane .xy-omni-actions button{color:#cdeef7;background:rgba(79,208,230,.09);border-color:rgba(79,208,230,.5)}
-@media(max-width:980px){.xy-omni-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:620px){.xy-omni-grid{grid-template-columns:1fr}.xy-omni-pane pre,.xy-omni-op-list{max-height:180px}}
+.xy-omni-result{min-width:0;border:1px solid currentColor;border-left-width:3px;background:rgba(255,255,255,.025);padding:9px;display:flex;flex-direction:column;gap:8px}
+.xy-omni-result.is-ok{color:#4fd97a;background:rgba(80,217,122,.055)}
+.xy-omni-result.is-error{color:#e07b7b;background:rgba(224,123,123,.07)}
+.xy-omni-result-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.xy-omni-result-head h4{margin:0;color:#d4dde2;font-size:12px;letter-spacing:0}
+.xy-omni-validation{border:1px solid currentColor;padding:2px 7px;font-size:11px;line-height:1.2}
+.xy-omni-patch{margin:0;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#03070d;border:1px solid rgba(139,154,172,.24);padding:8px;color:inherit;font:12px/1.55 Consolas,monospace}
+.xy-omni-valid-note{font-size:12px;color:#4fd97a}
+.xy-omni-errors{font-size:12px;color:#e8a0a0}
+.xy-omni-errors ul{margin:0;padding-left:18px;display:grid;gap:4px}
+@media(max-width:620px){.xy-omni-summary{flex-wrap:wrap}.xy-omni-title{flex-basis:calc(100% - 90px)}.xy-omni-tools{width:100%}.xy-omni-tools button{flex:1}.xy-omni-patch{max-height:210px}}
+@media(pointer:coarse){.xy-omni-tools button{min-height:44px}}
 </style>

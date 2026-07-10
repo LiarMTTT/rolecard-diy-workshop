@@ -89,7 +89,7 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.3.8-stability-r2-20260710';
+  const GIT_RUNTIME_REVISION = '3.3.8-stability-r3-20260710';
   const GIT_RUNTIME_REVISION_KEY = 'xingyue-control-center-runtime-revision';
   function notifyGitRuntimeRevision() {
     try {
@@ -412,9 +412,21 @@
     const m = String(text || '').match(re);
     return m ? m[1].trim() : '';
   }
+  function extractUpdateBlocks(text) {
+    return [...String(text || '').matchAll(/<UpdateVariable(?:variable)?>[\s\S]*?<\/UpdateVariable(?:variable)?>/gi)].map(match => match[0]);
+  }
   function extractUpdateBlock(text) {
-    const all = [...String(text || '').matchAll(/<UpdateVariable(?:variable)?>[\s\S]*?<\/UpdateVariable(?:variable)?>/gi)];
-    return all.length ? all[all.length - 1][0] : '';
+    const all = extractUpdateBlocks(text);
+    return all.length ? all[all.length - 1] : '';
+  }
+  function rawUpdateBlockAt(floorId, blockIndex) {
+    const message = messageInfoAt(floorId);
+    const blocks = extractUpdateBlocks(message.text);
+    if (!blocks.length) return '';
+    const hasIndex = blockIndex !== null && blockIndex !== undefined && blockIndex !== '';
+    if (!hasIndex) return blocks[blocks.length - 1];
+    const index = Number(blockIndex);
+    return Number.isInteger(index) && index >= 0 && index < blocks.length ? blocks[index] : '';
   }
   function extractJsonPatchText(text) {
     return extractTagContent(text, 'JSONPatch');
@@ -445,85 +457,20 @@
     });
     return problems;
   }
-  function pointerParts(path) {
-    return String(path || '').replace(/^\//, '').split('/').filter(Boolean).map(decodePointer);
-  }
-  function hasOwn(container, key) {
-    return container && typeof container === 'object' && Object.prototype.hasOwnProperty.call(container, key);
-  }
-  function getPointerValue(root, path) {
-    const parts = pointerParts(path);
-    let cur = root;
-    for (const part of parts) {
-      if (Array.isArray(cur)) {
-        const idx = Number(part);
-        if (!Number.isInteger(idx) || idx < 0 || idx >= cur.length) return { ok: false };
-        cur = cur[idx];
-      } else if (hasOwn(cur, part)) {
-        cur = cur[part];
-      } else {
-        return { ok: false };
-      }
-    }
-    return { ok: true, value: cur };
-  }
-  function setPointerValue(root, path, value, mode) {
-    const parts = pointerParts(path);
-    if (!parts.length) return '禁止直接替换根对象';
-    let cur = root;
-    for (let i = 0; i < parts.length - 1; i += 1) {
-      const key = parts[i];
-      if (Array.isArray(cur)) {
-        const idx = Number(key);
-        if (!Number.isInteger(idx) || idx < 0 || idx >= cur.length) return '父路径不存在：/' + parts.slice(0, i + 1).join('/');
-        cur = cur[idx];
-      } else if (hasOwn(cur, key)) {
-        cur = cur[key];
-      } else {
-        return '父路径不存在：/' + parts.slice(0, i + 1).join('/');
-      }
-      if (!cur || typeof cur !== 'object') return '父路径不是对象：/' + parts.slice(0, i + 1).join('/');
-    }
-    const key = parts[parts.length - 1];
-    if (Array.isArray(cur)) {
-      const idx = key === '-' ? cur.length : Number(key);
-      if (!Number.isInteger(idx) || idx < 0 || idx > cur.length) return '数组下标非法：' + path;
-      if (mode === 'replace' && idx >= cur.length) return 'replace 路径不存在：' + path;
-      if (mode === 'remove') {
-        if (idx >= cur.length) return 'remove 路径不存在：' + path;
-        cur.splice(idx, 1);
-      } else if (mode === 'add') {
-        cur.splice(idx, 0, clone(value));
-      } else {
-        cur[idx] = clone(value);
-      }
-      return '';
-    }
-    const exists = hasOwn(cur, key);
-    if (mode === 'replace' && !exists) return 'replace 路径不存在：' + path;
-    if (mode === 'remove' && !exists) return 'remove 路径不存在：' + path;
-    if (mode === 'remove') delete cur[key];
-    else cur[key] = clone(value);
-    return '';
-  }
-  function applyPatchStrict(root, ops) {
-    const next = clone(root || {});
+  function validateUpdateBlockProtocol(block) {
+    const text = String(block || '');
+    const count = pattern => (text.match(pattern) || []).length;
+    const analysisOpen = count(/<analysis\b[^>]*>/gi);
+    const analysisClose = count(/<\/analysis>/gi);
+    const patchOpen = count(/<JSONPatch\b[^>]*>/gi);
+    const patchClose = count(/<\/JSONPatch>/gi);
     const problems = [];
-    (Array.isArray(ops) ? ops : []).forEach((op, index) => {
-      if (!op || typeof op !== 'object') return;
-      if (op.op === 'move') {
-        const from = getPointerValue(next, op.from);
-        if (!from.ok) { problems.push('op #' + (index + 1) + ' from 路径不存在：' + op.from); return; }
-        const removeErr = setPointerValue(next, op.from, undefined, 'remove');
-        if (removeErr) { problems.push('op #' + (index + 1) + ' ' + removeErr); return; }
-        const addErr = setPointerValue(next, op.path, from.value, 'add');
-        if (addErr) problems.push('op #' + (index + 1) + ' ' + addErr);
-        return;
-      }
-      const err = setPointerValue(next, op.path, op.value, op.op);
-      if (err) problems.push('op #' + (index + 1) + ' ' + err);
-    });
-    return { next, problems };
+    if (analysisOpen !== 1 || analysisClose !== 1) problems.push('<analysis> 标签必须且只能出现一次');
+    if (patchOpen !== 1 || patchClose !== 1) problems.push('<JSONPatch> 标签必须且只能出现一次');
+    if (!problems.length && !/^<UpdateVariable(?:variable)?\b[^>]*>\s*<analysis\b[^>]*>[\s\S]*?<\/analysis>\s*<JSONPatch\b[^>]*>[\s\S]*?<\/JSONPatch>\s*<\/UpdateVariable(?:variable)?>$/i.test(text)) {
+      problems.push('标签顺序必须为 <analysis> 后接 <JSONPatch>，且块内不能夹带其它内容');
+    }
+    return problems;
   }
   function wrapUpdateVariableBlock(analysis, opsOrJsonText) {
     let jsonText;
@@ -539,66 +486,45 @@
     if (!parsed.ok) return text;
     return wrapUpdateVariableBlock(analysis, parsed.ops);
   }
-  function analyzeOmniUpdateBlock(rawInput, floorId) {
-    const raw = decodeHtmlEntities(rawInput);
-    const block = /<UpdateVariable/i.test(raw) ? (extractUpdateBlock(raw) || raw) : '<UpdateVariable>' + raw + '</UpdateVariable>';
+  function analyzeOmniUpdateBlock(rawInput, floorId, blockIndex) {
+    const authoritativeBlock = floorId == null ? '' : rawUpdateBlockAt(floorId, blockIndex);
+    const raw = String(authoritativeBlock || decodeHtmlEntities(rawInput) || '').trim();
+    const matchedBlock = extractUpdateBlock(raw);
+    const hasWrapper = !!matchedBlock;
+    const block = matchedBlock || (raw ? '<UpdateVariable>' + raw + '</UpdateVariable>' : '');
     const analysis = extractTagContent(block, 'analysis');
     const parsed = parseJsonPatchOps(block);
     const messages = [];
+    if (!hasWrapper) messages.push('缺少完整 <UpdateVariable> 块');
+    else messages.push(...validateUpdateBlockProtocol(block));
     if (!analysis) messages.push('缺少内置 <analysis>');
     if (!parsed.ok) messages.push(parsed.error);
-    const opProblems = parsed.ok ? validatePatchOps(parsed.ops) : [];
-    messages.push(...opProblems);
-    let state = messages.length ? 'error' : 'warn';
-    let schemaMessage = '';
-    if (!messages.length) {
-      let root = null;
-      try { root = statRoot(getMvuDataAt(floorId)); } catch (_) { root = null; }
-      const Schema = getMvuSchema();
-      if (!root || typeof root !== 'object' || !Schema || typeof Schema.parse !== 'function') {
-        state = 'warn';
-        schemaMessage = 'schema 或当前楼变量不可用，无法离线确认写入后格式';
-      } else {
-        const applied = applyPatchStrict(root, parsed.ops);
-        if (applied.problems.length) {
-          state = 'error';
-          messages.push(...applied.problems);
-        } else {
-          try {
-            const repaired = Schema.parse(JSON.parse(JSON.stringify(applied.next)));
-            if (JSON.stringify(repaired) !== JSON.stringify(applied.next)) {
-              state = 'error';
-              messages.push('写入后需要 schema 回正，存在格式类型问题');
-            } else {
-              state = 'ok';
-              schemaMessage = 'JSONPatch 可解析，op 合法，写入后符合 schema';
-            }
-          } catch (error) {
-            state = 'error';
-            messages.push('写入后 schema 无法解析：' + (error && error.message || error));
-          }
-        }
-      }
-    }
-    return { raw, block, analysis, ops: parsed.ops, jsonText: parsed.jsonText, state, messages, schemaMessage };
-  }
-  function renderOmniDoneContent(rawInput, floorId) {
-    const result = analyzeOmniUpdateBlock(rawInput, floorId);
-    const palette = {
-      ok: { color: '#4fd97a', label: '格式正确' },
-      warn: { color: '#e0b27b', label: '无法离线确认' },
-      error: { color: '#e07b7b', label: '格式错误' },
+    if (parsed.ok) messages.push(...validatePatchOps(parsed.ops));
+    const state = messages.length ? 'error' : 'ok';
+    const displayJson = parsed.ok ? JSON.stringify(parsed.ops, null, 2) : parsed.jsonText;
+    return {
+      raw,
+      block,
+      analysis,
+      ops: parsed.ops,
+      jsonText: parsed.jsonText,
+      displayJson,
+      state,
+      messages,
+      source: authoritativeBlock ? 'message' : 'rendered-fallback',
     };
-    const tone = palette[result.state] || palette.warn;
-    const opRows = result.ops.length
-      ? result.ops.map((op, index) => '<div class="xy-omni-op ' + (result.state === 'ok' ? 'is-ok' : (result.state === 'warn' ? 'is-warn' : 'is-error')) + '"><span>#' + (index + 1) + '</span><code>' + escapeHtml(JSON.stringify(op)) + '</code></div>').join('')
-      : '<div class="xy-omni-empty ' + (result.state === 'error' ? 'is-error' : 'is-warn') + '">' + escapeHtml(result.jsonText || '未解析到 JSONPatch 数组') + '</div>';
-    const statusText = result.messages.length ? result.messages : [result.schemaMessage || '等待校验结果'];
-    return '<div class="xy-omni-grid" data-xy-omni-state="' + result.state + '">'
-      + '<section class="xy-omni-pane xy-omni-analysis-pane"><h4>预分析</h4><pre>' + escapeHtml(result.analysis || '缺少内置 <analysis>') + '</pre><div class="xy-omni-actions"><button type="button" data-xy-analysis-edit>编辑</button><button type="button" data-xy-analysis-reroll>重算</button></div></section>'
-      + '<section class="xy-omni-pane"><h4>JSONPatch</h4><div class="xy-omni-op-list">' + opRows + '</div></section>'
-      + '<section class="xy-omni-pane"><h4>格式校验</h4><div class="xy-omni-status xy-omni-status--' + result.state + '" style="border-color:' + tone.color + ';color:' + tone.color + '"><b>' + tone.label + '</b></div><ul>' + statusText.map(item => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul></section>'
-      + '<section class="xy-omni-pane"><h4>原始块 / 操作</h4><pre>' + escapeHtml(result.block) + '</pre><div class="xy-omni-actions"><button type="button" data-xy-var-tune>微调</button></div></section>'
+  }
+  function renderOmniDoneContent(rawInput, floorId, blockIndex) {
+    const result = analyzeOmniUpdateBlock(rawInput, floorId, blockIndex);
+    const valid = result.state === 'ok';
+    const patchText = result.displayJson || result.jsonText || '未解析到 <JSONPatch> 数组';
+    const feedback = result.messages.length
+      ? '<div class="xy-omni-errors"><ul>' + result.messages.map(item => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul></div>'
+      : '<div class="xy-omni-valid-note">JSONPatch 格式正确</div>';
+    return '<div class="xy-omni-result ' + (valid ? 'is-ok' : 'is-error') + '" data-xy-omni-state="' + result.state + '">'
+      + '<div class="xy-omni-result-head"><h4>JSONPatch</h4><span class="xy-omni-validation">' + (valid ? 'VALID' : 'INVALID') + '</span></div>'
+      + '<pre class="xy-omni-patch">' + escapeHtml(patchText) + '</pre>'
+      + feedback
       + '</div>';
   }
   function assertOptionalString(value, name, maxLength) {
@@ -1220,36 +1146,71 @@
   }
   // B17 变量微调工具：修一个错变量不必重 roll 整条消息——省一次正文生成成本，所有 MVU 卡通用。
   // 共用写回三段式：generateRaw 只生成变量 → Mvu.parseMessage 解析 <UpdateVariable> → replaceMvuData 只写当前楼，不改正文、不动历史楼。
-  function variableGenerateRaw() {
+  let variableGenerationInFlight = false;
+  async function withBusyButton(button, busyText, task) {
+    const oldText = button?.textContent || '';
+    if (button) {
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = busyText || '正在重算…';
+    }
+    try { return await task(); }
+    finally {
+      if (button) {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = oldText;
+      }
+    }
+  }
+  function captureVariableOperationContext(floorId) {
+    const requestedFloor = floorId == null ? 'latest' : floorId;
+    const requestedMessage = messageInfoAt(requestedFloor);
+    const latestId = hudCurrentMsgId();
+    const resolvedFloor = requestedFloor === 'latest'
+      ? (requestedMessage.id != null && String(requestedMessage.id) !== 'latest' ? requestedMessage.id : latestId)
+      : requestedFloor;
+    if (resolvedFloor == null || String(resolvedFloor) === 'latest') throw new Error('无法锁定目标楼层，已取消变量重算');
+    const message = messageInfoAt(resolvedFloor);
+    return { floorId: resolvedFloor, messageText: String(message.text || ''), chatId: hudCurrentChatId() };
+  }
+  function assertVariableOperationContext(context) {
+    if (!context) return;
+    if (runtimeDestroyed) throw new Error('控制中心已重载，已取消本次变量写入');
+    if (String(context.chatId) !== hudCurrentChatId()) throw new Error('聊天已切换，已取消本次变量写入');
+    const current = messageInfoAt(context.floorId);
+    if (String(current.text || '') !== context.messageText) throw new Error('目标楼层或 swipe 已变化，已取消本次变量写入');
+  }
+  async function runVariableGenerationTransaction(floorId, task) {
+    if (variableGenerationInFlight) throw new Error('已有变量重算正在进行，请等待完成');
+    const context = captureVariableOperationContext(floorId);
+    variableGenerationInFlight = true;
+    const done = showRerollBubble('正在重算变量，请稍候…（只改变量、不动正文）');
+    try {
+      assertVariableOperationContext(context);
+      return await task(context);
+    } finally {
+      variableGenerationInFlight = false;
+      done();
+    }
+  }
+  function variableGenerateRaw(operationContext) {
     const helper = helperHost();
     const fn = helper?.generateRaw || window.generateRaw || hostWindow().generateRaw;
     if (typeof fn !== 'function') throw new Error('Tavern Helper generateRaw 不可用');
-    // 包一层：generateRaw（LLM，慢）期间显示持续气泡，完成/失败都关闭——所有 reroll/修正共用此入口，一处覆盖全部。
     return async function (opts) {
-      const done = showRerollBubble('正在重算变量，请稍候…（只改变量、不动正文）');
-      try { return await fn(opts); }
-      finally { done(); }
+      assertVariableOperationContext(operationContext);
+      const result = await fn.call(helper || hostWindow(), opts);
+      assertVariableOperationContext(operationContext);
+      return result;
     };
   }
-  async function writeRawToCurrentFloor(raw) {
-    const Mvu = mvuHost();
-    if (!Mvu?.replaceMvuData) throw new Error('MVU 写入接口尚未就绪');
-    if (!/<UpdateVariable/i.test(String(raw || ''))) throw new Error('结果未包含 <UpdateVariable> 块，已放弃写入');
-    const oldData = getCurrentMvuData();
-    let nextData = null;
-    if (typeof Mvu.parseMessage === 'function') {
-      try { nextData = await Mvu.parseMessage(String(raw), oldData); } catch (_) { nextData = null; }
-    }
-    if (!nextData) throw new Error('未能从结果解析出有效变量更新（格式不合规）');
-    nextData = validateHudMvuData(nextData);
-    await Mvu.replaceMvuData(nextData, { type: 'message', message_id: 'latest' });
-    emitHudSignal('data-changed', { force: true });
-  }
   async function rerollCurrentVariables() {
-    const generateRaw = variableGenerateRaw();
-    const oldData = getCurrentMvuData();
-    const root = statRoot(oldData);
-    const message = currentMessageInfo();
+    return runVariableGenerationTransaction('latest', async operationContext => {
+      const generateRaw = variableGenerateRaw(operationContext);
+      const oldData = getMvuDataAt(operationContext.floorId);
+      const root = statRoot(oldData);
+      const message = { text: operationContext.messageText };
     const prompt = [
       '当前楼正文：',
       (message.text || '（无法读取正文）').slice(0, 6000),
@@ -1269,19 +1230,22 @@
         { role: 'user', content: prompt },
       ],
     }) || '').trim(), '整楼重算：依据当前楼正文重新推导本楼变量变化。');
-    await writeRawToCurrentFloor(raw);
-    lastVariableFix = { kind: 'reroll', instruction: '（整楼重算）', raw, at: new Date().toISOString() };
-    toast('success', '当前楼变量已重算（正文未改、未消耗历史楼）');
-    renderPanel();
-    return lastVariableFix;
+      await writeRawToFloor(raw, operationContext.floorId, operationContext);
+      lastVariableFix = { kind: 'reroll', instruction: '（整楼重算）', raw, floorId: operationContext.floorId, chatId: operationContext.chatId, at: new Date().toISOString() };
+      toast('success', '当前楼变量已重算（正文未改、未消耗历史楼）');
+      renderPanel();
+      return lastVariableFix;
+    });
   }
-  async function previewVariableCorrection(instruction) {
+  async function previewVariableCorrection(instruction, floorId = 'latest') {
     instruction = String(instruction || '').trim();
     if (!instruction) throw new Error('请先用一句话写出要修正什么');
-    const generateRaw = variableGenerateRaw();
-    const oldData = getCurrentMvuData();
-    const root = statRoot(oldData);
-    const message = currentMessageInfo();
+    return runVariableGenerationTransaction(floorId, async operationContext => {
+      const targetFloor = operationContext.floorId;
+      const generateRaw = variableGenerateRaw(operationContext);
+      const oldData = getMvuDataAt(targetFloor);
+      const root = statRoot(oldData);
+      const message = { text: operationContext.messageText };
     const prompt = [
       '当前楼正文：',
       (message.text || '（无法读取正文）').slice(0, 4000),
@@ -1304,20 +1268,22 @@
       ],
     }) || '').trim(), '定点修正：按玩家要求只更新指定变量。');
     if (!/<UpdateVariable/i.test(raw)) throw new Error('修正结果未包含 <UpdateVariable> 块，请调整描述后重试');
-    // 3.3.1 总监拍板：生成即自动写入（去手动「写回当前楼」步骤），并把正文原变量块中同 path 条目替换为新值
-    await writeRawToCurrentFloor(raw);
-    let mergedIntoFloor = false;
-    try { mergedIntoFloor = await mergeUpdateBlockInFloor(raw, null); } catch (_) {}
-    lastVariableFix = { kind: 'correct', instruction, raw, at: new Date().toISOString() };
-    toast('success', mergedIntoFloor ? '已重新生成并写入对应变量（本楼正文变量块已同步）' : '已重新生成并写入对应变量');
-    renderPanel();
-    return lastVariableFix;
+      await writeRawToFloor(raw, targetFloor, operationContext);
+      let mergedIntoFloor = false;
+      try { mergedIntoFloor = await mergeUpdateBlockInFloor(raw, targetFloor, operationContext); } catch (error) {
+        if (/已取消本次变量写入/.test(String(error?.message || error))) throw error;
+      }
+      lastVariableFix = { kind: 'correct', instruction, raw, floorId: targetFloor, chatId: operationContext.chatId, at: new Date().toISOString() };
+      toast('success', mergedIntoFloor ? '已重新生成并写入对应变量（目标楼正文变量块已同步）' : '已重新生成并写入对应变量');
+      renderPanel();
+      return lastVariableFix;
+    });
   }
   async function applyVariableCorrection() {
-    // 3.3.1 起修正已自动写入；本函数保留作 api 兼容/手动兜底
+    // 3.3.1 起修正已自动写入；本函数保留作 api 兼容/手动兜底。
     if (!lastVariableFix?.raw) throw new Error('没有可写回的修正结果');
-    await writeRawToCurrentFloor(lastVariableFix.raw);
-    toast('success', '变量修正已写回当前楼（正文未改）');
+    await writeRawToFloor(lastVariableFix.raw, lastVariableFix.floorId ?? 'latest');
+    toast('success', '变量修正已写回目标楼（正文未改）');
     lastVariableFix = null;
     renderPanel();
     renderVarTunePanel();
@@ -1332,12 +1298,16 @@
     const helper = helperHost();
     const range = (floorId == null || floorId === 'latest') ? -1 : floorId;
     try {
-      const msg = helper?.getChatMessages?.(range)?.[0];
-      if (msg) return { id: msg.message_id ?? (floorId ?? 'latest'), text: String(msg.message || ''), role: msg.role || '' };
+      const msg = helper?.getChatMessages?.(range, { include_swipes: false })?.[0];
+      if (msg) {
+        const text = msg.message ?? msg.mes ?? msg.text ?? '';
+        return { id: msg.message_id ?? (floorId ?? 'latest'), text: String(text), role: msg.role || '' };
+      }
     } catch (_) {}
     return { id: floorId ?? 'latest', text: '', role: '' };
   }
-  async function writeRawToFloor(raw, floorId) {
+  async function writeRawToFloor(raw, floorId, operationContext) {
+    assertVariableOperationContext(operationContext);
     const Mvu = mvuHost();
     if (!Mvu?.replaceMvuData) throw new Error('MVU 写入接口尚未就绪');
     if (!/<UpdateVariable/i.test(String(raw || ''))) throw new Error('结果未包含 <UpdateVariable> 块，已放弃写入');
@@ -1348,7 +1318,9 @@
     }
     if (!nextData) throw new Error('未能从结果解析出有效变量更新（格式不合规）');
     nextData = validateHudMvuData(nextData);
+    assertVariableOperationContext(operationContext);
     await Mvu.replaceMvuData(nextData, { type: 'message', message_id: floorId == null ? 'latest' : floorId });
+    assertVariableOperationContext(operationContext);
     emitHudSignal('data-changed', { force: true });
   }
   // ── 楼层正文变量块读写（3.3.1 总监拍板语义;CDP 实验证实 setChatMessages 编辑不触发 MVU 重处理,变量写入仍由 replaceMvuData 负责）──
@@ -1359,7 +1331,8 @@
     return (typeof get === 'function' && typeof set === 'function') ? { get, set } : null;
   }
   // 按预分析重算：把新 <UpdateVariable> 块追加到楼层正文底部（旧块保留,读数以最新为准）
-  async function appendUpdateBlockToFloor(raw, floorId) {
+  async function appendUpdateBlockToFloor(raw, floorId, operationContext) {
+    assertVariableOperationContext(operationContext);
     const api = floorMessageApi();
     if (!api) return false;
     const block = String(raw).match(/<UpdateVariable>[\s\S]*?<\/UpdateVariable>/i)?.[0];
@@ -1367,29 +1340,33 @@
     const range = (floorId == null || floorId === 'latest') ? -1 : floorId;
     const msg = api.get(range)?.[0];
     if (!msg) return false;
-    await api.set([{ message_id: msg.message_id, message: String(msg.message || '') + '\n\n' + block }], { refresh: 'affected' });
+    const text = msg.message ?? msg.mes ?? msg.text ?? '';
+    assertVariableOperationContext(operationContext);
+    await api.set([{ message_id: msg.message_id, message: String(text) + '\n\n' + block }], { refresh: 'affected' });
     return true;
   }
   // 定点修正：正文原块内「相同 path 条目」替换为新值,块内没有的追加;楼内无块则整块追加
-  async function mergeUpdateBlockInFloor(raw, floorId) {
+  async function mergeUpdateBlockInFloor(raw, floorId, operationContext) {
+    assertVariableOperationContext(operationContext);
     const api = floorMessageApi();
     if (!api) return false;
     const newBlock = String(raw).match(/<UpdateVariable>([\s\S]*?)<\/UpdateVariable>/i);
     if (!newBlock) return false;
     let newPatch = null;
     try { const parsedNew = parseJsonPatchOps(newBlock[0]); newPatch = parsedNew.ok ? parsedNew.ops : null; } catch (_) { newPatch = null; }
-    if (!Array.isArray(newPatch)) return appendUpdateBlockToFloor(raw, floorId);
+    if (!Array.isArray(newPatch)) return appendUpdateBlockToFloor(raw, floorId, operationContext);
     const range = (floorId == null || floorId === 'latest') ? -1 : floorId;
     const msg = api.get(range)?.[0];
     if (!msg) return false;
-    const text = String(msg.message || '');
+    const messageText = msg.message ?? msg.mes ?? msg.text ?? '';
+    const text = String(messageText);
     // 以最后一个块为主块（读数以最新为准的语义，与「按预分析重算」append 的新块自洽——审查 minor 修复）
     const all = [...text.matchAll(/<UpdateVariable>([\s\S]*?)<\/UpdateVariable>/gi)];
-    if (!all.length) return appendUpdateBlockToFloor(raw, floorId);
+    if (!all.length) return appendUpdateBlockToFloor(raw, floorId, operationContext);
     const m = all[all.length - 1];
     let oldPatch = null;
     try { const parsedOld = parseJsonPatchOps(m[0]); oldPatch = parsedOld.ok ? parsedOld.ops : null; } catch (_) { oldPatch = null; }
-    if (!Array.isArray(oldPatch)) return appendUpdateBlockToFloor(raw, floorId);
+    if (!Array.isArray(oldPatch)) return appendUpdateBlockToFloor(raw, floorId, operationContext);
     const merged = oldPatch.slice();
     for (const entry of newPatch) {
       if (!entry || typeof entry.path !== 'string') continue;
@@ -1400,6 +1377,7 @@
     const mergedBlock = wrapUpdateVariableBlock(mergedAnalysis, merged);
     // 按 index 精确替换（多块下 String.replace 会误中第一处同文块）
     const newText = text.slice(0, m.index) + mergedBlock + text.slice(m.index + m[0].length);
+    assertVariableOperationContext(operationContext);
     await api.set([{ message_id: msg.message_id, message: newText }], { refresh: 'affected' });
     return true;
   }
@@ -1409,10 +1387,12 @@
   }
   // 按（编辑后的）预分析重算整楼变量——预分析是权威导向，补足正文 LLM 写出的 analysis 不足。
   async function rerollFromAnalysis(analysisText, floorId) {
-    const generateRaw = variableGenerateRaw();
-    const oldData = getMvuDataAt(floorId);
-    const root = statRoot(oldData);
-    const message = messageInfoAt(floorId);
+    return runVariableGenerationTransaction(floorId, async operationContext => {
+      const targetFloor = operationContext.floorId;
+      const generateRaw = variableGenerateRaw(operationContext);
+      const oldData = getMvuDataAt(targetFloor);
+      const root = statRoot(oldData);
+      const message = { text: operationContext.messageText };
     const analysis = (String(analysisText || '').trim()) || extractAnalysis(message.text);
     const prompt = [
       '当前楼正文：',
@@ -1436,14 +1416,17 @@
         { role: 'user', content: prompt },
       ],
     }) || '').trim(), analysis || '按玩家编辑后的预分析重算本楼变量。');
-    await writeRawToFloor(raw, floorId);
-    // 3.3.1 总监拍板：完成时把新变量块追加到本楼正文底部（旧块保留，读数以最新为准）
-    let appendedToFloor = false;
-    try { appendedToFloor = await appendUpdateBlockToFloor(raw, floorId); } catch (_) {}
-    lastVariableFix = { kind: 'reroll-analysis', instruction: '（按预分析整楼重算）', raw, at: new Date().toISOString() };
-    toast('success', appendedToFloor ? '已按预分析重算全部变量，新变量块已写入本楼正文底部' : '已按预分析重算该楼全部变量（正文块追加失败，变量已写入）');
-    renderPanel();
-    return lastVariableFix;
+      await writeRawToFloor(raw, targetFloor, operationContext);
+      // 3.3.1 总监拍板：完成时把新变量块追加到本楼正文底部（旧块保留，读数以最新为准）
+      let appendedToFloor = false;
+      try { appendedToFloor = await appendUpdateBlockToFloor(raw, targetFloor, operationContext); } catch (error) {
+        if (/已取消本次变量写入/.test(String(error?.message || error))) throw error;
+      }
+      lastVariableFix = { kind: 'reroll-analysis', instruction: '（按预分析整楼重算）', raw, floorId: targetFloor, chatId: operationContext.chatId, at: new Date().toISOString() };
+      toast('success', appendedToFloor ? '已按预分析重算全部变量，新变量块已写入本楼正文底部' : '已按预分析重算该楼全部变量（正文块追加失败，变量已写入）');
+      renderPanel();
+      return lastVariableFix;
+    });
   }
   // B17(2.9.8) Panel B 一键修复变量格式：优先用卡内 zod schema 确定性 parse 回正，秒修不耗 LLM；取不到再退 LLM。
   function getMvuSchema() {
@@ -1466,15 +1449,15 @@
     }
     return ops;
   }
-  async function repairVariableFormat() {
-    const data = getCurrentMvuData();
+  async function repairVariableFormat(floorId = 'latest') {
+    const targetFloor = floorId == null ? 'latest' : floorId;
+    const data = getMvuDataAt(targetFloor);
     const root = statRoot(data);
     if (!root || typeof root !== 'object') throw new Error('本楼暂无变量');
     const Schema = getMvuSchema();
     if (Schema && typeof Schema.parse === 'function') {
       let repaired = null;
       try { repaired = Schema.parse(JSON.parse(JSON.stringify(root))); } catch (_) {
-        // 任务4.11：parse 失败时输出 warn 供调试
         try { console.warn('[xingyue][zod parse failed]', _); } catch (__) {}
         repaired = null;
       }
@@ -1482,18 +1465,20 @@
         const ops = diffRepairRootOps(root, repaired);
         if (!ops.length) { toast('info', '变量格式已合规，无需修复'); return; }
         const raw = wrapUpdateVariableBlock('schema 修复：将不合规字段回正为当前变量结构可接受的格式。', ops);
-        await writeRawToCurrentFloor(raw);
-        lastVariableFix = { kind: 'repair', instruction: '（按 schema 修复 ' + ops.length + ' 处格式）', raw, at: new Date().toISOString() };
+        await writeRawToFloor(raw, targetFloor);
+        lastVariableFix = { kind: 'repair', instruction: '（按 schema 修复 ' + ops.length + ' 处格式）', raw, floorId: targetFloor, at: new Date().toISOString() };
         toast('success', '已按 schema 一键修复变量格式（' + ops.length + ' 处，正文未改）');
         renderVarTunePanel();
         return;
       }
     }
-    await repairVariableFormatViaLLM();
+    await repairVariableFormatViaLLM(targetFloor);
   }
-  async function repairVariableFormatViaLLM() {
-    const generateRaw = variableGenerateRaw();
-    const root = statRoot(getCurrentMvuData());
+  async function repairVariableFormatViaLLM(floorId = 'latest') {
+    return runVariableGenerationTransaction(floorId, async operationContext => {
+      const targetFloor = operationContext.floorId;
+      const generateRaw = variableGenerateRaw(operationContext);
+      const root = statRoot(getMvuDataAt(targetFloor));
     const prompt = [
       '当前变量状态 stat_data：',
       safeJson(root, '{}').slice(0, 8000),
@@ -1510,10 +1495,11 @@
       ],
     }) || '').trim(), 'LLM 格式修复：只修正变量结构和类型问题，不改变语义。');
     if (!/<UpdateVariable/i.test(raw)) throw new Error('修复结果未包含 <UpdateVariable> 块');
-    await writeRawToCurrentFloor(raw);
-    lastVariableFix = { kind: 'repair', instruction: '（LLM 修复格式）', raw, at: new Date().toISOString() };
-    toast('success', '已用 LLM 修复变量格式（正文未改）');
-    renderVarTunePanel();
+      await writeRawToFloor(raw, targetFloor, operationContext);
+      lastVariableFix = { kind: 'repair', instruction: '（LLM 修复格式）', raw, floorId: targetFloor, chatId: operationContext.chatId, at: new Date().toISOString() };
+      toast('success', '已用 LLM 修复变量格式（正文未改）');
+      renderVarTunePanel();
+    });
   }
   function fixKindLabel(kind) {
     if (kind === 'reroll-analysis') return '按预分析重算结果';
@@ -1522,24 +1508,38 @@
     if (kind === 'reroll') return '整楼重算结果';
     return '修正预览';
   }
-  // B17(2.9.8) Panel A 浮窗：编辑本楼预分析 → 按它整楼重算。独立于 Panel B（变量美化框）。
+  // 预分析与变量微调保留为两个专用浮窗，但共用楼层上下文并互斥显示。
   let analysisPanel = null;
   let analysisFloorId = 'latest';
+  let varTunePanel = null;
+  let varTuneTab = 'fix';
+  let varTuneFloorId = 'latest';
+  function normalizeToolFloorId(floorId) { return floorId == null ? 'latest' : floorId; }
+  function sameToolFloor(a, b) { return String(normalizeToolFloorId(a)) === String(normalizeToolFloorId(b)); }
+  function closeAnalysisPopover() {
+    try { analysisPanel?.remove?.(); } catch (_) {}
+    analysisPanel = null;
+  }
+  function closeVariableTunePopover() {
+    try { varTunePanel?.remove?.(); } catch (_) {}
+    varTunePanel = null;
+  }
   function analysisPanelHtml() {
     const message = messageInfoAt(analysisFloorId);
     const analysis = extractAnalysis(message.text);
     return '<div class="xy-vt-head"><span>◆ 变量预分析 · 楼层 ' + escapeHtml(String(message.id)) + '</span><button type="button" data-xy-an="close" class="xy-vt-x">✕</button></div>'
       + '<div class="xy-vt-body">'
-      + '<div class="xy-vt-hint">预分析是变量更新的导向。在这里补足/修正本楼预分析，再点下方按钮——按预分析重算本楼变量，完成后新变量块写入本楼正文底部（不耗历史楼）。</div>'
+      + '<div class="xy-vt-hint">预分析是变量更新的导向。在这里补足或修正本楼预分析，再按它重算本楼变量；完成后新变量块写入目标楼正文底部。</div>'
       + '<label class="xy-vt-field">本楼变量预分析<textarea data-xy-an-input rows="8" placeholder="正文未给出预分析时，可在此写下本楼应当发生的变量变化（按顶层根分条）">' + escapeHtml(analysis) + '</textarea></label>'
-      + '<div class="xy-vt-row"><button type="button" data-xy-an="reroll">按预分析重算整楼变量</button><span class="xy-vt-muted">重算变量并把新变量块写入本楼底部</span></div>'
+      + '<div class="xy-vt-row"><button type="button" data-xy-an="reroll">按预分析重算整楼变量</button><span class="xy-vt-muted">只重算变量，不重新生成正文</span></div>'
       + '</div>';
   }
   function renderAnalysisPanel() {
     if (analysisPanel && analysisPanel.isConnected) analysisPanel.innerHTML = analysisPanelHtml();
   }
   function openAnalysisPopover(floorId) {
-    analysisFloorId = (floorId == null ? 'latest' : floorId);
+    analysisFloorId = normalizeToolFloorId(floorId);
+    closeVariableTunePopover();
     const doc = hostDocument();
     ensureVarTuneStyle(doc);
     if (!analysisPanel || !analysisPanel.isConnected) {
@@ -1549,14 +1549,16 @@
       doc.body.appendChild(analysisPanel);
       makeCcPopDraggable(analysisPanel);
       analysisPanel.addEventListener('click', async (event) => {
-        const act = event.target?.closest?.('[data-xy-an]')?.getAttribute?.('data-xy-an');
+        const actionButton = event.target?.closest?.('[data-xy-an]');
+        const act = actionButton?.getAttribute?.('data-xy-an');
         if (!act) return;
         event.preventDefault(); event.stopPropagation();
         try {
-          if (act === 'close') { analysisPanel.remove(); analysisPanel = null; return; }
+          if (act === 'close') { closeAnalysisPopover(); return; }
           if (act === 'reroll') {
             const edited = analysisPanel.querySelector('[data-xy-an-input]')?.value || '';
-            await rerollFromAnalysis(edited, analysisFloorId);
+            await withBusyButton(actionButton, '正在重算…', () => rerollFromAnalysis(edited, analysisFloorId));
+            renderAnalysisPanel();
           }
         } catch (error) { toast('error', error.message || String(error)); }
       });
@@ -1593,22 +1595,17 @@
     doc.__xyAnalysisBound = { owner: runtimeOwner, dispose };
     disposers.push(dispose);
   }
-  // 由 media_library 就地绑定的 omni 面板按钮统一回调（绕过委托绑定的 doc/前缀不确定性）。
   function handleOmniButton(action, el) {
     try {
       const floorId = resolveFloorFromEl(el);
       if (action === 'analysis-edit') { openAnalysisPopover(floorId); return; }
       if (action === 'analysis-reroll') { rerollFromAnalysis('', floorId).catch(e => toast('error', e.message || String(e))); return; }
-      if (action === 'var-tune') { openVariableTunePopover(); return; }
+      if (action === 'var-tune') { openVariableTunePopover(floorId); return; }
     } catch (error) { toast('error', error.message || String(error)); }
   }
-  // B17 交互层：入口在红绿框（正则美化框），控制中心函数作后端代理。
-  // 用事件委托 + data 钩子绑定 → 免 custom- 前缀、无视层级嵌套、capture 阶段 stopPropagation 阻 <details> 折叠。
-  let varTunePanel = null;
-  let varTuneTab = 'fix';
-  function getVariableValidationStatus() {
+  function getVariableValidationStatus(floorId = varTuneFloorId) {
     let root;
-    try { root = statRoot(getCurrentMvuData()); } catch (_) { return { state: 'unknown', text: 'MVU 未就绪，无法校验' }; }
+    try { root = statRoot(getMvuDataAt(floorId)); } catch (_) { return { state: 'unknown', text: 'MVU 未就绪，无法校验' }; }
     if (!root || typeof root !== 'object') return { state: 'empty', text: '本楼暂无变量' };
     const Schema = getMvuSchema();
     if (!Schema || typeof Schema.parse !== 'function') return { state: 'unknown', text: '无法离线校验（schema 未就绪），可点修复走 LLM' };
@@ -1619,8 +1616,8 @@
     if (!ops.length) return { state: 'ok', text: '变量内容无误（符合 schema）' };
     return { state: 'warn', text: '检出 ' + ops.length + ' 处格式问题，可一键修复' };
   }
-  function varValidationStatusHtml() {
-    const s = getVariableValidationStatus();
+  function varValidationStatusHtml(floorId = varTuneFloorId) {
+    const s = getVariableValidationStatus(floorId);
     const map = { ok: ['#4fd97a', '✓'], warn: ['#e0b27b', '!'], error: ['#e07b7b', '✕'], empty: ['#7d8a99', '—'], unknown: ['#7d8a99', '?'] };
     const pair = map[s.state] || map.unknown;
     const color = pair[0], icon = pair[1];
@@ -1628,32 +1625,32 @@
       + '<span style="font-weight:bold;">' + icon + '</span><span>' + escapeHtml(s.text) + '</span></div>';
   }
   function varTunePanelHtml() {
-    const fix = lastVariableFix;
+    const fix = lastVariableFix && sameToolFloor(lastVariableFix.floorId, varTuneFloorId) ? lastVariableFix : null;
     const tab = varTuneTab;
     const preview = (fix && fix.raw)
-      ? '<div class="xy-vt-label">' + fixKindLabel(fix.kind) + '（已自动写入本楼）</div><pre class="xy-vt-pre">' + escapeHtml(String(fix.raw).slice(0, 2000)) + '</pre>'
+      ? '<div class="xy-vt-label">' + fixKindLabel(fix.kind) + '（已自动写入目标楼）</div><pre class="xy-vt-pre">' + escapeHtml(String(fix.raw).slice(0, 2000)) + '</pre>'
       : '';
     const tabBtn = (id, label) => '<button type="button" class="xy-vt-tab' + (tab === id ? ' is-on' : '') + '" data-xy-vt-tab="' + id + '">' + label + '</button>';
     let body;
     if (tab === 'reroll') {
       body = '<label class="xy-vt-field">重新生成哪些变量（一句话）<textarea data-xy-vt-input rows="2" placeholder="例：把星月的好感度改成 80；或 重算当前穿着">' + escapeHtml(fix && fix.kind === 'correct' ? (fix.instruction || '') : '') + '</textarea></label>'
-        + '<div class="xy-vt-row"><button type="button" data-xy-vt="preview">重新生成并写入对应变量</button><span class="xy-vt-muted">只重 roll 描述到的内容，完成即写入本楼</span></div>'
+        + '<div class="xy-vt-row"><button type="button" data-xy-vt="preview">重新生成并写入对应变量</button><span class="xy-vt-muted">只重 roll 描述到的内容，完成即写入目标楼</span></div>'
         + (fix && fix.kind === 'correct' ? preview : '');
     } else if (tab === 'fields') {
-      body = varTuneFieldsHtml();
+      body = varTuneFieldsHtml(varTuneFloorId);
     } else {
-      body = varValidationStatusHtml()
-        + varProblemListHtml()
+      body = varValidationStatusHtml(varTuneFloorId)
+        + varProblemListHtml(varTuneFloorId)
         + '<div class="xy-vt-row"><button type="button" data-xy-vt="repair">一键修复变量格式</button><span class="xy-vt-muted">按 schema 把错误格式修回合规</span></div>'
         + (fix && fix.kind === 'repair' ? preview : '');
     }
-    return '<div class="xy-vt-head"><span>⚙ 微调当前楼变量</span><button type="button" data-xy-vt="close" class="xy-vt-x">✕</button></div>'
+    return '<div class="xy-vt-head"><span>⚙ 微调变量 · 楼层 ' + escapeHtml(String(varTuneFloorId)) + '</span><button type="button" data-xy-vt="close" class="xy-vt-x">✕</button></div>'
       + '<div class="xy-vt-tabs">' + tabBtn('fix', '一键修正变量') + tabBtn('reroll', '部分重 roll') + tabBtn('fields', '逐字段修改') + '</div>'
       + '<div class="xy-vt-body">' + body + '</div>';
   }
-  function listSchemaProblems() {
+  function listSchemaProblems(floorId = varTuneFloorId) {
     let root;
-    try { root = statRoot(getCurrentMvuData()); } catch (_) { return []; }
+    try { root = statRoot(getMvuDataAt(floorId)); } catch (_) { return []; }
     const Schema = getMvuSchema();
     if (!root || typeof root !== 'object' || !Schema || typeof Schema.parse !== 'function') return [];
     let repaired = null;
@@ -1690,11 +1687,11 @@
     }
     return '<span style="color:#8b9aac">' + valStr + '</span>';
   }
-  function varProblemListHtml() {
+  function varProblemListHtml(floorId = varTuneFloorId) {
     let root;
-    try { root = statRoot(getCurrentMvuData()); } catch (_) { return ''; }
+    try { root = statRoot(getMvuDataAt(floorId)); } catch (_) { return ''; }
     if (!root || typeof root !== 'object') return '';
-    const probs = listSchemaProblems();
+    const probs = listSchemaProblems(floorId);
     if (!probs.length) return '';
     if (probs.some(p => p.whole)) return '<div class="xy-vt-problems"><div class="xy-vt-prob-h">schema 整体无法解析，点一键修复走 LLM</div></div>';
     const errMap = {};
@@ -1723,6 +1720,7 @@
       '.xy-cc-pop .xy-vt-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}',
       '.xy-cc-pop button{font:inherit;cursor:pointer;background:rgba(80,217,122,.1);color:#d4f5e0;border:1px solid rgba(80,217,122,.45);border-radius:5px;padding:6px 12px;}',
       '.xy-cc-pop button:hover{background:rgba(80,217,122,.2);}',
+      '.xy-cc-pop button:disabled{opacity:.68;cursor:wait;}',
       '.xy-cc-pop .xy-vt-field{display:flex;flex-direction:column;gap:4px;color:#9fb0c2;}',
       '.xy-cc-pop textarea{font:inherit;background:#050912;color:#cdd7e2;border:1px solid #2a4858;border-radius:5px;padding:7px;resize:vertical;}',
       '.xy-cc-pop .xy-vt-pre{white-space:pre-wrap;background:#050912;border:1px solid rgba(42,72,88,.6);border-radius:5px;padding:8px;max-height:200px;overflow:auto;color:#8b9aac;}',
@@ -1784,7 +1782,9 @@
       pdoc.addEventListener('mousemove', move); pdoc.addEventListener('mouseup', up);
     });
   }
-  function openVariableTunePopover() {
+  function openVariableTunePopover(floorId = 'latest') {
+    varTuneFloorId = normalizeToolFloorId(floorId);
+    closeAnalysisPopover();
     const doc = hostDocument();
     ensureVarTuneStyle(doc);
     if (!varTunePanel || !varTunePanel.isConnected) {
@@ -1798,15 +1798,19 @@
         if (tabEl) { event.preventDefault(); event.stopPropagation(); varTuneTab = tabEl.getAttribute('data-xy-vt-tab'); renderVarTunePanel(); return; }
         const boolEl = event.target?.closest?.('[data-xy-vt-bool]');
         if (boolEl) { event.preventDefault(); event.stopPropagation(); const on = boolEl.getAttribute('data-val') === 'true'; boolEl.setAttribute('data-val', on ? 'false' : 'true'); boolEl.textContent = on ? 'false' : 'true'; return; }
-        const act = event.target?.closest?.('[data-xy-vt]')?.getAttribute?.('data-xy-vt');
+        const actionButton = event.target?.closest?.('[data-xy-vt]');
+        const act = actionButton?.getAttribute?.('data-xy-vt');
         if (!act) return;
         event.preventDefault(); event.stopPropagation();
         try {
-          if (act === 'close') { varTunePanel.remove(); varTunePanel = null; return; }
-          if (act === 'repair') await repairVariableFormat();
-          if (act === 'preview') await previewVariableCorrection(varTunePanel.querySelector('[data-xy-vt-input]')?.value || '');
+          if (act === 'close') { closeVariableTunePopover(); return; }
+          if (act === 'repair') await repairVariableFormat(varTuneFloorId);
+          if (act === 'preview') {
+            const instruction = varTunePanel.querySelector('[data-xy-vt-input]')?.value || '';
+            await withBusyButton(actionButton, '正在重算…', () => previewVariableCorrection(instruction, varTuneFloorId));
+          }
           if (act === 'apply') await applyVariableCorrection();
-          if (act === 'apply-fields') await applyFieldEdits();
+          if (act === 'apply-fields') await applyFieldEdits(varTuneFloorId);
           if (act === 'discard') lastVariableFix = null;
         } catch (error) { toast('error', error.message || String(error)); }
         renderVarTunePanel();
@@ -1823,7 +1827,7 @@
       const hook = event.target?.closest?.('[data-xy-var-tune]');
       if (!hook) return;
       event.preventDefault(); event.stopPropagation();
-      openVariableTunePopover();
+      openVariableTunePopover(resolveFloorFromEl(hook));
     };
     const dispose = () => {
       try { doc.removeEventListener('click', handler, true); } catch (_) {}
@@ -1847,9 +1851,9 @@
     if (typeof val === 'object') { Object.keys(val).forEach(k => flattenStat(val[k], path + '/' + jsonPtrSeg(k), out)); return; }
     out.push({ path, value: val, kind: typeof val === 'number' ? 'number' : (typeof val === 'boolean' ? 'boolean' : 'string') });
   }
-  function varTuneFieldsHtml() {
+  function varTuneFieldsHtml(floorId = varTuneFloorId) {
     let root;
-    try { root = statRoot(getCurrentMvuData()); } catch (_) { return '<div class="xy-vt-hint">MVU 未就绪，无法读取本楼变量。</div>'; }
+    try { root = statRoot(getMvuDataAt(floorId)); } catch (_) { return '<div class="xy-vt-hint">MVU 未就绪，无法读取本楼变量。</div>'; }
     if (!root || typeof root !== 'object') return '<div class="xy-vt-hint">本楼暂无变量。</div>';
     const groups = Object.keys(root).map(rk => {
       const fields = [];
@@ -1864,10 +1868,11 @@
     }).join('');
     return groups + '<div class="xy-vt-row"><button type="button" data-xy-vt="apply-fields">应用字段修改</button><span class="xy-vt-muted">改哪个写哪个，只写当前楼</span></div>';
   }
-  async function applyFieldEdits() {
+  async function applyFieldEdits(floorId = varTuneFloorId) {
     if (!varTunePanel) return;
+    const targetFloor = normalizeToolFloorId(floorId);
     let root;
-    try { root = statRoot(getCurrentMvuData()); } catch (_) { throw new Error('MVU 未就绪'); }
+    try { root = statRoot(getMvuDataAt(targetFloor)); } catch (_) { throw new Error('MVU 未就绪'); }
     const ops = [];
     varTunePanel.querySelectorAll('[data-xy-vt-field]').forEach(input => {
       const path = input.getAttribute('data-xy-vt-field');
@@ -1881,9 +1886,9 @@
     });
     if (!ops.length) { toast('info', '没有检测到字段改动'); return; }
     const raw = wrapUpdateVariableBlock('逐字段修改：按玩家在变量微调面板中的字段编辑写回。', ops);
-    await writeRawToCurrentFloor(raw);
-    lastVariableFix = { kind: 'fields', instruction: '（逐字段修改 ' + ops.length + ' 处）', raw, at: new Date().toISOString() };
-    toast('success', '字段修改已写回当前楼（' + ops.length + ' 处，正文未改）');
+    await writeRawToFloor(raw, targetFloor);
+    lastVariableFix = { kind: 'fields', instruction: '（逐字段修改 ' + ops.length + ' 处）', raw, floorId: targetFloor, at: new Date().toISOString() };
+    toast('success', '字段修改已写回目标楼（' + ops.length + ' 处，正文未改）');
     renderVarTunePanel();
   }
   // 3.3.0 桌宠悬浮球（原 B17 Phase 3 暖色胶囊球升级）——科幻自由点阵球(canvas+rAF) + 半轮盘4键 +
@@ -5465,9 +5470,11 @@
     try { hostDocument().getElementById(CONTROL_PANEL_ID)?.remove(); } catch (_) {}
     try { hostDocument().getElementById(CONTROL_PANEL_STYLE_ID)?.remove(); } catch (_) {}
     try { hostDocument().getElementById(WAND_CONTAINER_ID)?.remove(); } catch (_) {}
-    try { hostDocument().getElementById('xingyue-analysis-pop')?.remove(); } catch (_) {}
-    try { hostDocument().getElementById('xingyue-var-tune-pop')?.remove(); } catch (_) {}
+    closeAnalysisPopover();
+    closeVariableTunePopover();
     try { hostDocument().getElementById('xingyue-var-tune-style')?.remove(); } catch (_) {}
+    try { hostDocument().getElementById('xy-reroll-bubble')?.remove(); } catch (_) {}
+    try { hostDocument().getElementById('xy-reroll-bubble-style')?.remove(); } catch (_) {}
     try { hostDocument().getElementById('xingyue-npc-pop')?.remove(); } catch (_) {}
     try { if (window.XingyueControlCenter === api) delete window.XingyueControlCenter; } catch (_) {}
     try { if (window.CrossedZoneControlCenter === api) delete window.CrossedZoneControlCenter; } catch (_) {}
