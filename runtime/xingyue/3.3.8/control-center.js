@@ -89,7 +89,7 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.3.8-stability-r4-20260710';
+  const GIT_RUNTIME_REVISION = '3.3.8-stability-r5-20260710';
   const GIT_RUNTIME_REVISION_KEY = 'xingyue-control-center-runtime-revision';
   function notifyGitRuntimeRevision() {
     try {
