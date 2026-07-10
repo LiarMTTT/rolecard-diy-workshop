@@ -89,8 +89,40 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.3.8-stability-r5-20260710';
+  const GIT_RUNTIME_REVISION = '3.3.8-stability-r6-20260710';
   const GIT_RUNTIME_REVISION_KEY = 'xingyue-control-center-runtime-revision';
+  const OMNI_FLAT_STYLE_ID = 'xingyue-omni-flat-style';
+  const OMNI_FLAT_CSS = [
+    '[data-xy-omni="done"] .xy-omni-body{background:transparent!important;border:0!important;}',
+    '[data-xy-omni="done"] .xy-omni-result,[data-xy-omni="done"] .xy-omni-analysis,[data-xy-omni="done"] .xy-omni-result-head,[data-xy-omni="done"] .xy-omni-patch,[data-xy-omni="done"] .xy-omni-validation,[data-xy-omni="done"] .xy-omni-valid-note,[data-xy-omni="done"] .xy-omni-errors{background:transparent!important;border:0!important;box-shadow:none!important;outline:0!important;}',
+    '[data-xy-omni="done"] .xy-omni-result,[data-xy-omni="done"] .xy-omni-analysis,[data-xy-omni="done"] .xy-omni-patch,[data-xy-omni="done"] .xy-omni-validation,[data-xy-omni="done"] .xy-omni-complete{padding:0!important;}',
+    '[data-xy-omni="done"] .xy-omni-analysis{color:#a9c0cd!important;}',
+    '[data-xy-omni="done"] .xy-omni-complete{background:transparent!important;border:0!important;box-shadow:none!important;}',
+    '[data-xy-omni="done"] .xy-omni-grid{display:block!important;background:transparent!important;border:0!important;box-shadow:none!important;}',
+    '[data-xy-omni="done"] .xy-omni-cell{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;}',
+  ].join('');
+  function omniFlatDocuments() {
+    const docs = [];
+    try { if (document) docs.push(document); } catch (_) {}
+    try { const hostDoc = hostDocument(); if (hostDoc && !docs.includes(hostDoc)) docs.push(hostDoc); } catch (_) {}
+    return docs;
+  }
+  function ensureOmniFlatStyle() {
+    omniFlatDocuments().forEach(doc => {
+      try {
+        let style = doc.getElementById(OMNI_FLAT_STYLE_ID);
+        if (!style) {
+          style = doc.createElement('style');
+          style.id = OMNI_FLAT_STYLE_ID;
+          (doc.head || doc.body || doc.documentElement).appendChild(style);
+        }
+        if (style.textContent !== OMNI_FLAT_CSS) style.textContent = OMNI_FLAT_CSS;
+      } catch (_) {}
+    });
+  }
+  function removeOmniFlatStyle() {
+    omniFlatDocuments().forEach(doc => { try { doc.getElementById(OMNI_FLAT_STYLE_ID)?.remove(); } catch (_) {} });
+  }
   function notifyGitRuntimeRevision() {
     try {
       const host = hostWindow();
@@ -5475,6 +5507,7 @@
     closeAnalysisPopover();
     closeVariableTunePopover();
     try { hostDocument().getElementById('xingyue-var-tune-style')?.remove(); } catch (_) {}
+    removeOmniFlatStyle();
     try { hostDocument().getElementById('xy-reroll-bubble')?.remove(); } catch (_) {}
     try { hostDocument().getElementById('xy-reroll-bubble-style')?.remove(); } catch (_) {}
     try { hostDocument().getElementById('xingyue-npc-pop')?.remove(); } catch (_) {}
@@ -5572,6 +5605,7 @@
       host.XY_RT_BASE = RUNTIME_BASE_URL;
     }
   } catch (_) {}
+  ensureOmniFlatStyle();
   notifyGitRuntimeRevision();
   dispatchControlCenterReady();
   ensurePanel();
