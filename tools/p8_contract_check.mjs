@@ -101,6 +101,7 @@ ok(currentRuntime.includes('refreshWorkshop: fetchWorkshopCatalog'), 'network ca
 ok(currentRuntime.includes('if (!sharedContract?.normalizePackage) throw new Error'), 'missing shared contract disables workshop mutations');
 ok(loader.includes('shared/workshop-package-contract.js'), '3.4 loader loads shared browser contract');
 ok(loader.includes('MIN_RUNTIME_REVISION = 27'), '3.4 loader requires runtime r27');
+ok(loader.includes('@90facdc030ffb59902506f1f8737685487f52496/runtime/xingyue/3.4.0/control-center.js'), '3.4 loader pins verified r27 release commit');
 ok(currentRuntime.includes("GIT_RUNTIME_REVISION = '3.4.0-stability-r27-20260711'"), '3.4 runtime exposes r27 revision');
 ok(currentRuntime.includes('/api/workshop/login-handoff') && currentRuntime.includes('beginWorkshopLogin'), 'runtime has one-time OAuth handoff fallback');
 ok(currentRuntime.includes('/api/workshop/login-handoff/start') && currentRuntime.includes('workshopHandoffChallenge') && currentRuntime.includes('JSON.stringify({ handoffId, secret })'), 'runtime handoff uses private secret challenge');
