@@ -10,6 +10,7 @@
     "ops:takeover": "node tools/ops_takeover.mjs",
     "ops:p1": "node tools/p1_external_check.mjs",
     "ops:p2": "node tools/p2_publish_flow_check.mjs",
+    "check:p8-contract": "node tools/p8_contract_check.mjs",
     "deploy:gateway-docker": "node tools/deploy_gateway_docker.mjs"
   },
   "engines": {

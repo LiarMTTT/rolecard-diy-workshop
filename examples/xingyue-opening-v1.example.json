@@ -1,0 +1,26 @@
+{
+  "packageVersion": "1.0.0",
+  "id": "xingyue-opening-rainy-gate",
+  "type": "world_factor",
+  "cardScope": "xingyue-opening-v1",
+  "title": "雨日校门入学模板",
+  "summary": "适用于中学与高中阶段的纯文本开局正文模板。",
+  "authorName": "星月工坊示例",
+  "rating": "general",
+  "language": "zh-CN",
+  "tags": ["开局正文", "雨日"],
+  "payload": {
+    "target": "xingyue.opening_day_body",
+    "schemaVersion": 1,
+    "compatibility": {
+      "minRuntimeVersion": "3.4.0"
+    },
+    "gradeScope": ["middle", "high"],
+    "worldFactors": [
+      {
+        "title": "雨日校门入学模板",
+        "content": "雨丝落在星月学园的校门前。{{player}}收好伞，确认写着{{grade}}的入学资料，向接待处走去。"
+      }
+    ]
+  }
+}

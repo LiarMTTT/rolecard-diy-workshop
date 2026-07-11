@@ -15,6 +15,7 @@ const packageStoreDir = path.join(tempRoot, 'packages');
 const publicPackageDir = path.join(tempRoot, 'public-packages');
 const indexFile = path.join(tempRoot, 'index.json');
 const publisherFile = path.join(tempRoot, 'publishers.json');
+const votesFile = path.join(tempRoot, 'votes.json');
 const auditLogFile = path.join(tempRoot, 'audit-log.jsonl');
 const publicSyncReportFile = path.join(tempRoot, 'public-sync-report.json');
 const port = Number(args.port || (19000 + crypto.randomInt(1000)));
@@ -67,6 +68,7 @@ async function startGateway() {
       PACKAGE_STORE_DIR: packageStoreDir,
       INDEX_FILE: indexFile,
       PUBLISHER_FILE: publisherFile,
+      VOTES_FILE: votesFile,
       AUDIT_LOG_FILE: auditLogFile,
       PUBLIC_PACKAGE_DIR: publicPackageDir,
       PUBLIC_SYNC_REPORT_FILE: publicSyncReportFile,
@@ -113,20 +115,73 @@ async function runFlow() {
     body: basePackage({ id: `${packageId}-blocked`, type: 'opening_pack' }),
     expected: 400,
   });
-  assert(String(blocked.body.error || '').includes('blocked package type'), 'blocked type rejected', blocked.body.error);
+  assert(String(blocked.body.error || '').includes('blocked-package-type'), 'blocked type rejected', blocked.body.error);
 
   const cookie = await devLoginCookie('owner');
   const me = await request('/api/workshop/me', { cookie, expected: 200 });
   assert(me.body.loggedIn === true && me.body.publisherId, 'owner login', 'dev ownership key accepted');
+  const bearerToken = decodeURIComponent(cookie.slice(cookie.indexOf('=') + 1));
+  const crossOriginCookie = await request('/api/workshop/me', {
+    cookie,
+    headers: { origin: 'https://evil.example.invalid' },
+    expected: 401,
+  });
+  assert(crossOriginCookie.body.loggedIn === false, 'cross-origin Cookie fallback rejected', 'Bearer required');
+  const crossOriginBearer = await request('/api/workshop/me', {
+    headers: { origin: 'https://evil.example.invalid', authorization: `Bearer ${bearerToken}` },
+    expected: 200,
+  });
+  assert(crossOriginBearer.body.publisherId === me.body.publisherId, 'cross-origin Bearer accepted', 'card API path');
+
+  const openingId = `${packageId}-opening`;
+  const disguisedOpening = await request('/api/workshop/packages', {
+    method: 'POST', cookie,
+    body: openingPackage({ id: `${openingId}-bad`, cardScope: 'xingyue' }),
+    expected: 400,
+  });
+  assert(disguisedOpening.body.error.includes('opening-scope-target-mismatch'), 'Gateway rejects disguised opening target', disguisedOpening.body.error);
+
+  const openingWithPrivateSidecar = openingPackage({ id: `${openingId}-private` });
+  openingWithPrivateSidecar.payload.fullDraft = { identity: 'must-not-publish' };
+  const privateOpening = await request('/api/workshop/packages', {
+    method: 'POST', cookie, body: openingWithPrivateSidecar, expected: 400,
+  });
+  assert(privateOpening.body.error.includes('unknown-opening-payload-field'), 'Gateway rejects opening private sidecars', privateOpening.body.error);
+
+  const embeddedIdentity = await request('/api/workshop/packages', {
+    method: 'POST', cookie,
+    body: {
+      packageVersion:'1.0.0', id:`${openingId}-identity-media`, type:'user_identity', cardScope:'xingyue', title:'Identity media probe',
+      payload:{ media:{ avatar:'data:image/png;base64,AAAA' } },
+    },
+    expected: 400,
+  });
+  assert(embeddedIdentity.body.error.includes('embedded-identity-image-data'), 'Gateway rejects embedded identity media', embeddedIdentity.body.error);
+
+  const openingCreate = await request('/api/workshop/packages', {
+    method: 'POST', cookie,
+    body: openingPackage({ id: openingId }),
+    expected: 200,
+  });
+  assert(openingCreate.body.reviewStatus === 'pending' && openingCreate.body.revision === 1, 'Gateway accepts canonical opening-v1 package', 'pending revision 1');
 
   const create = await request('/api/workshop/packages', {
     method: 'POST',
     cookie,
-    body: basePackage({ id: packageId, summary: 'P2 smoke package before review.' }),
+    body: basePackage({ id: packageId, summary: 'P2 smoke package before review.', reviewStatus: 'approved', revision: 999 }),
     expected: 200,
   });
   assert(create.body.reviewStatus === 'pending', 'publish creates pending package', `rev ${create.body.revision}`);
   assert(create.body.revision === 1, 'initial revision', 'revision 1');
+  assert(create.body.reviewStatus === 'pending', 'client review state ignored', 'server owns review state');
+
+  const duplicate = await request('/api/workshop/packages', {
+    method: 'POST',
+    cookie,
+    body: basePackage({ id: packageId }),
+    expected: 409,
+  });
+  assert(duplicate.body.error === 'package-exists', 'duplicate POST rejected', '409 package-exists');
 
   const pendingPublic = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, { expected: 404 });
   assert(pendingPublic.status === 404, 'pending hidden from public detail', 'HTTP 404');
@@ -136,9 +191,14 @@ async function runFlow() {
   const pendingList = await adminRequest('/api/admin/review/packages?status=pending');
   assert((pendingList.body.packages || []).some(pkg => pkg.id === packageId), 'admin pending list', packageId);
 
+  const missingReviewRevision = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(packageId)}`, {
+    method: 'POST', body: { status: 'approved' }, expected: 428,
+  });
+  assert(missingReviewRevision.body.error === 'revision-required', 'admin review requires inspected revision', '428 revision-required');
+
   const approved = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(packageId)}`, {
     method: 'POST',
-    body: { status: 'approved' },
+    body: { status: 'approved', revision: 1 },
   });
   assert(approved.body.reviewStatus === 'approved', 'admin approve', 'approved');
   await assertPublicIndex(true, 'approved appears in public index');
@@ -156,6 +216,14 @@ async function runFlow() {
   });
   assert(stale.body.error === 'package-conflict', 'stale update rejected', '409 package-conflict');
 
+  const missingRevision = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, {
+    method: 'PUT',
+    cookie,
+    body: basePackage({ id: packageId, summary: 'Missing revision.' }),
+    expected: 428,
+  });
+  assert(missingRevision.body.error === 'revision-required', 'missing update revision rejected', '428 revision-required');
+
   const updated = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, {
     method: 'PUT',
     cookie,
@@ -169,19 +237,45 @@ async function runFlow() {
 
   await adminRequest(`/api/admin/review/packages/${encodeURIComponent(packageId)}`, {
     method: 'POST',
-    body: { status: 'approved' },
+    body: { status: 'approved', revision: 2 },
   });
   await assertPublicIndex(true, 'reapproved update appears in public index');
   await assertPublicFile(true, 'reapproved update synced to public dir');
 
+  await fs.writeFile(votesFile, JSON.stringify({ votes:{ [packageId]:{ voters:{ [me.body.publisherId]:'up' } } } }, null, 2));
+  const migratedVoteDetail = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, { cookie, expected: 200 });
+  assert(migratedVoteDetail.body.votes.up === 1 && migratedVoteDetail.body.myVote === 'up', 'legacy vote migration preserves myVote and tally', 'up 1, no duplicate');
+  const migratedVotesText = await fs.readFile(votesFile, 'utf8');
+  assert(!migratedVotesText.includes(me.body.publisherId), 'legacy vote migration removes publisherId', 'per-package HMAC only');
+
+  const secondCookie = await devLoginCookie('concurrent-voter');
+  const concurrentVotes = await Promise.all([
+    request(`/api/workshop/packages/${encodeURIComponent(packageId)}/vote`, { method:'POST', cookie, body:{ vote:'up' }, expected:200 }),
+    request(`/api/workshop/packages/${encodeURIComponent(packageId)}/vote`, { method:'POST', cookie:secondCookie, body:{ vote:'up' }, expected:200 }),
+  ]);
+  assert(concurrentVotes.every(item => item.status === 200), 'concurrent approved package votes return without conflict', 'two HTTP 200 responses');
+  const concurrentVoteDetail = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, { cookie, expected:200 });
+  assert(concurrentVoteDetail.body.votes.up === 2 && concurrentVoteDetail.body.myVote === 'up', 'concurrent votes preserve both publishers', 'up 2');
+
+  const phantomVote = await request('/api/workshop/packages/no-such-package/vote', {
+    method: 'POST', cookie, body: { vote: 'up' }, expected: 404,
+  });
+  assert(phantomVote.body.error === 'not-found', 'phantom package vote rejected', '404');
+
   const withdrawn = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, {
     method: 'DELETE',
     cookie,
+    headers: { 'x-package-revision': '2' },
     expected: 200,
   });
   assert(withdrawn.body.ok === true, 'owner withdraw', 'ok');
   await assertPublicIndex(false, 'withdrawn removed from public index');
   await assertPublicFile(false, 'withdrawn removed from public dir');
+
+  const withdrawnVote = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}/vote`, {
+    method: 'POST', cookie, body: { vote: 'down' }, expected: 400,
+  });
+  assert(withdrawnVote.body.error === 'package-not-public', 'withdrawn package vote rejected', '400 package-not-public');
 
   const mine = await request('/api/workshop/me/packages', { cookie, expected: 200 });
   assert((mine.body.packages || []).some(pkg => pkg.id === packageId && pkg.reviewStatus === 'withdrawn'), 'my packages shows withdrawn state', packageId);
@@ -198,7 +292,7 @@ async function devLoginCookie(id) {
 }
 
 function basePackage(overrides = {}) {
-  const type = overrides.type || 'user_identity';
+  const type = overrides.type || 'world_factor';
   return {
     packageVersion: '1.0.0',
     id: overrides.id || packageId,
@@ -211,13 +305,36 @@ function basePackage(overrides = {}) {
     language: 'zh-CN',
     tags: ['p2-smoke', 'ops'],
     payload: {
-      installMode: 'worldbook-entry',
-      worldbookEntries: [
+      worldFactors: [
         {
-          key: '[Rolecard Workshop P2 Smoke]',
-          content: 'This package verifies worldbook-entry workshop install flow and must not patch MVU variables.',
-        },
+          title: 'P2 Workshop Smoke Package',
+          content: 'This package verifies worldbook workshop install flow and must not patch MVU variables.',
+        }
       ],
+    },
+    ...overrides,
+  };
+}
+
+function openingPackage(overrides = {}) {
+  const title = 'P8 Opening Contract Smoke';
+  return {
+    packageVersion: '1.0.0',
+    id: overrides.id || `${packageId}-opening`,
+    type: 'world_factor',
+    cardScope: 'xingyue-opening-v1',
+    title,
+    summary: 'Canonical P8 opening package.',
+    authorName: 'ops-smoke',
+    rating: 'general',
+    language: 'zh-CN',
+    tags: ['p8-opening'],
+    payload: {
+      target: 'xingyue.opening_day_body',
+      schemaVersion: 1,
+      compatibility: { minRuntimeVersion: '3.4.0' },
+      gradeScope: ['middle'],
+      worldFactors: [{ title, content: '{{player}} enters the academy as {{grade}}.' }],
     },
     ...overrides,
   };
@@ -284,6 +401,10 @@ async function assertPrivacyFiles() {
   const auditText = await fs.readFile(auditLogFile, 'utf8');
   const leak = auditText.match(/email|avatar|username|global_name|discriminator|rawDiscord|discordUserId/i);
   assert(!leak, 'audit privacy scan', 'no Discord profile fields');
+
+  const votesText = await fs.readFile(votesFile, 'utf8');
+  const publisherIds = (publisherRegistry.publishers || []).map(item => item.publisherId).filter(Boolean);
+  assert(!publisherIds.some(id => votesText.includes(id)), 'vote privacy scan', 'per-package HMAC voter keys only');
 }
 
 function getSetCookie(res) {

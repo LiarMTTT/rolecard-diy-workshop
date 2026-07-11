@@ -18,10 +18,11 @@ if (args.action === 'list') {
 } else if (args.action === 'approve' || args.action === 'reject') {
   if (!args.id) fail('--id is required');
   const status = args.action === 'approve' ? 'approved' : 'rejected';
+  const detail = await request(`/api/admin/review/packages/${encodeURIComponent(args.id)}`);
   const body = await request(`/api/admin/review/packages/${encodeURIComponent(args.id)}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ status, reason: args.reason || '' }),
+    body: JSON.stringify({ status, reason: args.reason || '', revision: detail.revision }),
   });
   printJson(body);
 } else {

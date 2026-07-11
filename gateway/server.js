@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
+import workshopPackageContract from './shared/workshop-package-contract.js';
 
 const env = process.env;
 const GATEWAY_ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -26,8 +27,6 @@ const PACKAGE_PUBLIC_BASE_URL = String(env.PACKAGE_PUBLIC_BASE_URL || '').replac
 const PUBLIC_PACKAGE_DIR = env.PUBLIC_PACKAGE_DIR || '';
 const PUBLIC_SYNC_REPORT_FILE = env.PUBLIC_SYNC_REPORT_FILE || './data/public-sync-report.json';
 const CORS_ORIGIN = env.CORS_ORIGIN || '*';
-const SUPPORTED_TYPES = new Set(['character', 'user_identity', 'world_factor', 'shop_item', 'blueprint', 'recipe', 'skill', 'function']);
-const BLOCKED_TYPES = new Set(['opening_pack', 'prompt_patch', 'ui_theme']);
 const REVIEW_STATES = new Set(['pending', 'approved', 'rejected', 'withdrawn']);
 const ADMIN_PAGE_FILE = path.join(GATEWAY_ROOT, 'public', 'admin.html');
 const LOGIN_SUCCESS_PAGE_FILE = path.join(GATEWAY_ROOT, 'public', 'login-success.html');
@@ -37,16 +36,17 @@ function corsHeaders(req, headers = {}) {
   const requestOrigin = String(req?.headers?.origin || '');
   const configured = String(CORS_ORIGIN || '*').split(',').map(item => item.trim()).filter(Boolean);
   let allowOrigin = configured[0] || '*';
-  if (configured.includes('*')) allowOrigin = requestOrigin || '*';
+  if (configured.includes('*')) allowOrigin = '*';
   else if (requestOrigin && configured.includes(requestOrigin)) allowOrigin = requestOrigin;
-  return {
+  const result = {
     'access-control-allow-origin': allowOrigin,
-    'access-control-allow-credentials': 'true',
     'access-control-allow-headers': 'authorization,content-type,if-match,x-package-revision',
     'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
     vary: 'Origin',
     ...headers,
   };
+  if (allowOrigin !== '*') result['access-control-allow-credentials'] = 'true';
+  return result;
 }
 
 function json(req, res, status, body, headers = {}) {
@@ -72,12 +72,16 @@ async function file(res, status, filePath, contentType) {
 function statusForError(message) {
   if (message === 'request-too-large') return 413;
   if (message === 'package-conflict') return 409;
+  if (message === 'package-exists') return 409;
+  if (message === 'revision-required') return 428;
+  if (message === 'not-found') return 404;
+  if (message === 'package-not-public') return 400;
   if (message === 'admin-required') return 403;
   if (message === 'admin-token-not-configured') return 503;
   if (message === 'not-package-owner') return 403;
   if (message === 'discord guild membership required') return 403;
   if (message.includes('invalid revision')) return 400;
-  if (message.includes('invalid package') || message.includes('unsupported package') || message.includes('blocked package')) return 400;
+  if (message.includes('invalid') || message.includes('unsupported') || message.includes('blocked') || message.includes('required') || message.includes('mismatch') || message.includes('must-have') || message.includes('unknown-') || message.includes('embedded-')) return 400;
   if (message.includes('ENOENT')) return 404;
   return 500;
 }
@@ -134,6 +138,10 @@ function sessionFromRequest(req) {
   // 优先 Authorization: Bearer（卡片 / Web 工作台跨域用），回退 Cookie（admin 同源页兼容）
   const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
   if (bearer) { const viaHeader = verifyToken(bearer[1].trim()); if (viaHeader) return viaHeader; }
+  const requestOrigin = String(req.headers.origin || '').trim();
+  let gatewayOrigin = '';
+  try { gatewayOrigin = new URL(PUBLIC_BASE_URL).origin; } catch (_) {}
+  if (requestOrigin && requestOrigin !== gatewayOrigin) return null;
   const cookies = parseCookies(req);
   return verifyToken(cookies[SESSION_COOKIE_NAME] || cookies.xy_workshop_session);
 }
@@ -174,28 +182,21 @@ async function readBody(req, maxBytes = 512 * 1024) {
 }
 
 function validatePackage(input) {
-  const pkg = input && typeof input === 'object' ? input : {};
-  const type = String(pkg.type || '').trim();
-  if (BLOCKED_TYPES.has(type)) throw new Error(`blocked package type: ${type}`);
-  if (!SUPPORTED_TYPES.has(type)) throw new Error(`unsupported package type: ${type || 'empty'}`);
-  const id = String(pkg.id || '').trim();
-  const title = String(pkg.title || '').trim();
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,119}$/.test(id)) throw new Error('invalid package id');
-  if (!title || title.length > 120) throw new Error('invalid package title');
+  const pkg = workshopPackageContract.normalizePackage(input, { allowLegacyFactors: false });
   return {
-    packageVersion: String(pkg.packageVersion || pkg.version || '1.0.0'),
-    id,
-    type,
-    cardScope: String(pkg.cardScope || 'xingyue').slice(0, 80),
-    title,
-    summary: String(pkg.summary || '').slice(0, 600),
-    authorName: String(pkg.authorName || 'anonymous').slice(0, 80),
-    rating: ['general', 'mature', 'restricted'].includes(pkg.rating) ? pkg.rating : 'general',
-    language: String(pkg.language || 'zh-CN').slice(0, 20),
-    tags: Array.isArray(pkg.tags) ? pkg.tags.map(tag => String(tag).slice(0, 40)).slice(0, 12) : [],
+    packageVersion: pkg.packageVersion,
+    id: pkg.id,
+    type: pkg.type,
+    cardScope: pkg.cardScope,
+    title: pkg.title,
+    summary: pkg.summary,
+    authorName: pkg.authorName,
+    rating: pkg.rating,
+    language: pkg.language,
+    tags: pkg.tags,
     createdAt: pkg.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    reviewStatus: REVIEW_STATES.has(pkg.reviewStatus) ? pkg.reviewStatus : (REQUIRE_REVIEW ? 'pending' : 'approved'),
+    reviewStatus: REQUIRE_REVIEW ? 'pending' : 'approved',
     rejectionReason: '',
     withdrawnAt: '',
     storage: pkg.storage && typeof pkg.storage === 'object'
@@ -246,6 +247,12 @@ function normalizeRevision(value) {
 
 function expectedRevisionFromRequest(req, input) {
   return normalizeRevision(req.headers['x-package-revision'] || req.headers['if-match'] || input?.expectedRevision || input?.revision);
+}
+
+function requiredExpectedRevision(req, input) {
+  const revision = expectedRevisionFromRequest(req, input);
+  if (revision === null) throw new Error('revision-required');
+  return revision;
 }
 
 function assertRevisionMatch(existing, expectedRevision) {
@@ -330,24 +337,59 @@ async function writePublishers(registry) {
   await fs.writeFile(PUBLISHER_FILE, JSON.stringify(registry, null, 2));
 }
 
-async function readVotes() {
+let voteMutationTail = Promise.resolve();
+
+function withVoteMutationLock(task) {
+  const run = voteMutationTail.then(task, task);
+  voteMutationTail = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function readVotesUnlocked() {
   await ensureStore();
   try {
     const data = JSON.parse(await fs.readFile(VOTES_FILE, 'utf8'));
-    if (!data.votes || typeof data.votes !== 'object') data.votes = {};
+    const sourceVotes = data.votes && typeof data.votes === 'object' && !Array.isArray(data.votes) ? data.votes : {};
+    const votes = Object.create(null);
+    let migratedLegacyPublisherKeys = false;
+    for (const [id, entry] of Object.entries(sourceVotes)) {
+      if (['__proto__', 'prototype', 'constructor'].includes(id)) continue;
+      const sourceVoters = entry?.voters && typeof entry.voters === 'object' && !Array.isArray(entry.voters) ? entry.voters : {};
+      const voters = Object.assign(Object.create(null), sourceVoters);
+      for (const [key, vote] of Object.entries(sourceVoters)) {
+        if (!/^pub_[A-Za-z0-9_-]+$/.test(key)) continue;
+        const hashed = voterKey(id, key);
+        if (!Object.hasOwn(voters, hashed)) voters[hashed] = vote;
+        delete voters[key];
+        migratedLegacyPublisherKeys = true;
+      }
+      votes[id] = { voters };
+    }
+    data.votes = votes;
+    if (migratedLegacyPublisherKeys) await writeVotes(data);
     return data;
   } catch (_error) {
     return { votes: {}, updatedAt: '' };
   }
 }
 
+async function readVotes() {
+  return withVoteMutationLock(() => readVotesUnlocked());
+}
+
 async function writeVotes(data) {
   data.updatedAt = new Date().toISOString();
-  await fs.writeFile(VOTES_FILE, JSON.stringify(data, null, 2));
+  const tempFile = `${VOTES_FILE}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+  try {
+    await fs.writeFile(tempFile, JSON.stringify(data, null, 2));
+    await fs.rename(tempFile, VOTES_FILE);
+  } finally {
+    await fs.rm(tempFile, { force: true }).catch(() => {});
+  }
 }
 
 function voteTally(data, id) {
-  const entry = (data.votes && data.votes[id]) || { voters: {} };
+  const entry = data.votes && Object.hasOwn(data.votes, id) ? data.votes[id] : { voters: {} };
   let up = 0;
   let down = 0;
   for (const v of Object.values(entry.voters || {})) {
@@ -359,18 +401,30 @@ function voteTally(data, id) {
 
 function myVoteOf(data, id, publisherId) {
   if (!publisherId) return 'none';
-  const entry = (data.votes && data.votes[id]) || { voters: {} };
-  return (entry.voters && entry.voters[publisherId]) || 'none';
+  const entry = data.votes && Object.hasOwn(data.votes, id) ? data.votes[id] : { voters: {} };
+  const key = voterKey(id, publisherId);
+  return (entry.voters && entry.voters[key]) || 'none';
+}
+
+function voterKey(id, publisherId) {
+  return crypto.createHmac('sha256', HASH_SECRET).update(`${id}\0${publisherId}`).digest('base64url');
 }
 
 async function setVote(id, publisherId, vote) {
-  const data = await readVotes();
-  if (!data.votes[id]) data.votes[id] = { voters: {} };
-  const voters = data.votes[id].voters || (data.votes[id].voters = {});
-  if (vote === 'up' || vote === 'down') voters[publisherId] = vote;
-  else delete voters[publisherId];
-  await writeVotes(data);
-  return { ...voteTally(data, id), myVote: voters[publisherId] || 'none' };
+  assertPackageId(id);
+  const pkg = await getPackage(id);
+  if (!isPublicPackage(pkg)) throw new Error('package-not-public');
+  return withVoteMutationLock(async () => {
+    const data = await readVotesUnlocked();
+    if (['__proto__', 'prototype', 'constructor'].includes(id)) throw new Error('invalid package id');
+    if (!Object.hasOwn(data.votes, id)) data.votes[id] = { voters: Object.create(null) };
+    const voters = data.votes[id].voters || (data.votes[id].voters = {});
+    const key = voterKey(id, publisherId);
+    if (vote === 'up' || vote === 'down') voters[key] = vote;
+    else delete voters[key];
+    await writeVotes(data);
+    return { ...voteTally(data, id), myVote: voters[key] || 'none' };
+  });
 }
 
 async function getOrCreatePublisher(discordUserHash) {
@@ -556,6 +610,8 @@ async function savePackage(pkg, publisherId, options = {}) {
   const file = packageFilePath(pkg.id);
   let existing = null;
   try { existing = JSON.parse(await fs.readFile(file, 'utf8')); } catch {}
+  if (options.createOnly && existing) throw new Error('package-exists');
+  if (options.updateOnly && !existing) throw new Error('not-found');
   assertRevisionMatch(existing, options.expectedRevision ?? null);
   if (existing && existing.ownerPublisherId !== publisherId) throw new Error('not-package-owner');
   const contentHash = packageContentHash(pkg);
@@ -589,6 +645,7 @@ async function savePackage(pkg, publisherId, options = {}) {
 async function deletePackage(id, publisherId, options = {}) {
   const existing = await getPackage(id);
   if (existing.ownerPublisherId !== publisherId) throw new Error('not-package-owner');
+  assertRevisionMatch(existing, options.expectedRevision ?? null);
   const withdrawn = {
     ...existing,
     reviewStatus: 'withdrawn',
@@ -626,6 +683,7 @@ async function listPackagesForReview(status = 'pending', baseUrl = PUBLIC_BASE_U
 async function setPackageReviewStatus(id, status, reason = '', reviewer = 'admin', options = {}) {
   if (!REVIEW_STATES.has(status) || status === 'withdrawn') throw new Error('invalid review status');
   const existing = await getPackage(id);
+  assertRevisionMatch(existing, options.expectedRevision ?? null);
   const next = {
     ...existing,
     reviewStatus: status,
@@ -745,7 +803,7 @@ async function route(req, res) {
     requireAdmin(req);
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
     const body = JSON.parse(await readBody(req, 32 * 1024) || '{}');
-    const meta = await setPackageReviewStatus(id, String(body.status || ''), String(body.reason || ''), 'admin', { baseUrl: publicBaseUrl });
+    const meta = await setPackageReviewStatus(id, String(body.status || ''), String(body.reason || ''), 'admin', { baseUrl: publicBaseUrl, expectedRevision: requiredExpectedRevision(req, body) });
     return json(req, res, 200, meta);
   }
   if (url.pathname === '/api/workshop/packages' && req.method === 'POST') {
@@ -753,7 +811,7 @@ async function route(req, res) {
     if (!session) return json(req, res, 401, { error: 'login-required' });
     const input = JSON.parse(await readBody(req));
     const pkg = validatePackage(input);
-    const meta = await savePackage(pkg, session.publisherId, { expectedRevision: expectedRevisionFromRequest(req, input), baseUrl: publicBaseUrl });
+    const meta = await savePackage(pkg, session.publisherId, { createOnly: true, baseUrl: publicBaseUrl });
     return json(req, res, 200, meta);
   }
   if (url.pathname.startsWith('/api/workshop/packages/') && req.method === 'PUT') {
@@ -763,14 +821,14 @@ async function route(req, res) {
     const input = JSON.parse(await readBody(req));
     const pkg = validatePackage(input);
     if (pkg.id !== id) return json(req, res, 400, { error: 'package-id-mismatch' });
-    const meta = await savePackage(pkg, session.publisherId, { expectedRevision: expectedRevisionFromRequest(req, input), baseUrl: publicBaseUrl });
+    const meta = await savePackage(pkg, session.publisherId, { updateOnly: true, expectedRevision: requiredExpectedRevision(req, input), baseUrl: publicBaseUrl });
     return json(req, res, 200, meta);
   }
   if (url.pathname.startsWith('/api/workshop/packages/') && req.method === 'DELETE') {
     const session = sessionFromRequest(req);
     if (!session) return json(req, res, 401, { error: 'login-required' });
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
-    await deletePackage(id, session.publisherId, { baseUrl: publicBaseUrl });
+    await deletePackage(id, session.publisherId, { expectedRevision: requiredExpectedRevision(req), baseUrl: publicBaseUrl });
     return json(req, res, 200, { ok: true });
   }
   if (/^\/api\/workshop\/packages\/[^/]+\/vote$/.test(url.pathname) && req.method === 'POST') {

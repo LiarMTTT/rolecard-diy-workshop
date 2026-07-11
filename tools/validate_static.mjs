@@ -9,7 +9,6 @@ const requiredJson = [
   'cards/xingyue/index.json',
   'shared/tags.json',
   'schemas/workshop-package.schema.json',
-  'runtime/xingyue/2.9.0/manifest.json',
   'examples/character.example.json',
   'examples/user_identity.example.json',
   'examples/world_factor.example.json',
@@ -34,12 +33,16 @@ for (const relativePath of requiredJson) {
 
 const workshopIndex = await readJson('workshop-index.json');
 assert(Array.isArray(workshopIndex.cards) && workshopIndex.cards.length > 0, 'workshop-index cards must not be empty');
+const runtimeManifests = [];
 for (const card of workshopIndex.cards) {
   assert(card.cardScope, 'cardScope is required');
   assert(card.indexUrl, `${card.cardScope} indexUrl is required`);
   assert(card.runtimeManifestUrl, `${card.cardScope} runtimeManifestUrl is required`);
   await readJson(card.indexUrl);
-  await readJson(card.runtimeManifestUrl);
+  runtimeManifests.push({
+    relativePath: card.runtimeManifestUrl,
+    manifest: await readJson(card.runtimeManifestUrl),
+  });
 }
 
 const packageSchema = await readJson('schemas/workshop-package.schema.json');
@@ -54,14 +57,17 @@ for (const example of ['examples/character.example.json', 'examples/user_identit
   }
 }
 
-const runtimeManifest = await readJson('runtime/xingyue/2.9.0/manifest.json');
-for (const mod of runtimeManifest.modules || []) {
-  if (!mod.url || !mod.sha256) continue;
-  const filename = decodeURIComponent(String(mod.url).split('/').pop() || '');
-  const filePath = path.join(root, 'runtime/xingyue/2.9.0', filename);
-  const actual = sha256(await fs.readFile(filePath));
-  assert(actual === mod.sha256, `${mod.id} sha256 mismatch: ${actual} !== ${mod.sha256}`);
-  console.log(`[sha256] ${mod.id}`);
+for (const { relativePath, manifest } of runtimeManifests) {
+  const runtimeDir = path.dirname(relativePath);
+  for (const mod of manifest.modules || []) {
+    if (!mod.url || !mod.sha256) continue;
+    const filename = decodeURIComponent(new URL(String(mod.url), 'https://workshop.invalid/').pathname.split('/').pop() || '');
+    assert(filename && filename !== '.' && filename !== '..', `${mod.id} has invalid module url`);
+    const filePath = path.join(root, runtimeDir, filename);
+    const actual = sha256(await fs.readFile(filePath));
+    assert(actual === mod.sha256, `${mod.id} sha256 mismatch: ${actual} !== ${mod.sha256}`);
+    console.log(`[sha256] ${mod.id}`);
+  }
 }
 
 console.log('[ok] static workshop contract validated');

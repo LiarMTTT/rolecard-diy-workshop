@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, 'dist-pages');
+const workshopIndex = JSON.parse(await fs.readFile(path.join(root, 'workshop-index.json'), 'utf8'));
+const runtimeManifestLinks = (workshopIndex.cards || [])
+  .map(card => card.runtimeManifestUrl)
+  .filter(Boolean);
 const entries = [
   'workshop-index.json',
   'README.md',
@@ -52,7 +56,7 @@ const indexHtml = `<!doctype html>
     <section class="panel">
       <p><a href="./workshop-index.json">workshop-index.json</a></p>
       <p><a href="./cards/xingyue/index.json">cards/xingyue/index.json</a></p>
-      <p><a href="./runtime/xingyue/2.9.0/manifest.json">runtime/xingyue/2.9.0/manifest.json</a></p>
+      ${runtimeManifestLinks.map(url => `<p><a href="./${url}">${url}</a></p>`).join('\n      ')}
       <p><a href="./schemas/workshop-package.schema.json">schemas/workshop-package.schema.json</a></p>
     </section>
     <p>Player workshop packages are JSON content packages. User-uploaded JavaScript is not accepted or executed.</p>

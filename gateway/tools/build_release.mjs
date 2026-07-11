@@ -34,4 +34,9 @@ async function copyEntry(relativePath) {
 await fs.rm(outDir, { recursive: true, force: true });
 await fs.mkdir(outDir, { recursive: true });
 for (const entry of entries) await copyEntry(entry);
+await fs.mkdir(path.join(outDir, 'shared'), { recursive: true });
+await fs.copyFile(
+  path.join(repoRoot, 'shared', 'workshop-package-contract.js'),
+  path.join(outDir, 'shared', 'workshop-package-contract.js'),
+);
 console.log(`[ok] gateway release built at ${outDir}`);

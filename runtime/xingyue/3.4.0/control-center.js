@@ -1,10 +1,13 @@
 (() => {
-  const VERSION = '3.3.8';
-  const BUTTON_NAME = '星月私立高等学院 控制中心 v3.3.8';
+  const VERSION = '3.4.0';
+  const BUTTON_NAME = '星月私立高等学院 控制中心 v3.4.0';
   // 任务3.3：单一真相源 RUNTIME_BASE_URL；media_library.js/status_bar_regex.html 从 window.XY_RT_BASE 读（降级保留内联硬编码）
-  const RUNTIME_BASE_URL = 'https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.8';
-  // 任务3.4：开局草稿 localStorage key 提顶层常量，版本 bump 只改这一处（bindOpeningPage 内层 STORAGE_KEY 须与此保持同步）
+  const RUNTIME_BASE_URL = 'https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.0';
+  // OpeningDraftV2：旧 key 只作一次性迁移与回滚来源，新草稿按聊天 metadata UUID 分区。
   const OPENING_DRAFT_KEY = 'xingyue-opening-draft-v333';
+  const OPENING_DRAFTS_V2_KEY = 'xingyue-opening-drafts-v2';
+  const OPENING_DRAFT_UUID_METADATA_KEY = 'xingyue_opening_draft_uuid_v2';
+  const OPENING_DRAFT_SCHEMA_VERSION = 2;
   const CONTROL_PANEL_ID = 'xingyue-control-center-panel';
   const CONTROL_PANEL_STYLE_ID = 'xingyue-control-center-style';
   const WAND_CONTAINER_ID = 'xingyue-control-center-wand-container';
@@ -18,7 +21,9 @@
   const DEFAULT_GATEWAY_URL = 'https://43-132-171-157.sslip.io';
   const SUPPORTED_TYPES = ['character','user_identity','world_factor','shop_item','blueprint','recipe','skill','function'];
   const BLOCKED_TYPES = ['opening_pack','prompt_patch','ui_theme'];
-  const SUPPORTED_CARD_SCOPES = ['xingyue','shared'];
+  const SUPPORTED_CARD_SCOPES = ['xingyue','shared','xingyue-opening-v1'];
+  const OPENING_PACKAGE_SCOPE = 'xingyue-opening-v1';
+  const OPENING_PACKAGE_TARGET = 'xingyue.opening_day_body';
   const SUPPORTED_RATINGS = ['general','mature','restricted'];
   const OPENING_SOURCE = 'xingyue-opening-wizard';
   const WORKSHOP_SOURCE = 'xingyue-workshop';
@@ -89,7 +94,20 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.3.8-stability-r8-20260710';
+  const GIT_RUNTIME_REVISION = '3.4.0-stability-r26-20260711';
+  function createRuntimeOwnerId() {
+    const targets = [window];
+    try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
+    for (const target of targets) {
+      try {
+        const uuid = target?.crypto?.randomUUID?.();
+        if (uuid) return GIT_RUNTIME_REVISION + ':' + uuid;
+      } catch (_) {}
+    }
+    return GIT_RUNTIME_REVISION + ':' + Date.now().toString(36) + ':' + String(++createRuntimeOwnerId.fallbackCounter);
+  }
+  createRuntimeOwnerId.fallbackCounter = 0;
+  runtimeOwner.id = createRuntimeOwnerId();
   const GIT_RUNTIME_REVISION_KEY = 'xingyue-control-center-runtime-revision';
   const OMNI_FLAT_STYLE_ID = 'xingyue-omni-flat-style';
   const OMNI_FLAT_CSS = [
@@ -191,6 +209,117 @@
     }
     return null;
   }
+  const WORLDBOOK_AI_SESSION_KEY = 'xingyue.worldbook-ai-session.v1';
+  let worldbookAiMemoryConfig = null;
+  const worldbookAiActiveIds = new Set();
+  function worldbookAiSessionStore() {
+    const candidates = [hostWindow(),window];
+    for (const target of candidates) { try { if (target?.sessionStorage) return target.sessionStorage; } catch (_) {} }
+    return null;
+  }
+  function normalizeWorldbookAiRuntimeConfig(value = {}) {
+    return {
+      source:value?.source === 'custom' ? 'custom' : 'current',
+      apiurl:String(value?.apiurl || '').trim().slice(0,2048),
+      key:String(value?.key || '').slice(0,4096),
+      model:String(value?.model || '').trim().slice(0,200),
+      rememberKey:value?.rememberKey === true,
+      allowLocalHttp:value?.allowLocalHttp === true,
+    };
+  }
+  function isWorldbookAiLoopback(hostname) {
+    const raw = String(hostname || '').toLowerCase();
+    const host = raw.startsWith('[') && raw.endsWith(']') ? raw.slice(1,-1) : raw;
+    if (host === 'localhost' || host.endsWith('.localhost') || host === '::1') return true;
+    const parts = host.split('.').map(Number);
+    return parts.length === 4 && parts.every(part => Number.isInteger(part) && part >= 0 && part <= 255) && parts[0] === 127;
+  }
+  function normalizeWorldbookAiApiUrl(value, allowLocalHttp = false) {
+    let url;
+    try { url = new URL(String(value || '').trim()); } catch (_) { throw new Error('自定义 API 地址无效'); }
+    if (!['http:','https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('自定义 API 地址必须是不含凭据、query 或 fragment 的完整基础 URL');
+    if (url.protocol === 'http:' && !(allowLocalHttp && isWorldbookAiLoopback(url.hostname))) throw new Error('自定义 API 默认要求 HTTPS；本机 HTTP 需显式开启开发模式');
+    return url.href.replace(/\/$/,'');
+  }
+  function loadWorldbookAiSessionConfig() {
+    if (worldbookAiMemoryConfig) return { ...worldbookAiMemoryConfig };
+    let stored = {};
+    try { stored = JSON.parse(worldbookAiSessionStore()?.getItem(WORLDBOOK_AI_SESSION_KEY) || '{}'); } catch (_) { stored = {}; }
+    worldbookAiMemoryConfig = normalizeWorldbookAiRuntimeConfig(stored);
+    if (!worldbookAiMemoryConfig.rememberKey) worldbookAiMemoryConfig.key = '';
+    return { ...worldbookAiMemoryConfig };
+  }
+  function saveWorldbookAiSessionConfig(value) {
+    const next = normalizeWorldbookAiRuntimeConfig(value);
+    worldbookAiMemoryConfig = next;
+    const sessionValue = { source:next.source, apiurl:next.apiurl, model:next.model, rememberKey:next.rememberKey, allowLocalHttp:next.allowLocalHttp };
+    if (next.rememberKey) sessionValue.key = next.key;
+    let sessionStored = false;
+    try { const store = worldbookAiSessionStore(); if (store) { store.setItem(WORLDBOOK_AI_SESSION_KEY,JSON.stringify(sessionValue)); sessionStored = true; } } catch (_) {}
+    return { ...next, sessionStored };
+  }
+  function clearWorldbookAiSessionConfig() {
+    worldbookAiMemoryConfig = { source:'current', apiurl:'', key:'', model:'', rememberKey:false, allowLocalHttp:false };
+    try { worldbookAiSessionStore()?.removeItem(WORLDBOOK_AI_SESSION_KEY); } catch (_) {}
+    try { worldbookEditor?.clearAiConfig?.({ clearAdapter:false }); } catch (_) {}
+    return true;
+  }
+  function assertWorldbookAiRequest(request) {
+    if (!request || typeof request !== 'object') throw new Error('AI 请求不存在');
+    if (!/^xingyue-p7-(?:keywords|compress|draft)-/.test(String(request.generationId || ''))) throw new Error('AI generation_id 无效');
+    if (request.maxChatHistory !== 0) throw new Error('AI 请求必须禁用聊天历史');
+    if (!Array.isArray(request.orderedPrompts) || request.orderedPrompts.length !== 2 || request.orderedPrompts[0]?.role !== 'system' || request.orderedPrompts[1] !== 'user_input') throw new Error('AI 提示词必须严格使用 system + user_input');
+    if (typeof request.userInput !== 'string' || !request.userInput || request.userInput.length > 80000) throw new Error('AI 用户上下文为空或超限');
+    if (!request.jsonSchema?.name || request.jsonSchema?.strict !== true || request.jsonSchema?.value?.additionalProperties !== false) throw new Error('AI JSON Schema 契约无效');
+  }
+  const worldbookAiAssistant = {
+    loadSessionConfig:loadWorldbookAiSessionConfig,
+    saveSessionConfig:saveWorldbookAiSessionConfig,
+    clearSessionConfig:clearWorldbookAiSessionConfig,
+    async generate(request, value) {
+      assertWorldbookAiRequest(request);
+      const config = normalizeWorldbookAiRuntimeConfig(value);
+      const helper = helperHost();
+      const fn = helper?.generateRaw || window.generateRaw || hostWindow().generateRaw;
+      if (typeof fn !== 'function') throw new Error('Tavern Helper generateRaw 不可用');
+      const generationId = String(request.generationId);
+      const payload = {
+        generation_id:generationId,
+        user_input:request.userInput,
+        should_silence:true,
+        should_stream:false,
+        max_chat_history:0,
+        ordered_prompts:request.orderedPrompts,
+        json_schema:{ name:request.jsonSchema.name, description:request.jsonSchema.description || '', value:request.jsonSchema.value, strict:true },
+      };
+      if (config.source === 'custom') {
+        const apiurl = normalizeWorldbookAiApiUrl(config.apiurl,config.allowLocalHttp);
+        if (!config.model) throw new Error('自定义 API 必须填写模型名称');
+        payload.custom_api = { apiurl, key:config.key, model:config.model, source:'openai', max_tokens:request.task === 'keywords' ? 1200 : 4000 };
+      }
+      worldbookAiActiveIds.add(generationId);
+      try { return await fn.call(helper || hostWindow(),payload); }
+      finally { worldbookAiActiveIds.delete(generationId); }
+    },
+    cancel(generationId) {
+      const id = String(generationId || '');
+      const helper = helperHost();
+      const stop = helper?.stopGenerationById || window.stopGenerationById || hostWindow().stopGenerationById;
+      if (typeof stop !== 'function') return false;
+      const result = stop.call(helper || hostWindow(),id);
+      if (result !== false) worldbookAiActiveIds.delete(id);
+      return result;
+    },
+    cancelAll() {
+      const ids = [...worldbookAiActiveIds];
+      ids.forEach(id => { try { this.cancel(id); } catch (_) {} });
+      return ids.length;
+    },
+    status() {
+      const config = loadWorldbookAiSessionConfig();
+      return { source:config.source, apiurl:config.apiurl, model:config.model, rememberKey:config.rememberKey, allowLocalHttp:config.allowLocalHttp, hasKey:!!config.key, activeRequests:worldbookAiActiveIds.size };
+    },
+  };
   function getCurrentMvuData() {
     const Mvu = mvuHost();
     if (!Mvu?.getMvuData) throw new Error('MVU 尚未就绪');
@@ -566,11 +695,14 @@
       + '</div></div>';
   }
   function assertOptionalString(value, name, maxLength) {
-    if (value === undefined || value === null) return;
+    if (value === undefined) return;
     if (typeof value !== 'string') throw new Error(name + ' 必须是字符串');
     if (value.length > maxLength) throw new Error(name + ' 超过长度限制');
   }
   function validatePackage(pkg, allowedTypes) {
+    const sharedContract = window.XingyueWorkshopPackageContract || hostWindow().XingyueWorkshopPackageContract;
+    if (!sharedContract?.normalizePackage) throw new Error('创意工坊安全契约未加载；本地编辑仍可使用，但导入、发布与安装已停用');
+    pkg = sharedContract.normalizePackage(pkg, { allowedTypes, runtimeVersion: VERSION, allowLegacyFactors: true });
     if (!isObject(pkg)) throw new Error('工坊包不是 JSON 对象');
     const size = JSON.stringify(pkg).length;
     if (size > 256 * 1024) throw new Error('工坊包超过 256KB 限制');
@@ -596,7 +728,184 @@
       });
     }
     if (!isObject(pkg.payload)) throw new Error('工坊包缺少 payload');
+    const openingByScope = pkg.cardScope === OPENING_PACKAGE_SCOPE;
+    const openingByTarget = pkg.type === 'world_factor' && pkg.payload.target === OPENING_PACKAGE_TARGET;
+    if (openingByScope !== openingByTarget) throw new Error('开局正文包的 scope 与 target 必须同时匹配');
+    if (openingByScope) {
+      if (pkg.payload.schemaVersion !== 1) throw new Error('开局正文包 schemaVersion 必须为 1');
+      if (pkg.payload.compatibility?.minRuntimeVersion !== '3.4.0') throw new Error('开局正文包最低 runtime 必须为 3.4.0');
+      const factors = Array.isArray(pkg.payload.worldFactors) ? pkg.payload.worldFactors : (Array.isArray(pkg.payload.factors) ? pkg.payload.factors : []);
+      if (factors.length !== 1) throw new Error('开局正文包必须且只能包含一项 worldFactors');
+      if (String(factors[0]?.title || '') !== pkg.title) throw new Error('开局正文包内外标题不一致');
+      const gradeScope = pkg.payload.gradeScope;
+      const allowedBands = ['primary','middle','high','university','none','custom','all'];
+      if (!Array.isArray(gradeScope) || !gradeScope.length || new Set(gradeScope).size !== gradeScope.length || gradeScope.some(item => !allowedBands.includes(item)) || (gradeScope.includes('all') && gradeScope.length !== 1)) throw new Error('开局正文包适用年级无效');
+      validateOpeningStory(String(factors[0]?.content || ''), { grade:'' });
+      pkg.payload.worldFactors = factors.map(item => ({ ...item, title:pkg.title, content:String(item.content || '').replace(/\r\n?/g, '\n') }));
+      delete pkg.payload.factors;
+    }
+    if (pkg.type === 'user_identity') {
+      const allowedIdentityPayloadFields = new Set(['identity','grade','callname','background','appearance','skills','avatar','portrait','media','core_attributes']);
+      Object.keys(pkg.payload).forEach(key => {
+        if (!allowedIdentityPayloadFields.has(key)) throw new Error('身份模板包含未知 payload 字段：' + key);
+      });
+      ['identity','grade','callname','background','appearance','skills','avatar','portrait'].forEach(field => {
+        const shortField = field === 'identity' || field === 'grade' || field === 'callname';
+        assertOptionalString(pkg.payload[field], '身份模板 payload.' + field, shortField ? 80 : 12000);
+      });
+      if (pkg.payload.media !== undefined && !isObject(pkg.payload.media)) throw new Error('身份模板 payload.media 必须是对象');
+      if (isObject(pkg.payload.media)) {
+        Object.keys(pkg.payload.media).forEach(key => {
+          if (key !== 'avatar' && key !== 'portrait') throw new Error('身份模板包含未知 media 字段：' + key);
+        });
+        assertOptionalString(pkg.payload.media.avatar, '身份模板 payload.media.avatar', 2048);
+        assertOptionalString(pkg.payload.media.portrait, '身份模板 payload.media.portrait', 2048);
+      }
+      if (pkg.payload.core_attributes !== undefined && !isObject(pkg.payload.core_attributes)) throw new Error('身份模板 core_attributes 必须是对象');
+      if (isObject(pkg.payload.core_attributes)) {
+        Object.entries(pkg.payload.core_attributes).forEach(([key, value]) => {
+          if (!IDENTITY_ATTRIBUTE_KEYS.includes(key)) throw new Error('身份模板包含未知核心属性：' + key);
+          if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 30) {
+            throw new Error('身份模板核心属性 ' + key + ' 必须是 0–30 的有限数值');
+          }
+        });
+      }
+      if (containsEmbeddedImageData(pkg.payload)) throw new Error('身份模板不能内嵌图片二进制，请改用媒体库 key 或 http(s) URL');
+      const rawMedia = [pkg.payload.avatar, pkg.payload.portrait, pkg.payload.media?.avatar, pkg.payload.media?.portrait];
+      rawMedia.filter(value => String(value ?? '').trim()).forEach(value => {
+        if (!normalizeIdentityMediaReference(value)) throw new Error('身份模板媒体引用无效，请使用媒体库 key 或 http(s) URL');
+      });
+      if (!userIdentityPayloadHasContent(pkg.payload)) throw new Error('身份模板至少需要文字、六项属性或一项媒体引用');
+    }
     return pkg;
+  }
+  // P8：无状态 Bearer 客户端。昵称与头像只保存在内存；跨域 API 不依赖第三方 Cookie。
+  function getWorkshopToken() { try { return localStorage.getItem('xingyue-workshop-token') || ''; } catch (_) { return ''; } }
+  function setWorkshopToken(token) { try { if (token) localStorage.setItem('xingyue-workshop-token', String(token)); else localStorage.removeItem('xingyue-workshop-token'); } catch (_) {} }
+  function getWorkshopIdentity() { return workshopIdentity ? { ...workshopIdentity } : null; }
+  function authHeaders(extra) {
+    const headers = { ...(extra || {}) };
+    const token = getWorkshopToken();
+    if (token) headers.authorization = 'Bearer ' + token;
+    return headers;
+  }
+  function gatewayBaseUrl() { return String(settings.gatewayUrl || DEFAULT_GATEWAY_URL || '').replace(/\/+$/, ''); }
+  async function workshopResponse(res, action) {
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) return body;
+    const code = String(body.error || ('HTTP ' + res.status));
+    if (res.status === 401) workshopAuth = { checked:true, loggedIn:false, publisherId:'', error:'login-required' };
+    if (res.status === 409) throw new Error(action + '发生版本冲突，请刷新“我的发布”后重试（' + code + '）');
+    if (res.status === 428) throw new Error(action + '缺少 revision，请先刷新包状态');
+    throw new Error(action + '失败：' + code);
+  }
+  async function fetchJson(url, options) {
+    const opt = options || {};
+    const res = await fetch(url, { credentials:'omit', ...opt, headers:authHeaders(opt.headers) });
+    return workshopResponse(res, '读取工坊');
+  }
+  async function checkWorkshopAuth() {
+    const base = gatewayBaseUrl();
+    if (!base) { workshopAuth = { checked:true, loggedIn:false, publisherId:'', error:'gateway-url-missing' }; return { ...workshopAuth }; }
+    try {
+      const res = await fetch(base + '/api/workshop/me', { credentials:'omit', headers:authHeaders() });
+      const body = await res.json().catch(() => ({}));
+      workshopAuth = { checked:true, loggedIn:Boolean(res.ok && body.loggedIn), publisherId:String(body.publisherId || ''), error:res.ok || res.status === 401 ? '' : 'HTTP ' + res.status };
+    } catch (error) { workshopAuth = { checked:true, loggedIn:false, publisherId:'', error:error.message || String(error) }; }
+    return { ...workshopAuth };
+  }
+  function workshopLoginUrl() {
+    let ret = '';
+    try { ret = hostWindow().location.origin || ''; } catch (_) {}
+    return gatewayBaseUrl() + '/auth/discord/login' + (ret ? ('?return=' + encodeURIComponent(ret)) : '');
+  }
+  function captureWorkshopLogin() {
+    let hw;
+    try { hw = hostWindow(); } catch (_) { return; }
+    if (!hw) return;
+    const previous = hw.__xyWorkshopLoginBinding;
+    if (previous?.handler) { try { hw.removeEventListener('message', previous.handler); } catch (_) {} }
+    const handler = event => {
+      try {
+        const gw = gatewayBaseUrl();
+        if (!gw || new URL(gw).origin !== event.origin) return;
+        const data = event.data;
+        if (!data || data.type !== 'xy-workshop-token' || !data.token) return;
+        setWorkshopToken(String(data.token));
+        workshopIdentity = data.name || data.avatar ? { name:String(data.name || ''), avatar:String(data.avatar || '') } : null;
+        void checkWorkshopAuth().then(async () => {
+          const openingRoot = currentOwnedOpeningRoots()[0];
+          if (openingRoot?.__xyOpeningRefreshWorkshop) await openingRoot.__xyOpeningRefreshWorkshop();
+          else await fetchWorkshopCatalog();
+        }).catch(() => {});
+      } catch (_) {}
+    };
+    hw.addEventListener('message', handler);
+    const binding = { owner:runtimeOwner, handler };
+    hw.__xyWorkshopLoginBinding = binding;
+    disposers.push(() => {
+      try { hw.removeEventListener('message', handler); } catch (_) {}
+      try { if (hw.__xyWorkshopLoginBinding === binding) delete hw.__xyWorkshopLoginBinding; } catch (_) {}
+    });
+  }
+  async function logout() {
+    try { await fetch(gatewayBaseUrl() + '/api/workshop/logout', { method:'POST', credentials:'omit', headers:authHeaders() }); } catch (_) {}
+    setWorkshopToken('');
+    workshopAuth = { checked:true, loggedIn:false, publisherId:'', error:'' };
+    workshopIdentity = null;
+    return { ...workshopAuth };
+  }
+  async function fetchWorkshopCatalog(options = {}) {
+    const types = Array.isArray(options.types) ? options.types : [];
+    lastError = '';
+    await checkWorkshopAuth();
+    const scopes = ['xingyue','shared',OPENING_PACKAGE_SCOPE];
+    const settled = await Promise.allSettled(scopes.map(scope => fetchJson(gatewayBaseUrl() + '/api/workshop/packages?cardScope=' + encodeURIComponent(scope))));
+    const ok = settled.filter(item => item.status === 'fulfilled');
+    if (!ok.length) {
+      const error = settled.find(item => item.status === 'rejected')?.reason || new Error('Gateway 不可用');
+      lastError = 'gateway-index:' + (error.message || error);
+      throw error;
+    }
+    const byId = new Map();
+    ok.forEach(item => (item.value.packages || []).forEach(pkg => {
+      if (!pkg?.id || (types.length && !types.includes(pkg.type))) return;
+      byId.set(String(pkg.type || '') + ':' + String(pkg.id), pkg);
+    }));
+    workshopCache = [...byId.values()];
+    try { renderPanel(); } catch (_) {}
+    return workshopCache.slice();
+  }
+  async function publishPackage(input) {
+    if (!workshopAuth.loggedIn) throw new Error('请先完成 Discord 登录');
+    let pkg = validatePackage(input);
+    if (!Number.isInteger(Number(pkg.revision)) || Number(pkg.revision) < 1) {
+      const owned = await fetchJson(gatewayBaseUrl() + '/api/workshop/me/packages');
+      const existing = (owned.packages || []).find(item => String(item.id) === String(pkg.id) && String(item.type) === String(pkg.type));
+      if (existing && Number.isInteger(Number(existing.revision)) && Number(existing.revision) >= 1) pkg = { ...pkg, revision:Number(existing.revision) };
+    }
+    const updating = Number.isInteger(Number(pkg.revision)) && Number(pkg.revision) >= 1;
+    const url = gatewayBaseUrl() + '/api/workshop/packages' + (updating ? '/' + encodeURIComponent(pkg.id) : '');
+    const headers = authHeaders({ 'content-type':'application/json' });
+    if (updating) headers['x-package-revision'] = String(pkg.revision);
+    const res = await fetch(url, { method:updating ? 'PUT' : 'POST', credentials:'omit', headers, body:JSON.stringify(pkg) });
+    return workshopResponse(res, updating ? '更新工坊包' : '发布工坊包');
+  }
+  async function myPackages() {
+    await checkWorkshopAuth();
+    if (!workshopAuth.loggedIn) throw new Error('请先完成 Discord 登录和服务器成员确认');
+    return fetchJson(gatewayBaseUrl() + '/api/workshop/me/packages');
+  }
+  async function withdrawPackage(id, revision) {
+    if (!workshopAuth.loggedIn) throw new Error('请先完成 Discord 登录');
+    if (!Number.isInteger(Number(revision)) || Number(revision) < 1) throw new Error('撤回前必须刷新并取得有效 revision');
+    const res = await fetch(gatewayBaseUrl() + '/api/workshop/packages/' + encodeURIComponent(id), { method:'DELETE', credentials:'omit', headers:authHeaders({ 'x-package-revision':String(revision) }) });
+    return workshopResponse(res, '撤回工坊包');
+  }
+  async function votePackage(id, vote) {
+    if (!workshopAuth.loggedIn) throw new Error('请先完成 Discord 登录');
+    const res = await fetch(gatewayBaseUrl() + '/api/workshop/packages/' + encodeURIComponent(id) + '/vote', { method:'POST', credentials:'omit', headers:authHeaders({ 'content-type':'application/json' }), body:JSON.stringify({ vote }) });
+    return workshopResponse(res, '工坊投票');
   }
   async function packageDetail(pkg) {
     if (pkg.payload) return validatePackage(pkg);
@@ -618,15 +927,1006 @@
       JSON.stringify(pkg.payload || {}, null, 2),
     ].join('\n');
   }
-  function readOpeningDraft() {
-    try { return JSON.parse(localStorage.getItem(OPENING_DRAFT_KEY) || '{}') || {}; } catch (_) { return {}; }
+  // <opening-draft-v2-core>
+  const IDENTITY_ATTRIBUTE_KEYS = ['格斗','平衡','反应','感知','技巧','精神'];
+  const IDENTITY_DEFAULT_ATTRIBUTES = Object.freeze({ 格斗:0, 平衡:0, 反应:0, 感知:0, 技巧:0, 精神:0 });
+  const IDENTITY_TEXT_FIELDS = ['identity','grade','callname','background','appearance','skills'];
+  const LEGACY_DEFAULT_GRADE = '初三';
+  const GRADE_PRESET_VALUES = Object.freeze([
+    '小学一年级','小学二年级','小学三年级','小学四年级','小学五年级','小学六年级',
+    '初一','初二','初三','高一','高二','高三',
+    '大学一年级','大学二年级','大学三年级','大学四年级','不适用',
+  ]);
+  const GRADE_ALIASES = Object.freeze({
+    小一:'小学一年级', 小二:'小学二年级', 小三:'小学三年级', 小四:'小学四年级', 小五:'小学五年级', 小六:'小学六年级',
+    初中一年级:'初一', 初中二年级:'初二', 初中三年级:'初三',
+    高中一年级:'高一', 高中二年级:'高二', 高中三年级:'高三',
+    大一:'大学一年级', 大二:'大学二年级', 大三:'大学三年级', 大四:'大学四年级',
+    无:'不适用', 非学生:'不适用', 'N/A':'不适用', 'n/a':'不适用', 未提供年级:'',
+  });
+  function normalizeGrade(value) {
+    const raw = String(value ?? '').trim().replace(/\s+/g, ' ');
+    if (!raw) return '';
+    if (hasOwn(GRADE_ALIASES, raw)) return GRADE_ALIASES[raw];
+    const compact = raw.replace(/\s+/g, '');
+    const primary = compact.match(/^小学([1-6一二三四五六])年级$/);
+    if (primary) {
+      const map = { '1':'一','2':'二','3':'三','4':'四','5':'五','6':'六', 一:'一',二:'二',三:'三',四:'四',五:'五',六:'六' };
+      return '小学' + map[primary[1]] + '年级';
+    }
+    const middle = compact.match(/^初中?([1-3一二三])年级?$/);
+    if (middle) return '初' + ({ '1':'一','2':'二','3':'三',一:'一',二:'二',三:'三' })[middle[1]];
+    const high = compact.match(/^高中?([1-3一二三])年级?$/);
+    if (high) return '高' + ({ '1':'一','2':'二','3':'三',一:'一',二:'二',三:'三' })[high[1]];
+    const university = compact.match(/^(?:大学|本科)([1-4一二三四])年级$/);
+    if (university) return '大学' + ({ '1':'一','2':'二','3':'三','4':'四',一:'一',二:'二',三:'三',四:'四' })[university[1]] + '年级';
+    return raw.slice(0, 80);
   }
-  function writeOpeningDraft(patch) {
-    const next = { ...readOpeningDraft(), ...(patch || {}) };
-    try { localStorage.setItem(OPENING_DRAFT_KEY, JSON.stringify(next)); } catch (_) {}
-    return next;
+  function gradeBand(value) {
+    const grade = normalizeGrade(value);
+    if (!grade || grade === '不适用') return grade === '不适用' ? 'none' : 'custom';
+    if (/^小学[一二三四五六]年级$/.test(grade)) return 'primary';
+    if (/^初[一二三]$/.test(grade)) return 'middle';
+    if (/^高[一二三]$/.test(grade)) return 'high';
+    if (/^大学[一二三四]年级$/.test(grade)) return 'university';
+    return 'custom';
+  }
+  function hasOwn(value, key) {
+    return !!value && Object.prototype.hasOwnProperty.call(value, key);
+  }
+  function normalizeIdentityAttributes(value, fallback = IDENTITY_DEFAULT_ATTRIBUTES) {
+    const source = isObject(value) ? value : {};
+    const base = isObject(fallback) ? fallback : IDENTITY_DEFAULT_ATTRIBUTES;
+    const normalized = {};
+    IDENTITY_ATTRIBUTE_KEYS.forEach(key => {
+      const raw = hasOwn(source, key) ? source[key] : base[key];
+      normalized[key] = Math.max(0, Math.min(30, Number(raw) || 0));
+    });
+    return normalized;
+  }
+  function normalizeIdentityMediaReference(value) {
+    const text = String(value ?? '').trim();
+    if (!text || text.length > 2048 || /[\u0000-\u001f\u007f]/.test(text)) return '';
+    if (/^(?:data|blob|file|javascript):/i.test(text)) return '';
+    return text;
+  }
+  function containsEmbeddedImageData(value, seen = new Set()) {
+    if (typeof value === 'string') return /data:image\//i.test(value);
+    if (!value || typeof value !== 'object' || seen.has(value)) return false;
+    seen.add(value);
+    if (Array.isArray(value)) return value.some(item => containsEmbeddedImageData(item, seen));
+    return Object.values(value).some(item => containsEmbeddedImageData(item, seen));
+  }
+  function normalizeUserIdentityPayload(payload) {
+    const source = isObject(payload) ? payload : {};
+    const media = isObject(source.media) ? source.media : {};
+    const normalized = {
+      identity: String(source.identity ?? '').trim(),
+      grade: normalizeGrade(source.grade),
+      callname: String(source.callname ?? '').trim(),
+      background: String(source.background ?? '').trim(),
+      appearance: String(source.appearance ?? '').trim(),
+      skills: String(source.skills ?? '').trim(),
+      core_attributes: normalizeIdentityAttributes(source.core_attributes),
+      media: {
+        avatar: normalizeIdentityMediaReference(hasOwn(media, 'avatar') ? media.avatar : source.avatar),
+        portrait: normalizeIdentityMediaReference(hasOwn(media, 'portrait') ? media.portrait : source.portrait),
+      },
+    };
+    return normalized;
+  }
+  function userIdentityPayloadHasContent(payload) {
+    const normalized = normalizeUserIdentityPayload(payload);
+    return IDENTITY_TEXT_FIELDS.some(field => !!normalized[field])
+      || !!normalized.media.avatar
+      || !!normalized.media.portrait
+      || IDENTITY_ATTRIBUTE_KEYS.some(key => Number(normalized.core_attributes[key]) !== 0);
+  }
+  function userIdentityDraftHasContent(draft) {
+    const source = isObject(draft) ? draft : {};
+    return userIdentityPayloadHasContent({
+      identity: source.player_identity,
+      grade: source.player_grade,
+      callname: source.player_callname,
+      background: source.player_background,
+      appearance: source.player_appearance,
+      skills: source.player_skills,
+      core_attributes: source.core_attributes,
+      media: { avatar: source.player_avatar, portrait: source.player_portrait },
+    });
+  }
+  function buildUserIdentityPayload(draft) {
+    const source = isObject(draft) ? draft : {};
+    return normalizeUserIdentityPayload({
+      identity: source.player_identity,
+      grade: source.player_grade,
+      callname: source.player_callname,
+      background: source.player_background,
+      appearance: source.player_appearance,
+      skills: source.player_skills,
+      core_attributes: source.core_attributes,
+      media: { avatar: source.player_avatar, portrait: source.player_portrait },
+    });
+  }
+  function applyUserIdentityPayload(draft, payload) {
+    const target = isObject(draft) ? draft : {};
+    const source = isObject(payload) ? payload : {};
+    const fieldMap = { identity:'player_identity', grade:'player_grade', callname:'player_callname', background:'player_background', appearance:'player_appearance', skills:'player_skills' };
+    Object.entries(fieldMap).forEach(([field, draftField]) => {
+      if (hasOwn(source, field)) target[draftField] = field === 'grade' ? normalizeGrade(source[field]) : String(source[field] ?? '').trim();
+    });
+    if (isObject(source.core_attributes)) {
+      const current = normalizeIdentityAttributes(target.core_attributes);
+      IDENTITY_ATTRIBUTE_KEYS.forEach(key => {
+        if (hasOwn(source.core_attributes, key)) current[key] = Math.max(0, Math.min(30, Number(source.core_attributes[key]) || 0));
+      });
+      target.core_attributes = current;
+    }
+    const media = isObject(source.media) ? source.media : {};
+    if (hasOwn(media, 'avatar')) target.player_avatar = normalizeIdentityMediaReference(media.avatar);
+    else if (hasOwn(source, 'avatar')) target.player_avatar = normalizeIdentityMediaReference(source.avatar);
+    if (hasOwn(media, 'portrait')) target.player_portrait = normalizeIdentityMediaReference(media.portrait);
+    else if (hasOwn(source, 'portrait')) target.player_portrait = normalizeIdentityMediaReference(source.portrait);
+    return target;
+  }
+  const PERSONA_IDENTITY_BLOCK_MAX_BYTES = 64 * 1024;
+  const PERSONA_DESCRIPTION_DISABLED_POSITION = 9;
+  function personaIdentityBlockRegex() {
+    return /<xingyue_identity(?:\s+schema=["']?1["']?)?\s*>([\s\S]*?)<\/xingyue_identity>/gi;
+  }
+  function personaIdentityOpeningCount(value) {
+    return (String(value ?? '').match(/<xingyue_identity(?:\s+schema=["']?1["']?)?\s*>/gi) || []).length;
+  }
+  function serializePersonaIdentityBlock(payload) {
+    const normalized = normalizeUserIdentityPayload(payload);
+    const stable = {
+      identity: normalized.identity,
+      callname: normalized.callname,
+      grade: normalized.grade,
+      background: normalized.background,
+      appearance: normalized.appearance,
+      skills: normalized.skills,
+      core_attributes: normalizeIdentityAttributes(normalized.core_attributes),
+      media: { avatar:normalized.media.avatar, portrait:normalized.media.portrait },
+    };
+    const block = '<xingyue_identity schema="1">\n' + JSON.stringify(stable, null, 2).replace(/</g, '\\u003c') + '\n</xingyue_identity>';
+    const bytes = openingStoryUtf8Bytes(block);
+    if (bytes > PERSONA_IDENTITY_BLOCK_MAX_BYTES) throw new Error('Persona 星月结构块超过 64KB 上限');
+    return block;
+  }
+  function personaIdentityPayloadHash(payload) {
+    return sha256HexFallback(serializePersonaIdentityBlock(payload), typeof TextEncoder === 'function' ? TextEncoder : null);
+  }
+  function parsePersonaIdentityBlock(value) {
+    const source = String(value ?? '');
+    const matches = Array.from(source.matchAll(personaIdentityBlockRegex()));
+    const openingCount = personaIdentityOpeningCount(source);
+    if (!openingCount && !matches.length) {
+      return { found:false, count:0, matchedCount:0, valid:true, multiple:false, gradeProvided:false, gradeLabel:'未提供年级', payload:normalizeUserIdentityPayload({}), errors:[] };
+    }
+    const errors = [];
+    if (openingCount !== matches.length) errors.push({ index:matches.length, message:'存在未闭合的 Persona 星月结构块' });
+    const parsed = [];
+    matches.forEach((match, index) => {
+      const block = String(match[0] || '');
+      const blockBytes = openingStoryUtf8Bytes(block);
+      if (blockBytes > PERSONA_IDENTITY_BLOCK_MAX_BYTES) {
+        errors.push({ index, message:'Persona 星月结构块超过 64KB 上限' });
+        return;
+      }
+      try {
+        const raw = JSON.parse(String(match[1] || '').trim());
+        if (!isObject(raw)) throw new Error('结构块 JSON 必须是对象');
+        const payload = normalizeUserIdentityPayload(raw);
+        const canonicalBlock = serializePersonaIdentityBlock(payload);
+        parsed.push({ index, raw, payload, canonicalBlock, contentHash:personaIdentityPayloadHash(payload), blockBytes, start:match.index, end:(match.index || 0) + block.length });
+      } catch (error) {
+        errors.push({ index, message:error?.message || String(error) });
+      }
+    });
+    if (!parsed.length) {
+      return { found:true, count:openingCount, matchedCount:matches.length, valid:false, multiple:openingCount > 1, errors, gradeProvided:false, gradeLabel:'未提供年级', payload:normalizeUserIdentityPayload({}) };
+    }
+    const first = parsed[0];
+    const grade = normalizeGrade(first.raw.grade);
+    const gradeProvided = hasOwn(first.raw, 'grade') && !!grade;
+    const payload = normalizeUserIdentityPayload({ ...first.raw, ...(gradeProvided ? { grade } : {}) });
+    return {
+      found:true,
+      count:openingCount,
+      matchedCount:matches.length,
+      valid:errors.length === 0,
+      multiple:openingCount > 1,
+      errors,
+      gradeProvided,
+      gradeLabel:grade || '未提供年级',
+      payload,
+      rawPayload:first.raw,
+      canonicalBlock:first.canonicalBlock,
+      contentHash:first.contentHash,
+      blockBytes:first.blockBytes,
+      blocks:parsed,
+    };
+  }
+  function replacePersonaIdentityBlocks(description, payload) {
+    const source = String(description ?? '');
+    const parsed = parsePersonaIdentityBlock(source);
+    if (parsed.found && (!parsed.valid || parsed.matchedCount !== parsed.count)) {
+      throw new Error(parsed.errors?.[0]?.message || 'Persona 星月结构块无效，禁止写回');
+    }
+    const canonicalBlock = serializePersonaIdentityBlock(payload);
+    if (!parsed.found) {
+      const separator = source && !source.endsWith('\n') ? '\n\n' : (source ? '\n' : '');
+      return { description:source + separator + canonicalBlock, mode:'append', replacedCount:0, canonicalBlock, contentHash:personaIdentityPayloadHash(payload) };
+    }
+    let replaced = false;
+    const descriptionNext = source.replace(personaIdentityBlockRegex(), () => {
+      if (replaced) return '';
+      replaced = true;
+      return canonicalBlock;
+    });
+    return { description:descriptionNext, mode:parsed.multiple ? 'merge' : 'replace', replacedCount:parsed.count, canonicalBlock, contentHash:personaIdentityPayloadHash(payload) };
+  }
+  function userIdentityPayloadDiff(draft, payload, rawPayload = payload) {
+    const left = buildUserIdentityPayload(draft);
+    const right = normalizeUserIdentityPayload(payload);
+    const raw = isObject(rawPayload) ? rawPayload : {};
+    const rows = [];
+    const add = (label, a, b) => { if (String(a ?? '') !== String(b ?? '')) rows.push({ field:label, current:String(a ?? ''), persona:String(b ?? '') }); };
+    add('身份', left.identity, right.identity);
+    add('称呼', left.callname, right.callname);
+    if (hasOwn(raw, 'grade')) add('年级', left.grade, right.grade);
+    else rows.push({ field:'年级', current:left.grade, persona:'未提供（导入时保留当前）' });
+    add('背景', left.background, right.background);
+    add('外貌', left.appearance, right.appearance);
+    add('技能', left.skills, right.skills);
+    IDENTITY_ATTRIBUTE_KEYS.forEach(key => add('属性.' + key, left.core_attributes[key], right.core_attributes[key]));
+    add('媒体.头像', left.media.avatar, right.media.avatar);
+    add('媒体.立绘', left.media.portrait, right.media.portrait);
+    return rows;
+  }
+  function mergePersonaIdentityIntoDraft(draft, parsedPersona, mode = 'replace') {
+    const target = isObject(draft) ? clone(draft) : {};
+    if (mode === 'cancel') return target;
+    const parsed = isObject(parsedPersona) && hasOwn(parsedPersona, 'payload') ? parsedPersona : { payload:parsedPersona, rawPayload:parsedPersona };
+    const payload = normalizeUserIdentityPayload(parsed.payload);
+    const raw = isObject(parsed.rawPayload) ? parsed.rawPayload : {};
+    if (mode === 'replace') {
+      const incoming = { ...payload };
+      if (!hasOwn(raw, 'grade')) delete incoming.grade;
+      return applyUserIdentityPayload(target, incoming);
+    }
+    if (mode !== 'fill-empty') throw new Error('未知 Persona 导入模式：' + mode);
+    const fieldMap = { identity:'player_identity', grade:'player_grade', callname:'player_callname', background:'player_background', appearance:'player_appearance', skills:'player_skills' };
+    Object.entries(fieldMap).forEach(([field, draftField]) => {
+      if (!String(target[draftField] ?? '').trim() && String(payload[field] ?? '').trim()) target[draftField] = payload[field];
+    });
+    target.core_attributes = normalizeIdentityAttributes(target.core_attributes);
+    IDENTITY_ATTRIBUTE_KEYS.forEach(key => {
+      if ((Number(target.core_attributes[key]) || 0) === 0 && (Number(payload.core_attributes[key]) || 0) !== 0) target.core_attributes[key] = payload.core_attributes[key];
+    });
+    if (!String(target.player_avatar ?? '').trim() && payload.media.avatar) target.player_avatar = payload.media.avatar;
+    if (!String(target.player_portrait ?? '').trim() && payload.media.portrait) target.player_portrait = payload.media.portrait;
+    return target;
+  }
+  function personaSnapshotFingerprint(snapshot) {
+    if (!snapshot?.resolved) return 'unresolved|' + String(snapshot?.reason || '');
+    return [snapshot.id, snapshot.name, snapshot.position, sha256HexFallback(snapshot.description || '', typeof TextEncoder === 'function' ? TextEncoder : null)].join('|');
+  }
+  function resolveActivePersonaSnapshot(context = getSillyTavernContext(), doc = hostDocument()) {
+    const power = context?.powerUserSettings;
+    const personas = isObject(power?.personas) ? power.personas : {};
+    const descriptors = isObject(power?.persona_descriptions) ? power.persona_descriptions : {};
+    const currentName = String(context?.name1 ?? '').trim();
+    const activeDescription = String(power?.persona_description ?? '');
+    const selectedIds = [];
+    try {
+      doc?.querySelectorAll?.('#user_avatar_block .avatar-container.selected[data-avatar-id]').forEach(node => {
+        const id = String(node?.dataset?.avatarId || node?.getAttribute?.('data-avatar-id') || '');
+        if (id && hasOwn(personas, id) && !selectedIds.includes(id)) selectedIds.push(id);
+      });
+    } catch (_) {}
+    let id = '';
+    let source = '';
+    if (selectedIds.length === 1 && String(personas[selectedIds[0]] ?? '').trim() === currentName && String(descriptors[selectedIds[0]]?.description ?? '') === activeDescription) {
+      id = selectedIds[0];
+      source = 'selected-dom';
+    } else if (selectedIds.length > 1) {
+      return { resolved:false, ambiguous:true, reason:'检测到多个选中的 Persona，禁止写入', candidates:selectedIds, name:currentName, description:activeDescription };
+    } else {
+      const exact = Object.keys(personas).filter(key => String(personas[key] ?? '').trim() === currentName && String(descriptors[key]?.description ?? '') === activeDescription);
+      if (exact.length === 1) {
+        id = exact[0];
+        source = 'name-description';
+      } else {
+        const byName = Object.keys(personas).filter(key => String(personas[key] ?? '').trim() === currentName);
+        if (byName.length === 1) {
+          id = byName[0];
+          source = 'unique-name';
+        } else {
+          const candidates = exact.length > 1 ? exact : byName;
+          return { resolved:false, ambiguous:candidates.length > 1, reason:candidates.length > 1 ? '当前 Persona 重名且无法唯一定位，禁止写入' : '未能定位当前活动 Persona', candidates, name:currentName, description:activeDescription };
+        }
+      }
+    }
+    const descriptor = descriptors[id];
+    if (!isObject(descriptor)) return { resolved:false, ambiguous:false, reason:'当前 Persona 缺少 descriptor，禁止写入', candidates:[id], name:currentName, description:activeDescription };
+    const description = String(descriptor.description ?? activeDescription);
+    const position = Number(descriptor.position ?? power?.persona_description_position ?? 0);
+    const snapshot = {
+      resolved:true,
+      ambiguous:false,
+      id,
+      source,
+      name:String(personas[id] ?? currentName),
+      description,
+      position:Number.isFinite(position) ? position : 0,
+      descriptor,
+      avatarUrl:typeof context?.getThumbnailUrl === 'function' ? context.getThumbnailUrl('persona', id) : '',
+    };
+    snapshot.fingerprint = personaSnapshotFingerprint(snapshot);
+    return snapshot;
+  }
+  async function writeActivePersonaDescription(snapshot, nextDescription) {
+    if (!snapshot?.resolved) throw new Error(snapshot?.reason || '当前 Persona 无法唯一定位');
+    const context = getSillyTavernContext();
+    const current = resolveActivePersonaSnapshot(context, hostDocument());
+    if (!current.resolved || current.id !== snapshot.id || current.fingerprint !== snapshot.fingerprint) throw new Error('Persona 已切换或内容已变化，请刷新后重试');
+    const power = context?.powerUserSettings;
+    const descriptor = power?.persona_descriptions?.[snapshot.id];
+    if (!isObject(descriptor)) throw new Error('当前 Persona descriptor 不可写');
+    const next = String(nextDescription ?? '');
+    let nativeApplied = false;
+    try {
+      const doc = hostDocument();
+      const input = doc?.querySelector?.('#persona_description');
+      if (input) {
+        input.value = next;
+        const EventCtor = doc.defaultView?.Event || Event;
+        input.dispatchEvent(new EventCtor('input', { bubbles:true }));
+        nativeApplied = String(power.persona_descriptions?.[snapshot.id]?.description ?? '') === next;
+      }
+    } catch (_) {}
+    if (!nativeApplied) {
+      descriptor.description = next;
+      power.persona_description = next;
+      await Promise.resolve(context?.saveSettingsDebounced?.());
+      const updatedEvent = context?.eventTypes?.PERSONA_UPDATED;
+      if (updatedEvent && context?.eventSource?.emit) await Promise.resolve(context.eventSource.emit(updatedEvent, snapshot.id));
+    }
+    return resolveActivePersonaSnapshot(context, hostDocument());
+  }
+  function personaIdentityAuthority(draft, snapshot = resolveActivePersonaSnapshot()) {
+    if (!userIdentityDraftHasContent(draft)) return { authoritative:false, suppressWorldbook:false, reason:'draft-empty' };
+    if (!snapshot?.resolved) return { authoritative:false, suppressWorldbook:false, reason:snapshot?.reason || 'persona-unresolved' };
+    const parsed = parsePersonaIdentityBlock(snapshot.description);
+    if (!parsed.found || !parsed.valid || parsed.multiple || parsed.count !== 1) return { authoritative:false, suppressWorldbook:false, reason:!parsed.found ? 'block-missing' : 'block-invalid', snapshot, parsed };
+    if (Number(snapshot.position) === PERSONA_DESCRIPTION_DISABLED_POSITION) return { authoritative:false, suppressWorldbook:false, reason:'persona-injection-disabled', snapshot, parsed };
+    const draftHash = personaIdentityPayloadHash(buildUserIdentityPayload(draft));
+    if (parsed.contentHash !== draftHash) return { authoritative:false, suppressWorldbook:false, reason:'payload-hash-mismatch', snapshot, parsed, draftHash };
+    return { authoritative:true, suppressWorldbook:true, reason:'persona', snapshot, parsed, draftHash };
+  }
+  function explicitIdentityWithoutGrade(draft, options = {}) {
+    const source = isObject(draft) ? draft : {};
+    const persona = options.personaBlock === undefined ? null : parsePersonaIdentityBlock(options.personaBlock);
+    if (persona?.found) return true;
+    return ['player_identity','player_callname','player_background','player_appearance','player_skills','player_avatar','player_portrait']
+      .some(key => !!String(source[key] ?? '').trim())
+      || IDENTITY_ATTRIBUTE_KEYS.some(key => (Number(source.core_attributes?.[key]) || 0) !== 0);
+  }
+  function resolveEffectiveGrade(draft, options = {}) {
+    const source = isObject(draft) ? draft : {};
+    const explicit = normalizeGrade(hasOwn(options, 'grade') ? options.grade : source.player_grade);
+    if (explicit) return { value:explicit, label:explicit, source:hasOwn(options, 'grade') ? 'option' : 'draft', fallback:false, band:gradeBand(explicit) };
+    if (options.personaBlock !== undefined) {
+      const persona = parsePersonaIdentityBlock(options.personaBlock);
+      if (persona.gradeProvided) return { value:persona.payload.grade, label:persona.payload.grade, source:'persona', fallback:false, band:gradeBand(persona.payload.grade) };
+      if (persona.found) return { value:'', label:'未提供年级', source:'persona-missing', fallback:false, band:'custom' };
+    }
+    if (explicitIdentityWithoutGrade(source, options) || options.allowLegacyFallback === false) {
+      return { value:'', label:'未提供年级', source:'missing', fallback:false, band:'custom' };
+    }
+    return { value:LEGACY_DEFAULT_GRADE, label:LEGACY_DEFAULT_GRADE + '（旧版默认兜底）', source:'legacy-fallback', fallback:true, band:'middle' };
+  }
+  function openingStoryCompatibility(draft, options = {}) {
+    const source = normalizeOpeningDraftData(draft);
+    const grade = resolveEffectiveGrade(source, options);
+    const scope = Array.isArray(source.openingDay?.gradeScope) ? source.openingDay.gradeScope : ['all'];
+    const compatible = scope.includes('all') || scope.includes(grade.band);
+    return { compatible, grade, gradeScope:scope.slice(), message:compatible ? '' : '当前正文不适用于“' + grade.label + '”。请先套用通用到访模板，再按需编辑后发送。' };
+  }
+  // OpeningDayDraftV1：正文只存模板与来源/hash，不持久化解析后的玩家名、年级、diff 或最终消息。
+  const OPENING_DAY_SCHEMA_VERSION = 1;
+  const OPENING_DAY_MAX_BYTES = 16 * 1024;
+  const OPENING_DAY_SOURCE_REVISION = '20260711-340-opening-day-r1';
+  const OFFICIAL_OPENING_DAY_BODY = [
+    '『2025年-9月1日-星期一-12:00-星月私立学园大门口-晴』',
+    '当{{player}}拎着行李箱站在私立星月学园的校门口，一座宏伟的庄园式校园便呈现在眼前。高耸的围墙上爬满了常青藤，金色的校徽在阳光下熠明。这里不像是一所小学、初中、高中全包的私立贵族学校，更像是一座戒备森严的贵族城堡。',
+    '{{player}}没有在挂着“私立星月学园”牌匾的正门停留，而是从大校门旁的保安室小门进入，给安保人员检查完入学通知书后，沿着学校的主干道来到行政综合楼一楼的财务室办理入学。',
+    '一名身着西装短裙的工作人员快速地为{{player}}办理了入学，并递过来一张校卡和三套校服，指了指北边的宿舍楼。{{player}}根据校卡上分配的班级和宿舍朝着男生宿舍前进，校园的全景如画卷般徐徐展开。',
+  ].join('\n\n');
+  const GENERIC_ARRIVAL_BODY = [
+    '『2025年-9月1日-星期一-12:00-星月私立学园行政楼前-晴』',
+    '{{player}}按当前身份来到星月私立学园，在行政楼前确认来访、任职、交流或其他到校安排。',
+    '工作人员核对资料后说明了校内通行与联络方式。接下来的行动以{{player}}填写的身份、年级与背景为准，不预设其为在校学生。',
+  ].join('\n\n');
+  function canonicalizeOpeningStoryBody(value) {
+    return String(value ?? '')
+      .replace(/\r\n?/g, '\n')
+      .replace(/\{\{\s*user\s*\}\}/gi, '{{player}}');
+  }
+  function openingStoryUtf8Bytes(value) {
+    const text = String(value ?? '');
+    const Encoder = typeof TextEncoder === 'function' ? TextEncoder : null;
+    if (Encoder) return new Encoder().encode(text).byteLength;
+    return unescape(encodeURIComponent(text)).length;
+  }
+  function openingStoryHash(value) {
+    const Encoder = typeof TextEncoder === 'function' ? TextEncoder : null;
+    return sha256HexFallback(canonicalizeOpeningStoryBody(value), Encoder);
+  }
+  const OFFICIAL_OPENING_DAY = Object.freeze({
+    schemaVersion: OPENING_DAY_SCHEMA_VERSION,
+    body: OFFICIAL_OPENING_DAY_BODY,
+    origin: 'official',
+    sourceRevision: OPENING_DAY_SOURCE_REVISION,
+    baseHash: openingStoryHash(OFFICIAL_OPENING_DAY_BODY),
+    bodyHash: openingStoryHash(OFFICIAL_OPENING_DAY_BODY),
+    gradeScope: Object.freeze(['primary','middle','high']),
+  });
+  function copyOfficialOpeningDay(official = OFFICIAL_OPENING_DAY) {
+    return {
+      schemaVersion: OPENING_DAY_SCHEMA_VERSION,
+      body: canonicalizeOpeningStoryBody(official.body),
+      origin: 'official',
+      sourceRevision: String(official.sourceRevision || OPENING_DAY_SOURCE_REVISION),
+      baseHash: String(official.baseHash || openingStoryHash(official.body)).toLowerCase(),
+      bodyHash: String(official.baseHash || openingStoryHash(official.body)).toLowerCase(),
+      gradeScope: Array.isArray(official.gradeScope) ? official.gradeScope.slice() : ['primary','middle','high'],
+    };
+  }
+  function normalizeOpeningDayDraft(value, official = OFFICIAL_OPENING_DAY) {
+    if (!isObject(value)) return copyOfficialOpeningDay(official);
+    const source = clone(value) || {};
+    const body = canonicalizeOpeningStoryBody(source.body ?? official.body);
+    const bodyHash = openingStoryHash(body);
+    const recordedBaseHash = /^[0-9a-f]{64}$/i.test(String(source.baseHash || ''))
+      ? String(source.baseHash).toLowerCase()
+      : String(official.baseHash).toLowerCase();
+    const recordedRevision = String(source.sourceRevision || official.sourceRevision || OPENING_DAY_SOURCE_REVISION);
+    const explicitUserOrigin = String(source.origin || '').toLowerCase() === 'user';
+    const cleanAgainstRecordedSource = !explicitUserOrigin && bodyHash === recordedBaseHash;
+    const officialChanged = recordedBaseHash !== String(official.baseHash).toLowerCase()
+      || recordedRevision !== String(official.sourceRevision);
+    if (cleanAgainstRecordedSource && officialChanged) return copyOfficialOpeningDay(official);
+    const matchesCurrentOfficial = !explicitUserOrigin && bodyHash === String(official.baseHash).toLowerCase();
+    const normalized = {
+      schemaVersion: OPENING_DAY_SCHEMA_VERSION,
+      body,
+      origin: matchesCurrentOfficial ? 'official' : 'user',
+      sourceRevision: matchesCurrentOfficial ? String(official.sourceRevision) : recordedRevision,
+      baseHash: matchesCurrentOfficial ? String(official.baseHash).toLowerCase() : recordedBaseHash,
+      bodyHash,
+      gradeScope: matchesCurrentOfficial
+        ? (Array.isArray(official.gradeScope) ? official.gradeScope.slice() : ['primary','middle','high'])
+        : (Array.isArray(source.gradeScope) && source.gradeScope.length ? source.gradeScope.map(String) : ['all']),
+    };
+    if (!matchesCurrentOfficial && isObject(source.sourcePackage)) normalized.sourcePackage = clone(source.sourcePackage);
+    if (!matchesCurrentOfficial && source.localModifiedAt) normalized.localModifiedAt = String(source.localModifiedAt);
+    return normalized;
+  }
+  function normalizeOpeningDraftData(value) {
+    const draft = isObject(value) ? clone(value) : {};
+    draft.openingDay = normalizeOpeningDayDraft(draft.openingDay);
+    if (hasOwn(draft, 'player_grade')) draft.player_grade = normalizeGrade(draft.player_grade);
+    if (hasOwn(draft, 'player_avatar')) draft.player_avatar = normalizeIdentityMediaReference(draft.player_avatar);
+    if (hasOwn(draft, 'player_portrait')) draft.player_portrait = normalizeIdentityMediaReference(draft.player_portrait);
+    if (isObject(draft.core_attributes)) draft.core_attributes = normalizeIdentityAttributes(draft.core_attributes);
+    return draft;
+  }
+  function validateOpeningStory(body, context = {}) {
+    const normalized = canonicalizeOpeningStoryBody(body);
+    if (normalized.includes('\0')) throw new Error('入学日正文不能包含 NUL 字符');
+    if (!normalized.trim()) throw new Error('入学日正文不能为空');
+    const bytes = openingStoryUtf8Bytes(normalized);
+    if (bytes > OPENING_DAY_MAX_BYTES) throw new Error('入学日正文超过 16 KiB 上限');
+    const macros = Array.from(normalized.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g), match => String(match[1] || '').trim().toLowerCase());
+    const unknownMacros = Array.from(new Set(macros.filter(name => name !== 'player' && name !== 'grade')));
+    if (unknownMacros.length) throw new Error('入学日正文包含不支持的占位符：' + unknownMacros.map(name => '{{' + name + '}}').join('、'));
+    const hasPlayerToken = macros.includes('player');
+    const hasGradeToken = macros.includes('grade');
+    const grade = String(context.grade ?? '').trim();
+    if (hasGradeToken && !grade) throw new Error('正文使用了 {{grade}}，但当前为“未提供年级”；请先选择或填写年级');
+    return { body: normalized, bytes, hasPlayerToken, hasGradeToken };
+  }
+  function getSillyTavernContext() {
+    const targets = [window];
+    try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
+    for (const target of targets) {
+      try {
+        const sillyTavern = target?.SillyTavern;
+        if (typeof sillyTavern?.getContext === 'function') {
+          const context = sillyTavern.getContext();
+          if (context) return context;
+        }
+        if (sillyTavern && typeof sillyTavern.getCurrentChatId === 'function') return sillyTavern;
+      } catch (_) {}
+    }
+    return null;
+  }
+  function isResolvedPlayerName(value) {
+    const name = String(value ?? '').trim();
+    return !!name && !/\{\{\s*user\s*\}\}/i.test(name);
+  }
+  function resolveCurrentPlayerName() {
+    const context = getSillyTavernContext();
+    if (isResolvedPlayerName(context?.name1)) return String(context.name1).trim();
+    const targets = [window];
+    try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
+    for (const target of targets) {
+      const candidates = [
+        { owner: target, fn: target?.substitudeMacros },
+        { owner: target?.builtin, fn: target?.builtin?.substitudeMacros },
+        { owner: target?.TavernHelper, fn: target?.TavernHelper?.substitudeMacros },
+        { owner: target?.TavernHelper?.builtin, fn: target?.TavernHelper?.builtin?.substitudeMacros },
+      ];
+      for (const candidate of candidates) {
+        if (typeof candidate.fn !== 'function') continue;
+        try {
+          const resolved = candidate.fn.call(candidate.owner, '{{user}}');
+          if (isResolvedPlayerName(resolved)) return String(resolved).trim();
+        } catch (_) {}
+      }
+    }
+    return '玩家';
+  }
+  function resolvePlayerText(value) {
+    const playerName = resolveCurrentPlayerName();
+    return String(value ?? '').replace(/\{\{\s*user\s*\}\}/gi, () => playerName);
+  }
+  function resolveOpeningStory(draft, options = {}) {
+    const sourceDraft = normalizeOpeningDraftData(draft);
+    const compatibility = openingStoryCompatibility(sourceDraft, options);
+    if (!compatibility.compatible) throw new Error(compatibility.message);
+    const grade = compatibility.grade.value;
+    const validated = validateOpeningStory(sourceDraft.openingDay.body, { grade });
+    const playerName = String(options.playerName ?? resolveCurrentPlayerName()).trim() || '玩家';
+    return validated.body
+      .replace(/\{\{\s*player\s*\}\}/gi, () => playerName)
+      .replace(/\{\{\s*grade\s*\}\}/gi, () => grade);
+  }
+  function composeOpeningMessage(draft, options = {}) {
+    const sourceDraft = normalizeOpeningDraftData(draft);
+    const story = resolveOpeningStory(sourceDraft, options).trim();
+    const identity = Object.prototype.hasOwnProperty.call(options, 'identity')
+      ? String(options.identity ?? '').trim()
+      : String(identityContent(sourceDraft) || '').trim();
+    return [story, identity].filter(Boolean).join('\n\n');
+  }
+  function openingDraftStorage() {
+    try { return hostWindow()?.localStorage || window.localStorage; } catch (_) {
+      try { return window.localStorage; } catch (_error) { return null; }
+    }
+  }
+  function isOpeningUuid(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+  }
+  function generateOpeningDraftUuid(injectedUuidv4) {
+    if (typeof injectedUuidv4 === 'function') {
+      const injected = injectedUuidv4();
+      if (isOpeningUuid(injected)) return String(injected);
+    }
+    const targets = [window];
+    try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
+    for (const target of targets) {
+      const candidates = [
+        { owner: target?.builtin, fn: target?.builtin?.uuidv4 },
+        { owner: target?.TavernHelper?.builtin, fn: target?.TavernHelper?.builtin?.uuidv4 },
+      ];
+      for (const candidate of candidates) {
+        if (typeof candidate.fn !== 'function') continue;
+        try {
+          const uuid = candidate.fn.call(candidate.owner);
+          if (isOpeningUuid(uuid)) return String(uuid);
+        } catch (_) {}
+      }
+    }
+    for (const target of targets) {
+      try {
+        const uuid = target?.crypto?.randomUUID?.();
+        if (isOpeningUuid(uuid)) return String(uuid);
+      } catch (_) {}
+    }
+    throw new Error('当前环境无法生成 OpeningDraftV2 UUID');
+  }
+  function normalizeOpeningScroll(value) {
+    const source = isObject(value) ? value : {};
+    const panes = isObject(source.panes) ? source.panes : {};
+    const normalizedPanes = {};
+    Object.keys(panes).forEach(key => {
+      const step = String(Math.max(1, Math.min(6, Number(key) || 1)));
+      normalizedPanes[step] = Math.max(0, Number(panes[key]) || 0);
+    });
+    return {
+      root: Math.max(0, Number(source.root) || 0),
+      workshop: Math.max(0, Number(source.workshop) || 0),
+      panes: normalizedPanes,
+    };
+  }
+  function normalizeOpeningUi(value) {
+    const source = isObject(value) ? value : {};
+    const view = ['boot', 'wizard', 'workshop'].includes(source.view) ? source.view : 'boot';
+    return {
+      step: Math.max(1, Math.min(6, Number(source.step) || 1)),
+      view,
+      scroll: normalizeOpeningScroll(source.scroll),
+    };
+  }
+  function mergeOpeningUi(current, patch) {
+    const base = normalizeOpeningUi(current);
+    const next = { ...base, ...(isObject(patch) ? patch : {}) };
+    if (isObject(patch?.scroll)) {
+      next.scroll = {
+        ...base.scroll,
+        ...patch.scroll,
+        panes: { ...base.scroll.panes, ...(isObject(patch.scroll.panes) ? patch.scroll.panes : {}) },
+      };
+    }
+    return normalizeOpeningUi(next);
+  }
+  function createOpeningDraftService(options = {}) {
+    const storage = options.storage || openingDraftStorage();
+    const contextProvider = options.getContext || getSillyTavernContext;
+    const nowIso = options.nowIso || (() => new Date().toISOString());
+    const setTimer = options.setTimer || setTimeout;
+    const clearTimer = options.clearTimer || clearTimeout;
+    const debounceMs = Math.max(40, Number(options.debounceMs) || 180);
+    let activeChatId = '';
+    let activeUuid = '';
+    let activeRecord = null;
+    let dirty = false;
+    let saveTimer = null;
+    let destroyed = false;
+    let transitionGeneration = 0;
+    let pendingDraftReplacement = null;
+    let pendingDraftPatch = {};
+    let pendingUiPatch = {};
+
+    function blankContainer() {
+      return { schemaVersion: OPENING_DRAFT_SCHEMA_VERSION, legacyMigration: null, records: {}, fallbackChatUuids: {}, quarantined: {} };
+    }
+    function normalizeContainer(value) {
+      const source = isObject(value) ? value : {};
+      return {
+        ...source,
+        schemaVersion: OPENING_DRAFT_SCHEMA_VERSION,
+        legacyMigration: isObject(source.legacyMigration) ? source.legacyMigration : null,
+        records: isObject(source.records) ? source.records : {},
+        fallbackChatUuids: isObject(source.fallbackChatUuids) ? source.fallbackChatUuids : {},
+        quarantined: isObject(source.quarantined) ? source.quarantined : {},
+      };
+    }
+    function readContainer() {
+      if (!storage) return blankContainer();
+      const raw = storage.getItem(OPENING_DRAFTS_V2_KEY);
+      if (!raw) return blankContainer();
+      try { return normalizeContainer(JSON.parse(raw)); } catch (error) {
+        try {
+          storage.setItem(OPENING_DRAFTS_V2_KEY + '-quarantined-root', JSON.stringify({ raw, at: nowIso(), reason: error?.message || String(error) }));
+        } catch (_) {}
+        return blankContainer();
+      }
+    }
+    function writeContainer(container) {
+      if (!storage) return false;
+      try {
+        storage.setItem(OPENING_DRAFTS_V2_KEY, JSON.stringify(normalizeContainer(container)));
+        return true;
+      } catch (_) { return false; }
+    }
+    function normalizeRecord(value, chatUuid) {
+      if (!isObject(value)) throw new Error('OpeningDraftV2 record 不是对象');
+      return {
+        ...value,
+        schemaVersion: OPENING_DRAFT_SCHEMA_VERSION,
+        chatUuid,
+        draft: normalizeOpeningDraftData(value.draft),
+        ui: normalizeOpeningUi(value.ui),
+      };
+    }
+    function readRecord(container, chatUuid) {
+      const raw = container.records[chatUuid];
+      if (raw === undefined) return { record: null, changed: false, corrupted: false };
+      try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        return { record: normalizeRecord(parsed, chatUuid), changed: false, corrupted: false };
+      } catch (error) {
+        const quarantineId = chatUuid + '::' + String(Object.keys(container.quarantined).length + 1);
+        container.quarantined[quarantineId] = { chatUuid, raw: typeof raw === 'string' ? raw : safeJson(raw, ''), at: nowIso(), reason: error?.message || String(error) };
+        delete container.records[chatUuid];
+        return { record: null, changed: true, corrupted: true };
+      }
+    }
+    function makeRecord(chatUuid, draft, ui, extra = {}) {
+      return {
+        schemaVersion: OPENING_DRAFT_SCHEMA_VERSION,
+        chatUuid,
+        ...extra,
+        draft: normalizeOpeningDraftData(draft),
+        ui: normalizeOpeningUi(ui),
+        updatedAt: nowIso(),
+      };
+    }
+    function legacyDraftAndUi() {
+      let legacy = {};
+      let hadLegacy = false;
+      if (storage) {
+        const raw = storage.getItem(OPENING_DRAFT_KEY);
+        if (raw) {
+          hadLegacy = true;
+          try { legacy = isObject(JSON.parse(raw)) ? JSON.parse(raw) : {}; } catch (_) { legacy = {}; }
+        }
+      }
+      const draft = clone(legacy) || {};
+      const ui = {
+        step: Math.max(1, Math.min(6, Number(draft.last_step) || 1)),
+        view: ['boot', 'wizard', 'workshop'].includes(draft.view) ? draft.view : 'boot',
+        scroll: draft.scroll,
+      };
+      delete draft.last_step;
+      delete draft.view;
+      delete draft.scroll;
+      return { draft, ui, hadLegacy };
+    }
+    function looksLikeSillyTavernHost() {
+      if (options.assumeSillyTavern === true) return true;
+      if (options.assumeSillyTavern === false) return false;
+      try { return !!hostDocument()?.querySelector?.('#send_textarea,#chat'); } catch (_) { return false; }
+    }
+    async function resolveContextSnapshot() {
+      const shouldWait = looksLikeSillyTavernHost();
+      const maxAttempts = shouldWait ? 30 : 1;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const context = contextProvider?.() || null;
+        let chatId = '';
+        try { chatId = String(context?.getCurrentChatId?.() || '').trim(); } catch (_) {}
+        if (context && chatId) return { context, chatId };
+        if (!shouldWait) return { context, chatId: '__preview__' };
+        await new Promise(resolve => setTimer(resolve, 100));
+      }
+      throw new Error('SillyTavern 聊天上下文尚未就绪，OpeningDraftV2 未启动');
+    }
+    async function persistContextDraftUuid(context, uuid) {
+      if (typeof context?.updateChatMetadata !== 'function' || typeof context?.saveMetadata !== 'function') {
+        throw new Error('SillyTavern chat metadata 写入接口不可用');
+      }
+      await Promise.resolve(context.updateChatMetadata({ [OPENING_DRAFT_UUID_METADATA_KEY]: uuid }, false));
+      await Promise.resolve(context.saveMetadata());
+      try {
+        if (isObject(context.chatMetadata)) context.chatMetadata[OPENING_DRAFT_UUID_METADATA_KEY] = uuid;
+      } catch (_) {}
+    }
+    async function resolveChatIdentity() {
+      const snapshot = await resolveContextSnapshot();
+      const context = snapshot.context;
+      const chatId = snapshot.chatId;
+      const metadataUuid = context?.chatMetadata?.[OPENING_DRAFT_UUID_METADATA_KEY];
+      if (isOpeningUuid(metadataUuid)) return { context, chatId, uuid: String(metadataUuid) };
+
+      const container = readContainer();
+      const canPersistMetadata = typeof context?.updateChatMetadata === 'function' && typeof context?.saveMetadata === 'function' && chatId !== '__preview__';
+      if (!canPersistMetadata && isOpeningUuid(container.fallbackChatUuids[chatId])) {
+        return { context, chatId, uuid: String(container.fallbackChatUuids[chatId]) };
+      }
+      const uuid = generateOpeningDraftUuid(options.uuidv4);
+      if (canPersistMetadata) {
+        await persistContextDraftUuid(context, uuid);
+      } else {
+        container.fallbackChatUuids[chatId] = uuid;
+        writeContainer(container);
+      }
+      return { context, chatId, uuid };
+    }
+    async function forkInheritedRecord(identity, container, loaded) {
+      const record = loaded.record;
+      if (!record) return { identity, loaded };
+      const originChatId = String(record.originChatId || '').trim();
+      const lastSeenChatId = String(record.lastSeenChatId || '').trim();
+      const mainChatId = String(identity.context?.chatMetadata?.main_chat || '').trim();
+      const hasBranchEvidence = !!mainChatId && mainChatId !== identity.chatId;
+      const inheritedUuid = hasBranchEvidence
+        && (!originChatId || originChatId === mainChatId || lastSeenChatId === mainChatId);
+      if (!inheritedUuid) {
+        if (!originChatId || record.lastSeenChatId !== identity.chatId) {
+          if (!originChatId) record.originChatId = identity.chatId;
+          record.lastSeenChatId = identity.chatId;
+          record.updatedAt = nowIso();
+          container.records[identity.uuid] = JSON.stringify(normalizeRecord(record, identity.uuid));
+          writeContainer(container);
+        }
+        return { identity, loaded: { ...loaded, record } };
+      }
+      const forkedAt = nowIso();
+      const forkUuid = generateOpeningDraftUuid(options.uuidv4);
+      await persistContextDraftUuid(identity.context, forkUuid);
+      const forkRecord = makeRecord(forkUuid, record.draft, record.ui, {
+        originChatId: identity.chatId,
+        lastSeenChatId: identity.chatId,
+        forkedFromUuid: identity.uuid,
+        forkedFromChatId: originChatId || mainChatId || '',
+        forkedAt,
+      });
+      container.records[forkUuid] = JSON.stringify(forkRecord);
+      writeContainer(container);
+      return {
+        identity: { ...identity, uuid: forkUuid },
+        loaded: { record: forkRecord, changed: false, corrupted: false },
+      };
+    }
+    function applyPending() {
+      if (!activeRecord) return;
+      let changed = false;
+      if (pendingDraftReplacement !== null) {
+        activeRecord.draft = normalizeOpeningDraftData(pendingDraftReplacement);
+        pendingDraftReplacement = null;
+        changed = true;
+      }
+      if (Object.keys(pendingDraftPatch).length) {
+        activeRecord.draft = normalizeOpeningDraftData({ ...activeRecord.draft, ...clone(pendingDraftPatch) });
+        pendingDraftPatch = {};
+        changed = true;
+      }
+      if (Object.keys(pendingUiPatch).length) {
+        activeRecord.ui = mergeOpeningUi(activeRecord.ui, pendingUiPatch);
+        pendingUiPatch = {};
+        changed = true;
+      }
+      if (changed) dirty = true;
+    }
+    function flushSync() {
+      if (saveTimer) { clearTimer(saveTimer); saveTimer = null; }
+      if (!activeRecord || !activeUuid || !dirty) return false;
+      activeRecord.updatedAt = nowIso();
+      const container = readContainer();
+      const existing = readRecord(container, activeUuid);
+      if (existing.changed) writeContainer(container);
+      container.records[activeUuid] = JSON.stringify(normalizeRecord(activeRecord, activeUuid));
+      const saved = writeContainer(container);
+      if (saved) dirty = false;
+      return saved;
+    }
+    function scheduleSave(immediate) {
+      if (immediate) return flushSync();
+      if (saveTimer) clearTimer(saveTimer);
+      saveTimer = setTimer(() => { saveTimer = null; flushSync(); }, debounceMs);
+      return true;
+    }
+    async function activate(generation) {
+      let identity = await resolveChatIdentity();
+      if (destroyed || generation !== transitionGeneration) return null;
+      const container = readContainer();
+      let loaded = readRecord(container, identity.uuid);
+      const forked = await forkInheritedRecord(identity, container, loaded);
+      identity = forked.identity;
+      loaded = forked.loaded;
+      if (destroyed || generation !== transitionGeneration) return null;
+      let record = loaded.record;
+      if (!record) {
+        const createdAt = nowIso();
+        let extra = loaded.corrupted ? { recoveredFromCorruptionAt: createdAt } : {};
+        let draft = {};
+        let ui = {};
+        if (!container.legacyMigration) {
+          const legacy = legacyDraftAndUi();
+          draft = legacy.draft;
+          ui = legacy.ui;
+          container.legacyMigration = { key: OPENING_DRAFT_KEY, claimedByUuid: identity.uuid, at: createdAt };
+          if (legacy.hadLegacy) extra = { ...extra, migratedFrom: OPENING_DRAFT_KEY, migratedAt: createdAt };
+        }
+        record = makeRecord(identity.uuid, draft, ui, { originChatId: identity.chatId, ...extra });
+        container.records[identity.uuid] = JSON.stringify(record);
+        writeContainer(container);
+      } else if (loaded.changed) {
+        writeContainer(container);
+      }
+      activeChatId = identity.chatId;
+      activeUuid = identity.uuid;
+      activeRecord = record;
+      applyPending();
+      if (dirty) flushSync();
+      return { chatId: activeChatId, uuid: activeUuid, record: clone(activeRecord) };
+    }
+    function readDraft() {
+      if (activeRecord) return clone(activeRecord.draft) || {};
+      if (pendingDraftReplacement !== null) return { ...(clone(pendingDraftReplacement) || {}), ...(clone(pendingDraftPatch) || {}) };
+      return clone(pendingDraftPatch) || {};
+    }
+    function replaceDraft(next, options = {}) {
+      const draft = normalizeOpeningDraftData(next);
+      if (!activeRecord) {
+        pendingDraftReplacement = draft;
+        pendingDraftPatch = {};
+        return clone(draft);
+      }
+      activeRecord.draft = draft;
+      dirty = true;
+      scheduleSave(options.immediate === true);
+      return clone(activeRecord.draft);
+    }
+    function patchDraft(patch, options = {}) {
+      const safePatch = isObject(patch) ? clone(patch) : {};
+      if (!activeRecord) {
+        pendingDraftPatch = { ...pendingDraftPatch, ...safePatch };
+        return readDraft();
+      }
+      activeRecord.draft = normalizeOpeningDraftData({ ...activeRecord.draft, ...safePatch });
+      dirty = true;
+      scheduleSave(options.immediate === true);
+      return clone(activeRecord.draft);
+    }
+    function readUi() {
+      return activeRecord ? clone(activeRecord.ui) : mergeOpeningUi({}, pendingUiPatch);
+    }
+    function patchUi(patch, options = {}) {
+      const safePatch = isObject(patch) ? clone(patch) : {};
+      if (!activeRecord) {
+        pendingUiPatch = mergeOpeningUi(pendingUiPatch, safePatch);
+        return readUi();
+      }
+      activeRecord.ui = mergeOpeningUi(activeRecord.ui, safePatch);
+      dirty = true;
+      scheduleSave(options.immediate === true);
+      return clone(activeRecord.ui);
+    }
+    function clearDraft() {
+      return replaceDraft({}, { immediate: true });
+    }
+    async function flush() {
+      await transition.catch(() => null);
+      return flushSync();
+    }
+    function switchChat() {
+      if (destroyed) return Promise.resolve(null);
+      transition = transition.catch(() => null).then(() => {
+        flushSync();
+        transitionGeneration += 1;
+        return activate(transitionGeneration);
+      });
+      return transition;
+    }
+    function destroyService() {
+      flushSync();
+      destroyed = true;
+      transitionGeneration += 1;
+      if (saveTimer) { clearTimer(saveTimer); saveTimer = null; }
+    }
+    function status() {
+      return { ready: !!activeRecord, chatId: activeChatId, uuid: activeUuid, originChatId: activeRecord?.originChatId || '', dirty, destroyed, ui: readUi() };
+    }
+
+    transitionGeneration += 1;
+    let transition = activate(transitionGeneration);
+    return { ready: () => transition, readDraft, replaceDraft, patchDraft, clearDraft, readUi, patchUi, flush, flushSync, switchChat, destroy: destroyService, status };
+  }
+  // </opening-draft-v2-core>
+  const openingDraftService = createOpeningDraftService();
+  const openingDraftReady = openingDraftService.ready().catch(error => {
+    lastError = error?.message || String(error);
+    return null;
+  });
+  function readOpeningDraft() {
+    return normalizeOpeningDraftData(openingDraftService.readDraft());
+  }
+  function writeOpeningDraft(patch, options = {}) {
+    const safePatch = isObject(patch) ? clone(patch) : {};
+    if (!openingDraftService.status().ready) {
+      return normalizeOpeningDraftData(openingDraftService.patchDraft(safePatch, { immediate: options.immediate !== false }));
+    }
+    const next = normalizeOpeningDraftData({ ...openingDraftService.readDraft(), ...safePatch });
+    return openingDraftService.replaceDraft(next, { immediate: options.immediate !== false });
   }
   function importPackageToDraft(pkg) {
+    if (!openingDraftService.status().ready) throw new Error('开局草稿仍在初始化，请稍后重试');
     pkg = validatePackage(pkg);
     const draft = readOpeningDraft();
     draft.packages = Array.isArray(draft.packages) ? draft.packages : [];
@@ -635,17 +1935,14 @@
     draft.enabledPackages = (draft.enabledPackages && typeof draft.enabledPackages === 'object') ? draft.enabledPackages : {};
     if (draft.enabledPackages[key] === undefined) draft.enabledPackages[key] = false;
     if (pkg.type === 'user_identity') {
-      draft.player_identity = pkg.payload.identity || draft.player_identity || '';
-      draft.player_callname = pkg.payload.callname || draft.player_callname || '';
-      draft.player_background = pkg.payload.background || draft.player_background || '';
+      applyUserIdentityPayload(draft, pkg.payload);
       draft.enabledPackages[key] = true;
     }
     if (pkg.type === 'world_factor') {
       draft.worldFactors = Array.isArray(draft.worldFactors) ? draft.worldFactors : [];
       draft.worldFactors = draft.worldFactors.filter(item => packageKey(item) !== key).concat([pkg]);
     }
-    try { localStorage.setItem(OPENING_DRAFT_KEY, JSON.stringify(draft)); } catch (_) {}
-    return draft;
+    return openingDraftService.replaceDraft(draft, { immediate: true });
   }
   async function importPackage(pkg, options = {}) {
     pkg = validatePackage(pkg, options.allowedTypes || []);
@@ -655,8 +1952,9 @@
   }
   async function installPackageToWorldbook(pkg, options = {}) {
     pkg = validatePackage(pkg, options.allowedTypes || []);
-    const result = await installWorkshopPackageEntries(pkg);
-    if (result?.applied) toast('success', '已安装到聊天世界书：' + pkg.title);
+    const result = await installOrUpdateWorkshopPackage(pkg, options);
+    if (result?.applied) toast('success', '已安装到角色卡绑定世界书：' + pkg.title);
+    else if (result?.kept) toast('info', '已保留本地修改，未覆盖来源记录');
     else if (result?.warning) toast('info', result.warning);
     return { ...result, package: pkg };
   }
@@ -686,36 +1984,57 @@
         content: packageToWorldbookText(pkg),
         packageId: pkg.id,
         packageType: pkg.type,
+        packageTarget: pkg?.payload?.target || pkg.packageTarget || pkg.type,
+        programOnly: pkg?.payload?.target === 'xingyue.opening_day_body' || pkg.programOnly === true,
+        enabled: pkg?.payload?.target === 'xingyue.opening_day_body' ? false : true,
         revision: packageRevision(pkg),
       }));
   }
   function identityContent(draft = readOpeningDraft()) {
-    const identity = String(draft.player_identity || '').trim();
-    const callname = String(draft.player_callname || '').trim();
-    const appearance = String(draft.player_appearance || '').trim();
-    const skills = String(draft.player_skills || '').trim();
-    const background = String(draft.player_background || '').trim();
-    // 仅当玩家在身份页填了任意文本字段才生成覆盖条目，避免用默认值凭空覆盖角色卡自带身份
-    if (!identity && !callname && !appearance && !skills && !background) return '';
+    if (!userIdentityDraftHasContent(draft)) return '';
+    const payload = buildUserIdentityPayload(draft);
     const lines = [];
-    if (identity) lines.push('    - 身份: ' + identity);
-    if (callname) lines.push('    - 称呼: ' + callname);
-    const attrs = (draft.core_attributes && typeof draft.core_attributes === 'object') ? draft.core_attributes : null;
-    if (attrs) {
-      const parts = Object.keys(attrs).map(key => key + ' ' + (Number(attrs[key]) || 0));
-      if (parts.length) lines.push('    - 核心属性: ' + parts.join(' / '));
+    if (payload.identity) lines.push('    - 身份: ' + payload.identity);
+    if (payload.grade) lines.push('    - 年级: ' + payload.grade);
+    if (payload.callname) lines.push('    - 称呼: ' + payload.callname);
+    if (IDENTITY_ATTRIBUTE_KEYS.some(key => Number(payload.core_attributes[key]) !== 0)) {
+      const parts = IDENTITY_ATTRIBUTE_KEYS.map(key => key + ' ' + payload.core_attributes[key]);
+      lines.push('    - 核心属性: ' + parts.join(' / '));
     }
-    if (appearance) lines.push('    - 外貌: ' + appearance);
-    if (skills) lines.push('    - 技能与天赋: ' + skills.split(/\r?\n/).map(s => s.trim()).filter(Boolean).join('；'));
-    if (background) lines.push('    - 背景: ' + background);
-    // 任务4.3：补 player_avatar 行，写入世界书条目时包含头像引用
-    const avatar = String(draft.player_avatar || '').trim();
-    if (avatar) lines.push('    - 头像: ' + avatar);
+    if (payload.appearance) lines.push('    - 外貌: ' + payload.appearance);
+    if (payload.skills) lines.push('    - 技能与天赋: ' + payload.skills.split(/\r?\n/).map(s => s.trim()).filter(Boolean).join('；'));
+    if (payload.background) lines.push('    - 背景: ' + payload.background);
+    if (payload.media.avatar) lines.push('    - 头像: ' + payload.media.avatar);
+    if (payload.media.portrait) lines.push('    - 立绘: ' + payload.media.portrait);
     return '<user_roles>\n' + lines.join('\n') + '\n</user_roles>';
   }
+  function resolvePlayerAvatarSrc(rawReference = '') {
+    const reference = normalizeIdentityMediaReference(rawReference)
+      || normalizeIdentityMediaReference(readOpeningDraft().player_avatar);
+    if (/^https?:\/\//i.test(reference)) return reference;
+    try {
+      const lib = mediaLibrary();
+      const exact = lib?.listManagedAssets?.().find(item => String(item?.key || '') === reference);
+      if (exact) return exact.dataUrl || exact.url || exact.src || '';
+      const fallback = lib?.getExactAsset?.({ type:'bond', slot:'avatar', name:'{{user}}', variant:'normal' });
+      return fallback?.dataUrl || fallback?.url || fallback?.src || '';
+    } catch (_) { return ''; }
+  }
   function openingWorldbookPayload(draft = readOpeningDraft()) {
+    const authority = personaIdentityAuthority(draft);
+    const identityAuthority = {
+      authoritative: authority.authoritative === true,
+      suppressWorldbook: authority.suppressWorldbook === true,
+      reason: authority.reason || '',
+      personaId: authority.snapshot?.id || '',
+      fingerprint: authority.snapshot?.fingerprint || '',
+      contentHash: authority.parsed?.contentHash || '',
+      draftHash: authority.draftHash || '',
+    };
     return {
-      identity: identityContent(draft),
+      identity: identityAuthority.suppressWorldbook ? '' : identityContent(draft),
+      identitySuppressedByPersona: identityAuthority.suppressWorldbook,
+      identityAuthority,
       worldFactor: worldFactorContent(draft),
       workshopEntries: workshopWorldbookEntries(draft),
       worldbookName: null,
@@ -723,208 +2042,2268 @@
       warning: '',
     };
   }
+  function openingChatContextSnapshot() {
+    const serviceStatus = openingDraftService.status();
+    const context = getSillyTavernContext();
+    let chatId = '';
+    try { chatId = String(context?.getCurrentChatId?.() || '').trim(); } catch (_) {}
+    if (!chatId) chatId = String(serviceStatus.chatId || '');
+    const metadataUuid = context?.chatMetadata?.[OPENING_DRAFT_UUID_METADATA_KEY];
+    const uuid = isOpeningUuid(metadataUuid)
+      ? String(metadataUuid)
+      : (String(serviceStatus.chatId || '') === chatId ? String(serviceStatus.uuid || '') : '');
+    return { chatId, uuid };
+  }
+  function assertOpeningChatContext(expected, message = '聊天已切换，已取消本次开局操作') {
+    if (!expected) return openingChatContextSnapshot();
+    const current = openingChatContextSnapshot();
+    if ((expected.chatId && current.chatId !== expected.chatId) || (expected.uuid && current.uuid && current.uuid !== expected.uuid)) {
+      throw new Error(message);
+    }
+    return current;
+  }
   function dispatchOpeningWorldbookPreview(payload) {
     try {
       window.dispatchEvent(new CustomEvent('xingyue-opening-worldbook-preview', { detail: payload }));
       hostWindow().dispatchEvent(new CustomEvent('xingyue-opening-worldbook-preview', { detail: payload }));
     } catch (_) {}
   }
-  function makeConstantEntry(name, content, extra) {
-    const options = extra?.__options || {};
-    const cleanExtra = { ...(extra || {}) };
-    delete cleanExtra.__options;
-    const source = cleanExtra.source || OPENING_SOURCE;
-    delete cleanExtra.source;
-    return {
-      name,
-      enabled: options.enabled ?? Boolean(String(content || '').trim()),
-      strategy: { type: 'constant', keys: [], keys_secondary: { logic: 'and_any', keys: [] }, scan_depth: 'same_as_global' },
-      position: { type: 'before_author_note', role: 'system', depth: 4, order: options.order ?? 100 },
-      content: String(content || ''),
-      probability: 100,
-      recursion: { prevent_incoming: false, prevent_outgoing: false, delay_until: null },
-      effect: { sticky: null, cooldown: null, delay: null },
-      extra: { source, version: VERSION, ...cleanExtra },
-    };
-  }
-  function makeWorkshopBoundaryEntry(name, kind) {
-    return makeConstantEntry(name, '', {
-      source: WORKSHOP_SOURCE,
-      kind,
-      __options: { enabled: false, order: kind === 'workshop_boundary_start' ? 101 : 199 },
+  // <shared-worldbook-manager-v0.4.0 source-sha256="fd700ce23b96286fb2122f6bdb2b6d0e18893d50e73560566c2bddb472c54808">
+  const SHARED_WORLDBOOK_MANAGER_SOURCE_SHA256 = 'fd700ce23b96286fb2122f6bdb2b6d0e18893d50e73560566c2bddb472c54808';
+  const sharedWorldbookManager = (() => {
+    // ============ 0. 常量与映射（grounded：A3 §6.2 / §5.1 + @types.txt 权威）============
+    
+    const POSITION_NUM_TO_TYPE = Object.freeze({
+      0: 'before_character_definition',
+      1: 'after_character_definition',
+      2: 'before_example_messages',
+      3: 'after_example_messages',
+      4: 'at_depth',
+      5: 'before_author_note', // Top of AN
+      6: 'after_author_note', // Bottom of AN
+      7: 'outlet',
     });
-  }
-  function worldbookApiHost() {
-    const candidates = [window, hostWindow(), window?.TavernHelper, hostWindow()?.TavernHelper];
-    for (const target of candidates) {
-      if (target?.updateWorldbookWith && (target?.getCharWorldbookNames || target?.getWorldbookNames)) return target;
+    const ROLE_NUM_TO_STR = Object.freeze({ 0: 'system', 1: 'user', 2: 'assistant' });
+    const SELECTIVE_LOGIC_NUM_TO_STR = Object.freeze({ 0: 'and_any', 1: 'not_all', 2: 'not_any', 3: 'and_all' });
+    
+    function invertNumKeyed(map) {
+      const out = {};
+      for (const key of Object.keys(map)) out[map[key]] = Number(key);
+      return out;
     }
-    return null;
-  }
-  // #6：开局/工坊条目写入「角色卡绑定的世界书」（同源 4.2 范式 getCharWorldbookNames('current').primary），
-  // 取代旧的 getOrCreateChatWorldbook（会另建聊天世界书、撞名报错、且写错对象）。
-  async function resolveCardWorldbookName(apiHost) {
-    try { const c = apiHost?.getCharWorldbookNames?.('current'); if (c && c.primary) return c.primary; } catch (_) {}
-    try {
-      const all = apiHost?.getWorldbookNames?.();
-      if (Array.isArray(all)) { const hit = all.find(n => /星月私立高等学院\s*ver/.test(String(n))); if (hit) return hit; }
-    } catch (_) {}
-    return '';
-  }
-  function isOpeningManagedEntry(entry) {
-    return entry?.extra?.source === OPENING_SOURCE && (entry.name === WORLD_FACTOR_COMMENT || entry.name === IDENTITY_COMMENT || entry.extra?.kind === 'world_factor' || entry.extra?.kind === 'identity');
-  }
-  function isWorkshopManagedEntry(entry) {
-    if (entry?.extra?.source === WORKSHOP_SOURCE) return true;
-    return entry?.extra?.source === OPENING_SOURCE && entry.extra?.kind === 'workshop_package';
-  }
-  function upsertEntries(existing, openingEntries, workshopEntries) {
-    const preservedByName = new Map();
-    (Array.isArray(existing) ? existing : []).forEach(entry => {
-      if (isOpeningManagedEntry(entry) || isWorkshopManagedEntry(entry)) {
-        preservedByName.set(entry.name, entry);
-      }
+    const POSITION_TYPE_TO_NUM = Object.freeze(invertNumKeyed(POSITION_NUM_TO_TYPE));
+    const ROLE_STR_TO_NUM = Object.freeze(invertNumKeyed(ROLE_NUM_TO_STR));
+    const SELECTIVE_LOGIC_STR_TO_NUM = Object.freeze(invertNumKeyed(SELECTIVE_LOGIC_NUM_TO_STR));
+    
+    const VALID_POSITION_TYPES = new Set(Object.values(POSITION_NUM_TO_TYPE));
+    const VALID_SECONDARY_LOGIC = new Set(Object.values(SELECTIVE_LOGIC_NUM_TO_STR));
+    const VALID_STRATEGY_TYPES = new Set(['constant', 'selective', 'vectorized']);
+    const VALID_ROLES = new Set(Object.values(ROLE_NUM_TO_STR));
+    const AN_POSITIONS = new Set(['before_author_note', 'after_author_note']); // V7 warn：AN 频率=0 静默跳过
+    
+    // 受管条目 kind（来源双标记 extra.kind）
+    const KIND = Object.freeze({
+      IDENTITY: 'identity',
+      WORLD_FACTOR: 'world_factor',
+      WORKSHOP_PACKAGE: 'workshop_package',
+      BOUNDARY_START: 'workshop_boundary_start',
+      BOUNDARY_END: 'workshop_boundary_end',
     });
-    const preserveUid = entry => {
-      const previous = preservedByName.get(entry.name);
-      return previous?.uid ? { ...entry, uid: previous.uid } : entry;
+    
+    // 来源后缀（与 sourcePrefix 拼成 extra.source，内核不含任何卡名）
+    const SOURCE_SUFFIX = Object.freeze({ OPENING: 'opening-wizard', WORKSHOP: 'workshop' });
+    
+    class WorldbookValidationError extends Error {
+      constructor(errors) {
+        super(`世界书条目校验未通过（${errors.length} 项）：` + errors.map(e => e.message).join('；'));
+        this.name = 'WorldbookValidationError';
+        this.errors = errors;
+      }
+    }
+    
+    class WorldbookRevisionConflictError extends Error {
+      constructor(expectedRevision, actualRevision, worldbookName) {
+        super('世界书版本冲突：保存前内容已变化，请重新载入差异后再试');
+        this.name = 'WorldbookRevisionConflictError';
+        this.expectedRevision = expectedRevision;
+        this.actualRevision = actualRevision;
+        this.worldbookName = worldbookName || '';
+      }
+    }
+    
+    // ============ 1. Canonical Entry（中间富表示 · 治「两套字段名」核心坑）============
+    
+    /**
+     * @typedef {Object} CanonicalEntry
+     * @property {string}  name           条目名（卡内 comment ⇄ 运行期 name）
+     * @property {boolean} enabled        启用（卡内 !disable ⇄ 运行期 enabled）
+     * @property {'constant'|'selective'|'vectorized'} strategyType
+     * @property {string[]} keys          主关键字
+     * @property {string[]} secondaryKeys 次级关键字
+     * @property {'and_any'|'and_all'|'not_all'|'not_any'} secondaryLogic
+     * @property {boolean} selective      是否启用次级逻辑
+     * @property {'same_as_global'|number} scanDepth
+     * @property {null|boolean} caseSensitive
+     * @property {null|boolean} matchWholeWords  null=继承全局（中文 key 必须显式 false，见 V3）
+     * @property {string}  positionType   8 串之一
+     * @property {'system'|'user'|'assistant'} role  仅 at_depth 有效
+     * @property {number}  depth          仅 at_depth 有效
+     * @property {number}  order
+     * @property {string}  content
+     * @property {number}  probability
+     * @property {string}  group          Inclusion Group 标签
+     * @property {boolean} groupOverride
+     * @property {number}  groupWeight
+     * @property {boolean} useGroupScoring
+     * @property {null|number} sticky
+     * @property {null|number} cooldown
+     * @property {null|number} delay
+     * @property {{prevent_incoming:boolean,prevent_outgoing:boolean,delay_until:null|number}} recursion
+     * @property {boolean} vectorized
+     * @property {Object}  meta           source/kind/packageId/packageType/revision/installedAt/version 等
+     * @property {number=} uid            保留旧 uid（preserveUid 用）
+     */
+    
+    function makeCanonical(overrides = {}) {
+      return {
+        name: '',
+        enabled: true,
+        strategyType: 'constant',
+        keys: [],
+        secondaryKeys: [],
+        secondaryLogic: 'and_any',
+        selective: false,
+        scanDepth: 'same_as_global',
+        caseSensitive: null,
+        matchWholeWords: null,
+        positionType: 'before_character_definition',
+        role: 'system',
+        depth: 4,
+        order: 100,
+        content: '',
+        probability: 100,
+        group: '',
+        groupOverride: false,
+        groupWeight: 100,
+        useGroupScoring: false,
+        sticky: null,
+        cooldown: null,
+        delay: null,
+        recursion: { prevent_incoming: true, prevent_outgoing: true, delay_until: null },
+        vectorized: false,
+        meta: {},
+        ...overrides,
+      };
+    }
+    
+    // ---- runtimeAdapter：Canonical ⇄ 运行期新 API WorldbookEntry（有损子集：无 group/mww）----
+    const runtimeAdapter = {
+      toRuntime(c) {
+        const entry = {
+          name: c.name,
+          enabled: c.enabled,
+          strategy: {
+            type: c.strategyType,
+            keys: [...c.keys],
+            keys_secondary: { logic: c.secondaryLogic, keys: [...c.secondaryKeys] },
+            scan_depth: c.scanDepth,
+          },
+          position: { type: c.positionType, role: c.role, depth: c.depth, order: c.order },
+          content: c.content,
+          probability: c.probability,
+          recursion: { ...c.recursion },
+          effect: { sticky: c.sticky, cooldown: c.cooldown, delay: c.delay },
+          extra: { ...c.meta },
+        };
+        if (c.uid != null) entry.uid = c.uid;
+        return entry;
+      },
+      fromRuntime(e) {
+        const pos = e.position || {};
+        const strat = e.strategy || {};
+        const ks = strat.keys_secondary || {};
+        const eff = e.effect || {};
+        return makeCanonical({
+          name: e.name || '',
+          enabled: e.enabled !== false,
+          strategyType: VALID_STRATEGY_TYPES.has(strat.type) ? strat.type : 'constant',
+          keys: Array.isArray(strat.keys) ? [...strat.keys] : [],
+          secondaryKeys: Array.isArray(ks.keys) ? [...ks.keys] : [],
+          secondaryLogic: VALID_SECONDARY_LOGIC.has(ks.logic) ? ks.logic : 'and_any',
+          selective: strat.type === 'selective',
+          scanDepth: strat.scan_depth ?? 'same_as_global',
+          positionType: VALID_POSITION_TYPES.has(pos.type) ? pos.type : 'before_character_definition',
+          role: VALID_ROLES.has(pos.role) ? pos.role : 'system',
+          depth: typeof pos.depth === 'number' ? pos.depth : 4,
+          order: typeof pos.order === 'number' ? pos.order : 100,
+          content: e.content || '',
+          probability: typeof e.probability === 'number' ? e.probability : 100,
+          recursion: {
+            prevent_incoming: Boolean(e.recursion?.prevent_incoming),
+            prevent_outgoing: Boolean(e.recursion?.prevent_outgoing),
+            delay_until: e.recursion?.delay_until ?? null,
+          },
+          sticky: eff.sticky ?? null,
+          cooldown: eff.cooldown ?? null,
+          delay: eff.delay ?? null,
+          meta: { ...(e.extra || {}) },
+          ...(e.uid != null ? { uid: e.uid } : {}),
+        });
+      },
     };
-    const base = (Array.isArray(existing) ? existing : []).filter(entry => !isOpeningManagedEntry(entry) && !isWorkshopManagedEntry(entry));
-    const workshopBlock = [
-      makeWorkshopBoundaryEntry(WORKSHOP_START_COMMENT, 'workshop_boundary_start'),
-      ...workshopEntries,
-      makeWorkshopBoundaryEntry(WORKSHOP_END_COMMENT, 'workshop_boundary_end'),
-    ].map(preserveUid);
-    return [
-      ...base,
-      ...openingEntries.map(preserveUid),
-      ...workshopBlock,
-    ];
-  }
-  function sameWorkshopPackage(entry, item) {
-    const targetId = item?.packageId ?? item?.extra?.packageId;
-    const targetType = item?.packageType ?? item?.extra?.packageType;
-    return entry?.extra?.source === WORKSHOP_SOURCE &&
-      entry?.extra?.kind === 'workshop_package' &&
-      String(entry.extra.packageId || '') === String(targetId || '') &&
-      String(entry.extra.packageType || '') === String(targetType || '');
-  }
-  function installSingleWorkshopEntry(existing, entry) {
-    const source = Array.isArray(existing) ? existing : [];
-    const start = makeWorkshopBoundaryEntry(WORKSHOP_START_COMMENT, 'workshop_boundary_start');
-    const end = makeWorkshopBoundaryEntry(WORKSHOP_END_COMMENT, 'workshop_boundary_end');
-    const nonWorkshop = [];
-    const workshopPackages = [];
-    source.forEach(item => {
-      if (item?.name === WORKSHOP_START_COMMENT || item?.name === WORKSHOP_END_COMMENT) return;
-      if (isWorkshopManagedEntry(item)) {
-        if (!sameWorkshopPackage(item, entry)) workshopPackages.push(item);
+    
+    // ---- cardAdapter：Canonical ⇄ 卡内 v2 JSON（富格式 · group/mww 全在 extensions）----
+    const cardAdapter = {
+      toCanonical(entry) {
+        const ext = entry.extensions || {};
+        const posNum = typeof ext.position === 'number' ? ext.position : 1;
+        return makeCanonical({
+          name: entry.comment || '',
+          enabled: entry.disable !== true && entry.enabled !== false,
+          strategyType: entry.constant ? 'constant' : entry.vectorized ? 'vectorized' : 'selective',
+          keys: normKeys(entry.key ?? entry.keys),
+          secondaryKeys: normKeys(entry.keysecondary ?? entry.secondary_keys),
+          secondaryLogic: SELECTIVE_LOGIC_NUM_TO_STR[Number(entry.selectiveLogic ?? 0)] || 'and_any',
+          selective: Boolean(entry.selective),
+          scanDepth: entry.scanDepth ?? ext.scan_depth ?? 'same_as_global',
+          caseSensitive: entry.caseSensitive ?? ext.case_sensitive ?? null,
+          matchWholeWords: entry.matchWholeWords ?? ext.match_whole_words ?? null,
+          positionType: POSITION_NUM_TO_TYPE[posNum] || 'after_character_definition',
+          role: ROLE_NUM_TO_STR[Number(ext.role) || 0] || 'system',
+          depth: typeof ext.depth === 'number' ? ext.depth : 4,
+          order: typeof entry.order === 'number' ? entry.order : 100,
+          content: entry.content || '',
+          probability: typeof entry.probability === 'number' ? entry.probability : 100,
+          group: entry.group ?? ext.group ?? '',
+          groupOverride: Boolean(entry.groupOverride ?? ext.group_override),
+          groupWeight: typeof (entry.groupWeight ?? ext.group_weight) === 'number' ? (entry.groupWeight ?? ext.group_weight) : 100,
+          useGroupScoring: Boolean(entry.useGroupScoring ?? ext.use_group_scoring),
+          sticky: entry.sticky ?? null,
+          cooldown: entry.cooldown ?? null,
+          delay: entry.delay ?? null,
+          vectorized: Boolean(entry.vectorized),
+          meta: { ...(ext.worldbookManager || {}) },
+          ...(entry.uid != null ? { uid: entry.uid } : {}),
+        });
+      },
+      fromCanonical(c) {
+        const entry = {
+          comment: c.name,
+          key: [...c.keys],
+          keysecondary: [...c.secondaryKeys],
+          selective: c.selective,
+          selectiveLogic: SELECTIVE_LOGIC_STR_TO_NUM[c.secondaryLogic] ?? 0,
+          content: c.content,
+          constant: c.strategyType === 'constant',
+          vectorized: c.strategyType === 'vectorized',
+          disable: !c.enabled,
+          order: c.order,
+          group: c.group,
+          groupOverride: c.groupOverride,
+          groupWeight: c.groupWeight,
+          useGroupScoring: c.useGroupScoring,
+          probability: c.probability,
+          sticky: c.sticky ?? null,
+          cooldown: c.cooldown ?? null,
+          delay: c.delay ?? null,
+          extensions: {
+            position: POSITION_TYPE_TO_NUM[c.positionType] ?? 1,
+            depth: c.depth,
+            role: ROLE_STR_TO_NUM[c.role] ?? 0,
+            group: c.group,
+            group_override: c.groupOverride,
+            group_weight: c.groupWeight,
+            use_group_scoring: c.useGroupScoring,
+            case_sensitive: c.caseSensitive,
+            match_whole_words: c.matchWholeWords,
+            worldbookManager: { ...c.meta },
+          },
+        };
+        if (c.uid != null) entry.uid = c.uid;
+        return entry;
+      },
+    };
+    
+    function normKeys(value) {
+      if (Array.isArray(value)) return value.map(v => String(v)).filter(Boolean);
+      if (typeof value === 'string') return value.split(',').map(s => s.trim()).filter(Boolean);
+      return [];
+    }
+    
+    // ============ 2. 校验器 V1-V7（写前闸门 · 违一即 reject，V7 仅 warn）============
+    
+    function validateCanonical(entries, options = {}) {
+      const errors = [];
+      const warnings = [];
+      const seenNames = new Map();
+      const list = Array.isArray(entries) ? entries : [];
+    
+      for (const c of list) {
+        const tag = c?.name ? `「${c.name}」` : '(无名条目)';
+    
+        // V1：position.type 只许合法枚举串
+        if (!VALID_POSITION_TYPES.has(c.positionType)) {
+          errors.push({ rule: 'V1', message: `${tag} position.type 非法：${c.positionType}` });
+        }
+        // V2：卡内 extensions.position 必须落在 0-7（经映射等价于 positionType 合法）
+        if (POSITION_TYPE_TO_NUM[c.positionType] == null) {
+          errors.push({ rule: 'V2', message: `${tag} position 越界（须 0-7）` });
+        }
+        // V3：中文 key 的选择性条目，matchWholeWords 必须显式 false（null=继承全局 ON → 中文永远匹配不上）
+        //     仅对选择性(绿灯/向量)且含 CJK key 的条目生效；constant(蓝灯)无 key 扫描不受影响
+        if (c.strategyType !== 'constant' && hasCjkKey(c.keys) && c.matchWholeWords !== false) {
+          const finding = { rule: 'V3', message: `${tag} 含中文 key 但 matchWholeWords 未显式 false（当前=${String(c.matchWholeWords)}），中文将匹配不上` };
+          // Tavern Helper 的运行期 WorldbookEntry 不暴露 matchWholeWords；运行期编辑不能把
+          // “API 没给这个字段”误判成脏数据。卡包/导入面仍维持硬错误，运行期只保留能力告警。
+          if (options.surface === 'runtime') warnings.push(finding);
+          else errors.push(finding);
+        }
+        // V6：at_depth 时 depth 必须为非负整数
+        if (c.positionType === 'at_depth' && !(Number.isInteger(c.depth) && c.depth >= 0)) {
+          errors.push({ rule: 'V6', message: `${tag} position=at_depth 但 depth 非非负整数：${c.depth}` });
+        }
+        // V5：普通条目按 name、managed 工坊包按三元组检查批次内重复；name 不再充当运行期主键。
+        const meta = c && c.meta && typeof c.meta === 'object' && !Array.isArray(c.meta) ? c.meta : {};
+        const managedIdentity = meta.kind === KIND.WORKSHOP_PACKAGE
+          ? [meta.source, meta.kind, meta.packageId, meta.packageType, meta.packageTarget].map(value => String(value || '')).join('|')
+          : (meta.source && meta.kind ? [meta.source, meta.kind].join('|') : String(c.name || ''));
+        if (managedIdentity) {
+          if (seenNames.has(managedIdentity)) errors.push({ rule: 'V5', message: `${tag} 业务主键在本批次内重复` });
+          else seenNames.set(managedIdentity, true);
+        }
+        // V8：受管元数据固定校验；program-only 条目必须禁用且递归双禁。
+        ['source','kind','packageId','packageType','packageTarget'].forEach(key => {
+          if (meta[key] !== undefined && (typeof meta[key] !== 'string' || !meta[key].trim())) {
+            errors.push({ rule: 'V8', message: `${tag} extra.${key} 必须是非空字符串` });
+          }
+        });
+        if (meta.kind === KIND.WORKSHOP_PACKAGE) {
+          ['source','packageId','packageType','packageTarget'].forEach(key => {
+            if (typeof meta[key] !== 'string' || !meta[key].trim()) errors.push({ rule: 'V8', message: `${tag} 工坊条目缺少 extra.${key}` });
+          });
+        }
+        if (meta.programOnly !== undefined && typeof meta.programOnly !== 'boolean') {
+          errors.push({ rule: 'V8', message: `${tag} extra.programOnly 必须是 boolean` });
+        }
+        if (meta.programOnly === true) {
+          ['source','kind','packageId','packageType','packageTarget'].forEach(key => {
+            if (typeof meta[key] !== 'string' || !meta[key].trim()) errors.push({ rule: 'V9', message: `${tag} programOnly 条目缺少 extra.${key}` });
+          });
+          if (meta.kind !== KIND.WORKSHOP_PACKAGE) errors.push({ rule: 'V9', message: `${tag} programOnly 条目 kind 必须是 ${KIND.WORKSHOP_PACKAGE}` });
+          if (c.strategyType !== 'constant') errors.push({ rule: 'V9', message: `${tag} programOnly 条目 strategy 必须是 constant` });
+          if (c.enabled !== false || c.recursion?.prevent_incoming !== true || c.recursion?.prevent_outgoing !== true || c.recursion?.delay_until !== null) {
+            errors.push({ rule: 'V9', message: `${tag} programOnly 条目必须 enabled=false 且递归双禁` });
+          }
+          if (!/^[a-f0-9]{64}$/.test(String(meta.contentHash || ''))) errors.push({ rule: 'V9', message: `${tag} programOnly 条目 contentHash 必须是 64 位小写 SHA-256` });
+          if (meta.revision === undefined || meta.revision === null || !String(meta.revision).trim()) errors.push({ rule: 'V9', message: `${tag} programOnly 条目缺少 extra.revision` });
+          if (typeof meta.installedAt !== 'string' || !meta.installedAt.trim() || Number.isNaN(Date.parse(meta.installedAt))) errors.push({ rule: 'V9', message: `${tag} programOnly 条目 installedAt 必须是合法时间` });
+        }
+        // V7（warn）：Top/Bottom of AN 在 AN 频率=0 时被静默跳过
+        if (AN_POSITIONS.has(c.positionType)) {
+          warnings.push({ rule: 'V7', message: `${tag} 位于 ${c.positionType}(AN)，AN 频率=0 时将被静默跳过、不注入 prompt` });
+        }
+      }
+      return { ok: errors.length === 0, errors, warnings };
+    }
+    
+    function hasCjkKey(keys) {
+      return (keys || []).some(k => /[一-鿿぀-ヿ]/.test(String(k)));
+    }
+    
+    function stableNormalize(value) {
+      if (value instanceof RegExp) return { source: value.source, flags: value.flags };
+      if (Array.isArray(value)) return value.map(item => item === undefined ? null : stableNormalize(item));
+      if (value && typeof value === 'object') {
+        const out = {};
+        Object.keys(value).sort().forEach(key => { if (value[key] !== undefined) out[key] = stableNormalize(value[key]); });
+        return out;
+      }
+      return value;
+    }
+    function stableStringify(value) { return JSON.stringify(stableNormalize(value)); }
+    function worldbookSha256Hex(value) {
+      let bytes;
+      if (typeof TextEncoder === 'function') bytes = new TextEncoder().encode(String(value));
+      else {
+        const encoded = unescape(encodeURIComponent(String(value)));
+        bytes = Uint8Array.from(encoded, char => char.charCodeAt(0));
+      }
+      const bitLength = bytes.length * 8;
+      const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
+      const padded = new Uint8Array(paddedLength);
+      padded.set(bytes); padded[bytes.length] = 0x80;
+      const view = new DataView(padded.buffer);
+      view.setUint32(paddedLength - 8, Math.floor(bitLength / 0x100000000), false);
+      view.setUint32(paddedLength - 4, bitLength >>> 0, false);
+      const state = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+      const constants = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+      const words = new Uint32Array(64);
+      const rotate = (word, bits) => (word >>> bits) | (word << (32 - bits));
+      for (let offset = 0; offset < paddedLength; offset += 64) {
+        for (let i = 0; i < 16; i += 1) words[i] = view.getUint32(offset + i * 4, false);
+        for (let i = 16; i < 64; i += 1) {
+          const a = words[i - 15], b = words[i - 2];
+          words[i] = (words[i - 16] + (rotate(a,7)^rotate(a,18)^(a>>>3)) + words[i - 7] + (rotate(b,17)^rotate(b,19)^(b>>>10))) >>> 0;
+        }
+        let [a,b,c,d,e,f,g,h] = state;
+        for (let i = 0; i < 64; i += 1) {
+          const t1 = (h + (rotate(e,6)^rotate(e,11)^rotate(e,25)) + ((e&f)^(~e&g)) + constants[i] + words[i]) >>> 0;
+          const t2 = ((rotate(a,2)^rotate(a,13)^rotate(a,22)) + ((a&b)^(a&c)^(b&c))) >>> 0;
+          h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;
+        }
+        state[0]=(state[0]+a)>>>0;state[1]=(state[1]+b)>>>0;state[2]=(state[2]+c)>>>0;state[3]=(state[3]+d)>>>0;
+        state[4]=(state[4]+e)>>>0;state[5]=(state[5]+f)>>>0;state[6]=(state[6]+g)>>>0;state[7]=(state[7]+h)>>>0;
+      }
+      return state.map(word => word.toString(16).padStart(8,'0')).join('');
+    }
+    function worldbookRevision(entries) { return 'wb1:' + worldbookSha256Hex(stableStringify(Array.isArray(entries) ? entries : [])); }
+    function worldbookContentHash(content) { return worldbookSha256Hex(String(content || '')); }
+    
+    function mergeRuntimeEntry(previous, updated) {
+      if (!previous) return cloneSnapshotValue(updated);
+      const next = { ...cloneSnapshotValue(previous), ...cloneSnapshotValue(updated) };
+      ['strategy','position','recursion','effect','extra'].forEach(key => {
+        const before = previous?.[key];
+        const after = updated?.[key];
+        if (before && typeof before === 'object' && !Array.isArray(before) && after && typeof after === 'object' && !Array.isArray(after)) {
+          next[key] = { ...cloneSnapshotValue(before), ...cloneSnapshotValue(after) };
+        }
+      });
+      if (previous?.strategy?.keys_secondary && updated?.strategy?.keys_secondary) {
+        next.strategy.keys_secondary = {
+          ...cloneSnapshotValue(previous.strategy.keys_secondary),
+          ...cloneSnapshotValue(updated.strategy.keys_secondary),
+        };
+      }
+      return next;
+    }
+    
+    class WorldbookSnapshotError extends Error {
+      constructor(message, cause = null) {
+        super(message);
+        this.name = 'WorldbookSnapshotError';
+        this.cause = cause || undefined;
+      }
+    }
+    
+    function cloneSnapshotValue(value) {
+      if (typeof structuredClone === 'function') {
+        try { return structuredClone(value); } catch (_) { /* fall through */ }
+      }
+      if (value instanceof RegExp) return new RegExp(value.source, value.flags);
+      if (Array.isArray(value)) return value.map(cloneSnapshotValue);
+      if (value && typeof value === 'object') {
+        const out = {};
+        Object.keys(value).forEach(key => { out[key] = cloneSnapshotValue(value[key]); });
+        return out;
+      }
+      return value;
+    }
+    
+    function snapshotChecksum(record) {
+      return worldbookSha256Hex(stableStringify({
+        schema: record.schema,
+        id: record.id,
+        worldbookName: record.worldbookName,
+        createdAt: record.createdAt,
+        createdAtMs: record.createdAtMs,
+        reason: record.reason,
+        beforeRevision: record.beforeRevision,
+        entries: record.entries,
+      }));
+    }
+    
+    function createWorldbookSnapshotStore(config = {}) {
+      const indexedDb = config.indexedDB ?? (typeof indexedDB !== 'undefined' ? indexedDB : null);
+      const localStore = config.localStorage ?? (typeof localStorage !== 'undefined' ? localStorage : null);
+      const maxPerWorldbook = Math.max(1, Number(config.maxPerWorldbook) || 10);
+      const now = config.now || (() => new Date().toISOString());
+      const randomUUID = config.randomUUID || (() => {
+        try { return crypto.randomUUID(); } catch (_) { return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`; }
+      });
+      const dbName = config.dbName || 'worldbook-manager-snapshots-v1';
+      const objectStoreName = config.objectStoreName || 'snapshots';
+      const metadataStoreName = config.metadataStoreName || 'snapshot_metadata';
+      const fallbackKey = config.fallbackKey || 'worldbook-manager:snapshot:fallback:v1';
+      const openTimeoutMs = Math.max(250, Number(config.openTimeoutMs) || 1500);
+      let idbDisabled = !indexedDb;
+      let dbPromise = null;
+      let activeBackend = idbDisabled ? 'localStorage' : 'indexedDB';
+    
+      function requestResult(request) {
+        return new Promise((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
+        });
+      }
+      function transactionDone(transaction) {
+        return new Promise((resolve, reject) => {
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed'));
+          transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted'));
+        });
+      }
+      function openDatabase() {
+        if (idbDisabled) return Promise.reject(new Error('IndexedDB unavailable'));
+        if (dbPromise) return dbPromise;
+        dbPromise = new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('IndexedDB open timeout')), openTimeoutMs);
+          let request;
+          try { request = indexedDb.open(dbName, 2); } catch (error) { clearTimeout(timer); reject(error); return; }
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains(objectStoreName)) db.createObjectStore(objectStoreName, { keyPath: 'id' });
+            const metadata = db.objectStoreNames.contains(metadataStoreName)
+              ? request.transaction.objectStore(metadataStoreName)
+              : db.createObjectStore(metadataStoreName, { keyPath:'id' });
+            if (!metadata.indexNames.contains('worldbookName')) metadata.createIndex('worldbookName', 'worldbookName', { unique:false });
+          };
+          request.onsuccess = () => { clearTimeout(timer); resolve(request.result); };
+          request.onerror = () => { clearTimeout(timer); reject(request.error || new Error('IndexedDB open failed')); };
+          request.onblocked = () => { clearTimeout(timer); reject(new Error('IndexedDB open blocked')); };
+        }).catch(error => { dbPromise = null; throw error; });
+        return dbPromise;
+      }
+      function stringifySnapshot(record) {
+        return JSON.stringify(record, (_key, value) => value instanceof RegExp
+          ? { __worldbookManagerRegExpV1: true, source: value.source, flags: value.flags }
+          : value);
+      }
+      function parseSnapshot(text) {
+        return JSON.parse(text, (_key, value) => value?.__worldbookManagerRegExpV1 === true
+          ? new RegExp(value.source, value.flags)
+          : value);
+      }
+      function assertSnapshot(record, expectedWorldbookName = '') {
+        if (!record || record.schema !== 'worldbook-snapshot-v1' || !Array.isArray(record.entries)) throw new WorldbookSnapshotError('快照格式无效');
+        if (expectedWorldbookName && record.worldbookName !== expectedWorldbookName) throw new WorldbookSnapshotError('快照不属于当前世界书');
+        if (record.entriesRevision !== worldbookRevision(record.entries)) throw new WorldbookSnapshotError('快照条目 revision 校验失败');
+        if (record.checksum !== snapshotChecksum(record)) throw new WorldbookSnapshotError('快照 checksum 校验失败');
+        return record;
+      }
+      function snapshotMetadata(record) {
+        return {
+          schema:record.schema, id:record.id, worldbookName:record.worldbookName,
+          createdAt:record.createdAt, createdAtMs:record.createdAtMs, reason:record.reason,
+          beforeRevision:record.beforeRevision, entriesRevision:record.entriesRevision,
+          entryCount:Array.isArray(record.entries) ? record.entries.length : Number(record.entryCount) || 0,
+          checksum:record.checksum, managerVersion:record.managerVersion,
+        };
+      }
+      function assertSnapshotMetadata(record, expectedWorldbookName = '') {
+        if (!record || record.schema !== 'worldbook-snapshot-v1' || !record.id || !/^[a-f0-9]{64}$/.test(String(record.checksum || ''))) throw new WorldbookSnapshotError('快照元数据无效');
+        if (expectedWorldbookName && record.worldbookName !== expectedWorldbookName) throw new WorldbookSnapshotError('快照不属于当前世界书');
+        return record;
+      }
+      async function saveToIndexedDb(record) {
+        const db = await openDatabase();
+        const transaction = db.transaction([objectStoreName, metadataStoreName], 'readwrite');
+        const done = transactionDone(transaction);
+        const store = transaction.objectStore(objectStoreName);
+        const metadata = transaction.objectStore(metadataStoreName);
+        await requestResult(store.put(record));
+        await requestResult(metadata.put(snapshotMetadata(record)));
+        const sameBook = (await requestResult(metadata.index('worldbookName').getAll(record.worldbookName))).sort((a, b) => b.createdAtMs - a.createdAtMs || String(b.id).localeCompare(String(a.id)));
+        for (const stale of sameBook.slice(maxPerWorldbook)) { store.delete(stale.id); metadata.delete(stale.id); }
+        await done;
+      }
+      function readFallback() {
+        if (!localStore) return null;
+        const raw = localStore.getItem(fallbackKey);
+        return raw ? parseSnapshot(raw) : null;
+      }
+      function saveFallback(record) {
+        if (!localStore) throw new Error('localStorage unavailable');
+        localStore.setItem(fallbackKey, stringifySnapshot(record));
+      }
+      async function save({ worldbookName, entries, reason = 'before-save' } = {}) {
+        if (!worldbookName || !Array.isArray(entries)) throw new WorldbookSnapshotError('保存快照需要 worldbookName 与完整 entries');
+        const createdAt = now();
+        const record = {
+          schema: 'worldbook-snapshot-v1',
+          id: randomUUID(),
+          worldbookName,
+          createdAt,
+          createdAtMs: Number.isFinite(Date.parse(createdAt)) ? Date.parse(createdAt) : Date.now(),
+          reason,
+          beforeRevision: worldbookRevision(entries),
+          entriesRevision: worldbookRevision(entries),
+          entries: cloneSnapshotValue(entries),
+          checksum: '',
+          managerVersion: '0.3.0',
+        };
+        record.checksum = snapshotChecksum(record);
+        if (!idbDisabled) {
+          try { await saveToIndexedDb(record); activeBackend = 'indexedDB'; return cloneSnapshotValue(record); }
+          catch (_) { idbDisabled = true; activeBackend = 'localStorage'; }
+        }
+        try { saveFallback(record); return cloneSnapshotValue(record); }
+        catch (error) { throw new WorldbookSnapshotError('无法建立强制世界书备份，已中止写入', error); }
+      }
+      async function list(worldbookName) {
+        if (!worldbookName) return [];
+        if (!idbDisabled) {
+          let merged = null;
+          try {
+            const db = await openDatabase();
+            const transaction = db.transaction(metadataStoreName, 'readonly');
+            const done = transactionDone(transaction);
+            const all = await requestResult(transaction.objectStore(metadataStoreName).index('worldbookName').getAll(worldbookName));
+            await done;
+            activeBackend = 'indexedDB';
+            merged = all.map(item => cloneSnapshotValue(assertSnapshotMetadata(item, worldbookName)));
+          } catch (_) { idbDisabled = true; activeBackend = 'localStorage'; }
+          if (merged) {
+            let fallback = null;
+            try { fallback = readFallback(); } catch (_) { fallback = null; }
+            if (fallback && fallback.worldbookName === worldbookName && !merged.some(item => item.id === fallback.id)) {
+              try {
+                merged.push(snapshotMetadata(assertSnapshot(fallback, worldbookName)));
+                activeBackend = 'indexedDB+localStorage';
+              } catch (_) { /* 损坏的降级快照不得拖垮正常 IndexedDB 列表。 */ }
+            }
+            return merged.sort((a, b) => b.createdAtMs - a.createdAtMs || String(b.id).localeCompare(String(a.id))).slice(0, maxPerWorldbook);
+          }
+        }
+        try {
+          const item = readFallback();
+          return item && item.worldbookName === worldbookName ? [cloneSnapshotValue(assertSnapshot(item, worldbookName))] : [];
+        } catch (error) { throw new WorldbookSnapshotError('读取世界书快照失败', error); }
+      }
+      async function get(id, worldbookName = '') {
+        if (!id) throw new WorldbookSnapshotError('缺少 snapshot id');
+        if (!idbDisabled) {
+          try {
+            const db = await openDatabase();
+            const transaction = db.transaction(objectStoreName, 'readonly');
+            const done = transactionDone(transaction);
+            const item = await requestResult(transaction.objectStore(objectStoreName).get(id));
+            await done;
+            if (item) return cloneSnapshotValue(assertSnapshot(item, worldbookName));
+          } catch (_) { idbDisabled = true; activeBackend = 'localStorage'; }
+        }
+        const item = readFallback();
+        if (!item || item.id !== id) throw new WorldbookSnapshotError('未找到指定世界书快照');
+        return cloneSnapshotValue(assertSnapshot(item, worldbookName));
+      }
+      return { save, list, get, backend: () => activeBackend, maxPerWorldbook };
+    }
+    function entryUid(entry) { return Number.isInteger(entry?.uid) && entry.uid >= 0 ? entry.uid : null; }
+    function entryMeta(entry) { return entry?.extra || entry?.meta || {}; }
+    function managedEntryKey(entry) {
+      const meta = entryMeta(entry);
+      if (!meta.source || !meta.kind) return '';
+      if (meta.kind === KIND.WORKSHOP_PACKAGE) return ['package',meta.source,meta.kind,meta.packageId,meta.packageType,meta.packageTarget].map(v => String(v || '')).join('|');
+      return ['managed',meta.source,meta.kind].join('|');
+    }
+    function diffValue(before, after, path, changes) {
+      if (stableStringify(before) === stableStringify(after)) return;
+      const beforeObject = before && typeof before === 'object' && !Array.isArray(before);
+      const afterObject = after && typeof after === 'object' && !Array.isArray(after);
+      if (beforeObject && afterObject) {
+        const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+        [...keys].sort().forEach(key => diffValue(before[key], after[key], path + '/' + String(key).replace(/~/g,'~0').replace(/\//g,'~1'), changes));
         return;
       }
-      nonWorkshop.push(item);
-    });
-    return [
-      ...nonWorkshop,
-      start,
-      ...workshopPackages,
-      entry,
-      end,
-    ];
+      changes.push({ path: path || '/', before, after });
+    }
+    function diffWorldbookEntries({ before = [], after = [], draft } = {}) {
+      if (draft !== undefined) after = draft;
+      const oldList = Array.isArray(before) ? before : [];
+      const newList = Array.isArray(after) ? after : [];
+      const oldByUid = new Map(oldList.filter(e => entryUid(e) !== null).map(e => [entryUid(e), e]));
+      const newByUid = new Map(newList.filter(e => entryUid(e) !== null).map(e => [entryUid(e), e]));
+      const added = [], deleted = [], updated = [], moved = []; let unchanged = 0;
+      oldByUid.forEach((entry, uid) => { if (!newByUid.has(uid)) deleted.push({ uid, entry }); });
+      newList.forEach(entry => {
+        const uid = entryUid(entry);
+        if (uid === null || !oldByUid.has(uid)) { added.push({ uid, entry }); return; }
+        const previous = oldByUid.get(uid);
+        const changes = []; diffValue(previous, entry, '', changes);
+        if (changes.length) updated.push({ uid, nameBefore: previous.name || previous.comment || '', nameAfter: entry.name || entry.comment || '', changes, before: previous, after: entry });
+        else unchanged += 1;
+      });
+      const commonOld = oldList.map(entryUid).filter(uid => uid !== null && newByUid.has(uid));
+      const commonNew = newList.map(entryUid).filter(uid => uid !== null && oldByUid.has(uid));
+      const oldRank = new Map(commonOld.map((uid, index) => [uid, index]));
+      commonNew.forEach((uid, index) => {
+        if (oldRank.get(uid) !== index) moved.push({ uid, fromIndex:oldList.findIndex(entry => entryUid(entry) === uid), toIndex:newList.findIndex(entry => entryUid(entry) === uid) });
+      });
+      return { added, deleted, updated, moved, unchanged, summary: { added: added.length, deleted: deleted.length, updated: updated.length, moved: moved.length, unchanged } };
+    }
+    function previewActivation(entries = [], context = {}) {
+      const initialText = String(context.text || '');
+      const maxDepth = Math.max(0, Math.min(16, Number.isInteger(context.maxRecursionDepth) ? context.maxRecursionDepth : 4));
+      const active = [], inactive = [], indeterminate = [], pending = [];
+      const matches = (key, text, caseSensitive, wholeWords) => {
+        if (key instanceof RegExp) {
+          try { return new RegExp(key.source, key.flags.replace(/[gy]/g, '')).test(text); } catch (_) { return false; }
+        }
+        const needle = String(key || '');
+        if (!needle) return false;
+        if (!wholeWords) return caseSensitive ? text.includes(needle) : text.toLocaleLowerCase().includes(needle.toLocaleLowerCase());
+        const haystack = caseSensitive ? text : text.toLocaleLowerCase();
+        const token = caseSensitive ? needle : needle.toLocaleLowerCase();
+        const isWord = char => Boolean(char) && /[0-9A-Za-z_]/.test(char);
+        let offset = 0;
+        while (offset <= haystack.length) {
+          const index = haystack.indexOf(token, offset);
+          if (index < 0) return false;
+          if (!isWord(haystack[index - 1]) && !isWord(haystack[index + token.length])) return true;
+          offset = index + Math.max(1, token.length);
+        }
+        return false;
+      };
+      const eligibleIn = (c, text) => {
+        if (c.strategyType === 'constant') return true;
+        if (c.strategyType !== 'selective') return false;
+        const primary = (c.keys || []).some(key => matches(key, text, c.caseSensitive === true, c.matchWholeWords === true));
+        const secondary = (c.secondaryKeys || []).map(key => matches(key, text, c.caseSensitive === true, c.matchWholeWords === true));
+        const logic = c.secondaryLogic || 'and_any';
+        const secondaryOk = !secondary.length || (logic === 'and_any' ? secondary.some(Boolean) : logic === 'and_all' ? secondary.every(Boolean) : logic === 'not_any' ? secondary.every(value => !value) : !secondary.every(Boolean));
+        return primary && secondaryOk;
+      };
+      (Array.isArray(entries) ? entries : []).forEach((raw, index) => {
+        const c = raw?.strategyType ? raw : runtimeAdapter.fromRuntime(raw || {});
+        const item = { entry:c, uid:entryUid(c), name:c.name, reason:'', depth:null, inputIndex:index };
+        if (c.meta?.programOnly === true) { item.reason='program_only'; inactive.push(item); return; }
+        if (c.enabled === false) { item.reason='disabled'; inactive.push(item); return; }
+        if (c.strategyType === 'vectorized') { item.reason='vectorized_requires_st'; indeterminate.push(item); return; }
+        if (Number(c.probability) <= 0) { item.reason='probability_zero'; inactive.push(item); return; }
+        pending.push({ c, item, index, done:false });
+      });
+      let scanText = initialText;
+      for (let depth = 0; depth <= maxDepth; depth += 1) {
+        let propagated = '';
+        pending.forEach(candidate => {
+          if (candidate.done) return;
+          const delay = Number.isInteger(candidate.c.recursion?.delay_until) ? candidate.c.recursion.delay_until : 0;
+          if (depth < delay) return;
+          const basis = depth > 0 && candidate.c.recursion?.prevent_incoming === true ? initialText : scanText;
+          if (!eligibleIn(candidate.c, basis)) return;
+          candidate.done = true;
+          candidate.item.depth = depth;
+          if (Number(candidate.c.probability) < 100) { candidate.item.reason='probabilistic'; indeterminate.push(candidate.item); return; }
+          candidate.item.reason = depth === 0 ? 'eligible' : 'eligible_recursive';
+          active.push(candidate.item);
+          if (candidate.c.recursion?.prevent_outgoing !== true && String(candidate.c.content || '').trim()) propagated += '\n' + candidate.c.content;
+        });
+        if (propagated) scanText += propagated;
+        const waitingForDelay = pending.some(candidate => !candidate.done && Number.isInteger(candidate.c.recursion?.delay_until) && candidate.c.recursion.delay_until > depth && candidate.c.recursion.delay_until <= maxDepth);
+        if (!propagated && !waitingForDelay) break;
+      }
+      pending.filter(candidate => !candidate.done).forEach(candidate => {
+        const delay = Number.isInteger(candidate.c.recursion?.delay_until) ? candidate.c.recursion.delay_until : 0;
+        candidate.item.reason = delay > maxDepth ? 'recursion_delay' : 'keys_not_matched';
+        inactive.push(candidate.item);
+      });
+      const byInputOrder = (a, b) => a.inputIndex - b.inputIndex;
+      active.sort(byInputOrder); inactive.sort(byInputOrder); indeterminate.sort(byInputOrder);
+      return { active, inactive, indeterminate, approximate:true, maxRecursionDepth:maxDepth };
+    }
+    
+    // ============ 3. 受管判定 / upsert 幂等 / scope 三态 / 边界块整替 ============
+    //   （提取自雏形 isOpeningManagedEntry/isWorkshopManagedEntry/upsertEntries，去硬编码为 sourcePrefix）
+    
+    function makeSourceTags(sourcePrefix) {
+      return {
+        opening: `${sourcePrefix}-${SOURCE_SUFFIX.OPENING}`,
+        workshop: `${sourcePrefix}-${SOURCE_SUFFIX.WORKSHOP}`,
+      };
+    }
+    
+    function isOpeningManaged(entry, tags, scheme) {
+      const src = entry?.extra?.source ?? entry?.meta?.source;
+      const kind = entry?.extra?.kind ?? entry?.meta?.kind;
+      const name = entry?.name;
+      return src === tags.opening && (name === scheme.identity || name === scheme.worldFactor || kind === KIND.IDENTITY || kind === KIND.WORLD_FACTOR);
+    }
+    
+    function isWorkshopManaged(entry, tags, scheme = {}) {
+      const src = entry?.extra?.source ?? entry?.meta?.source;
+      const kind = entry?.extra?.kind ?? entry?.meta?.kind;
+      if (src === tags.workshop) {
+        if ([KIND.WORKSHOP_PACKAGE, KIND.BOUNDARY_START, KIND.BOUNDARY_END].includes(kind)) return true;
+        if (!kind && (entry?.name === scheme.workshopStart || entry?.name === scheme.workshopEnd)) return true;
+        if (!kind && entry?.extra?.packageId && entry?.extra?.packageType) return true;
+        return false;
+      }
+      return src === tags.opening && kind === KIND.WORKSHOP_PACKAGE;
+    }
+    
+    /**
+     * upsert：分拣三类（受 opening 管理 / 受 workshop 管理 / 非受管），preserveUid，按 scope 决定重建哪类。
+     * 运行期新 API 无 group → 工坊覆盖用「边界块整替」（boundary 对包裹），雏形已验证。
+     * @param existing  现有运行期 entry 数组
+     * @param finalOpening   本次要落的 opening 运行期 entry（scope!=workshop 时）
+     * @param finalWorkshop  本次要落的 workshop 运行期 entry（scope!=identity 时）
+     */
+    function upsertRuntime(existing, finalOpening, finalWorkshop, ctx) {
+      const { tags, scheme, boundaryStart, boundaryEnd } = ctx;
+      const cur = Array.isArray(existing) ? existing : [];
+      const preservedByName = new Map();
+      for (const e of cur) {
+        if (isOpeningManaged(e, tags, scheme) || isWorkshopManaged(e, tags, scheme)) preservedByName.set(e.name, e);
+      }
+      const preserveUid = e => {
+        const prev = preservedByName.get(e.name);
+        return prev?.uid != null ? { ...e, uid: prev.uid } : e;
+      };
+      const base = cur.filter(e => !isOpeningManaged(e, tags, scheme) && !isWorkshopManaged(e, tags, scheme));
+      const workshopBlock = finalWorkshop.length
+        ? [boundaryStart, ...finalWorkshop, boundaryEnd].map(preserveUid)
+        : [];
+      return [...base, ...finalOpening.map(preserveUid), ...workshopBlock];
+    }
+    
+    // ============ 4. createWorldbookManager 工厂（可移植内核 · 卡配置注入）============
+    
+    /**
+     * @param {Object} config
+     * @param {RegExp[]} config.nameMatchers   卡名匹配候选正则（按优先级），解析绑定世界书名用
+     * @param {string}   config.sourcePrefix   来源命名空间前缀（如 'xingyue' / 'crossed'），内核拼 `${prefix}-*`
+     * @param {Object}   config.entryNameScheme {identity, worldFactor, workshopStart, workshopEnd}
+     * @param {Object=}  config.registry       type 注册表实例（getPositionDefaults/getLabel/validate），可选
+     * @param {Object=}  config.tavernHelper   运行期 TH（含 updateWorldbookWith + getCharWorldbookNames/getWorldbookNames）；无则降级 dry-run
+     * @param {string=}  config.version        写入 extra.version（调用方从 manifest 取）
+     * @param {Function=} config.now           时间戳工厂（默认 () => new Date().toISOString()），便于测试注入
+     * @param {EventTarget=} config.eventTarget 预览事件派发目标（默认 globalThis）
+     * @param {Object=} config.programOnlyPolicy 卡级 program-only 策略：detect(item) 与 validate(canonical)
+     * @param {Object=} config.snapshotStore   createWorldbookSnapshotStore() 或同构实现
+     * @param {boolean=} config.snapshotRequired 非空事务是否强制先建立完整原始快照
+     * @param {Function=} config.protectedEntryClassifier 可信卡级分类器：(uid) => core|variable|''，可返回 Promise
+     */
+    function createWorldbookManager(config = {}) {
+      const {
+        nameMatchers = [],
+        sourcePrefix,
+        entryNameScheme,
+        registry = null,
+        tavernHelper = null,
+        version = '0.0.0',
+        now = () => new Date().toISOString(),
+        eventTarget = typeof globalThis !== 'undefined' ? globalThis : null,
+        programOnlyPolicy = null,
+        snapshotStore = null,
+        snapshotRequired = false,
+        protectedEntryClassifier = null,
+        restorePlanTtlMs = 5 * 60 * 1000,
+        editorPlanTtlMs = 10 * 60 * 1000,
+      } = config;
+    
+      if (!sourcePrefix) throw new Error('createWorldbookManager: 缺少 sourcePrefix');
+      if (!entryNameScheme || !entryNameScheme.identity) throw new Error('createWorldbookManager: 缺少 entryNameScheme');
+    
+      const tags = makeSourceTags(sourcePrefix);
+      const scheme = entryNameScheme;
+      let transactionTail = Promise.resolve();
+      const restorePlans = new Map();
+      const editorSessions = new Map();
+      const editorPlans = new Map();
+      function validateEntries(entries, options = {}) {
+        const list = Array.isArray(entries) ? entries : [];
+        const base = validateCanonical(list, options);
+        const errors = base.errors.slice();
+        if (programOnlyPolicy) {
+          list.forEach(entry => {
+            const required = typeof programOnlyPolicy.requires === 'function' && programOnlyPolicy.requires(entry) === true;
+            if (required && entry?.meta?.programOnly !== true) {
+              errors.push({ rule:'V9P', message:`「${entry.name || '无名条目'}」命中卡级 programOnly 目标但未声明 programOnly=true` });
+              return;
+            }
+            if (entry?.meta?.programOnly === true && typeof programOnlyPolicy.validate === 'function') {
+              const verdict = programOnlyPolicy.validate(entry);
+              if (verdict !== true) errors.push({ rule:'V9P', message:typeof verdict === 'string' ? verdict : `「${entry.name || '无名条目'}」不符合卡级 programOnly 策略` });
+            }
+          });
+        }
+        return { ok:errors.length === 0, errors, warnings:base.warnings };
+      }
+    
+      // ---- 内部：探测运行期 API host ----
+      //   注入优先：config.tavernHelper 一旦提供就只认它、不回退全局（防「看似参数化、实则走全局」RISK-1）。
+      //   未注入时才探测 window / window.parent（iframe 宿主）链上的 TavernHelper。
+      function apiHost() {
+        if (tavernHelper) {
+          return tavernHelper.updateWorldbookWith && (tavernHelper.getCharWorldbookNames || tavernHelper.getWorldbookNames) ? tavernHelper : null;
+        }
+        const probes = [];
+        if (typeof window !== 'undefined') {
+          probes.push(window, window.TavernHelper);
+          try { if (window.parent && window.parent !== window) probes.push(window.parent, window.parent.TavernHelper); } catch (_) { /* 跨源 parent 访问抛错，忽略 */ }
+        }
+        for (const t of probes) {
+          if (t && t.updateWorldbookWith && (t.getCharWorldbookNames || t.getWorldbookNames)) return t;
+        }
+        return null;
+      }
+    
+      async function resolveWorldbookName(host) {
+        try {
+          const c = await host?.getCharWorldbookNames?.('current'); // 可能返回 Promise，必须 await（B-BUG1）
+          if (c && c.primary) return c.primary;
+        } catch (_) { /* noop */ }
+        try {
+          const all = await host?.getWorldbookNames?.();
+          if (Array.isArray(all)) {
+            for (const re of nameMatchers) {
+              const hit = all.find(n => re.test(String(n)));
+              if (hit) return hit;
+            }
+          }
+        } catch (_) { /* noop */ }
+        return ''; // 未匹配返回空、由调用方收「未定位」警告；不盲取 all[0]（可能是别卡的世界书，RISK-2）
+      }
+    
+      // ---- 内部：构造受管 Canonical 条目 ----
+      function makeConstantCanonical(name, content, kind, extraMeta = {}, order = 100) {
+        return makeCanonical({
+          name,
+          content: String(content || ''),
+          enabled: extraMeta.enabled ?? Boolean(String(content || '').trim()),
+          strategyType: 'constant',
+          // 同雏形：开局/工坊条目落 before_author_note(Top of AN)；role/depth 惰性（仅 at_depth 有效）
+          positionType: 'before_author_note',
+          role: 'system',
+          depth: 4,
+          order,
+          meta: { source: extraMeta.source || tags.opening, kind, version, ...stripMeta(extraMeta) },
+        });
+      }
+    
+      function stripMeta(m) {
+        const { enabled, source, order, ...rest } = m; // 这几个已单独消费
+        return rest;
+      }
+    
+      function boundaryCanonical(which) {
+        const isStart = which === 'start';
+        return makeConstantCanonical(
+          isStart ? scheme.workshopStart : scheme.workshopEnd,
+          '',
+          isStart ? KIND.BOUNDARY_START : KIND.BOUNDARY_END,
+          { source: tags.workshop, enabled: false },
+          isStart ? 101 : 199,
+        );
+      }
+    
+      function workshopPackageCanonical(item, installedAt) {
+        const packageId = item.packageId ?? item.id;
+        const packageType = item.packageType ?? item.type;
+        const packageTarget = item.packageTarget ?? item.target ?? packageType ?? 'generic';
+        const content = String(item.content || '');
+        const programOnly = item.programOnly === true || Boolean(programOnlyPolicy && typeof programOnlyPolicy.detect === 'function' && programOnlyPolicy.detect({ item, packageId, packageType, packageTarget }) === true);
+        const explicitEnabled = item.enabled !== undefined ? item.enabled === true : Boolean(content.trim());
+        const comment = item.comment || (registry?.workshopComment?.(packageType, item.title)) || `[${sourcePrefix}-工坊][${packageType || ''}]${item.title || ''}`;
+        return makeCanonical({
+          name: comment,
+          content,
+          enabled: programOnly ? false : explicitEnabled,
+          strategyType: 'constant',
+          positionType: 'before_author_note',
+          role: 'system',
+          depth: 4,
+          order: 110,
+          group: `${sourcePrefix}-override-${packageId}`,
+          groupOverride: true,
+          groupWeight: 100,
+          probability: 100,
+          recursion: { prevent_incoming: true, prevent_outgoing: true, delay_until: null },
+          meta: {
+            source: tags.workshop,
+            kind: KIND.WORKSHOP_PACKAGE,
+            programOnly,
+            packageId,
+            packageType,
+            packageTarget,
+            revision: item.revision,
+            contentHash: item.contentHash || worldbookContentHash(content),
+            installedAt: item.installedAt || installedAt,
+            version,
+          },
+        });
+      }
+    
+      // ---- 内部：payload → opening/workshop Canonical ----
+      function buildCanonical(payload) {
+        const opening = [];
+        if (payload.identity) opening.push(makeConstantCanonical(scheme.identity, payload.identity, KIND.IDENTITY));
+        if (payload.worldFactor) opening.push(makeConstantCanonical(scheme.worldFactor, payload.worldFactor, KIND.WORLD_FACTOR));
+        const installedAt = now();
+        const workshop = (payload.workshopEntries || []).map(item => workshopPackageCanonical(item, installedAt));
+        return { opening, workshop };
+      }
+    
+      function dispatchPreview(detail) {
+        try {
+          eventTarget?.dispatchEvent?.(new CustomEvent('worldbook-manager:preview', { detail }));
+        } catch (_) { /* 非浏览器环境无 CustomEvent，静默 */ }
+      }
+    
+      function duplicateUidErrors(entries) {
+        const seen = new Set(), errors = [];
+        (Array.isArray(entries) ? entries : []).forEach(entry => {
+          const uid = entryUid(entry);
+          if (uid === null) return;
+          if (seen.has(uid)) errors.push({ rule:'V10', message:'世界书存在重复 UID：' + uid });
+          seen.add(uid);
+        });
+        return errors;
+      }
+      function sameManagedEntry(existing, incoming) {
+        const a = entryMeta(existing), b = entryMeta(incoming);
+        if (!a.source || !a.kind || a.source !== b.source || a.kind !== b.kind) return false;
+        if (b.kind !== KIND.WORKSHOP_PACKAGE) return true;
+        if (String(a.packageId || '') !== String(b.packageId || '') || String(a.packageType || '') !== String(b.packageType || '')) return false;
+        if (!a.packageTarget) return true;
+        return String(a.packageTarget) === String(b.packageTarget || '');
+      }
+      function managedDelete(scope, entry) {
+        if (scope === 'opening') return isOpeningManaged(entry, tags, scheme);
+        if (scope === 'workshop') return isWorkshopManaged(entry, tags, scheme);
+        return false;
+      }
+      async function getRevision() {
+        await transactionTail;
+        const host = apiHost();
+        if (!host?.getWorldbook) return null;
+        const name = await resolveWorldbookName(host);
+        if (!name) return null;
+        const entries = await host.getWorldbook(name);
+        return worldbookRevision(entries);
+      }
+      function freshPlanId(prefix) {
+        return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      }
+      function pruneEditorState() {
+        const time = Date.now();
+        for (const [id, session] of editorSessions) if (time > session.expiresAt) editorSessions.delete(id);
+        for (const [id, plan] of editorPlans) if (time > plan.expiresAt) editorPlans.delete(id);
+      }
+      async function currentEditorSnapshot() {
+        await transactionTail;
+        const host = apiHost();
+        if (!host?.getWorldbook) throw new WorldbookSnapshotError('未检测到 Tavern Helper 世界书 API');
+        const worldbookName = await resolveWorldbookName(host);
+        if (!worldbookName) throw new WorldbookSnapshotError('未能定位角色卡绑定的世界书');
+        const rawEntries = await host.getWorldbook(worldbookName);
+        const entries = Array.isArray(rawEntries) ? cloneSnapshotValue(rawEntries) : [];
+        return { worldbookName, revision:worldbookRevision(entries), rawEntries:entries };
+      }
+      async function openEditorSession() {
+        pruneEditorState();
+        const snapshot = await currentEditorSnapshot();
+        const sessionId = freshPlanId('editor-session');
+        const expiresAt = Date.now() + Math.max(1000, Number(editorPlanTtlMs) || 600000);
+        editorSessions.set(sessionId, { ...snapshot, sessionId, expiresAt });
+        return {
+          sessionId,
+          worldbookName:snapshot.worldbookName,
+          revision:snapshot.revision,
+          entries:snapshot.rawEntries.map(runtimeAdapter.fromRuntime),
+          expiresAt,
+        };
+      }
+      async function requireFreshEditorSession(sessionId) {
+        pruneEditorState();
+        const session = editorSessions.get(sessionId);
+        if (!session) throw new WorldbookSnapshotError('编辑会话不存在或已过期，请重新载入');
+        const snapshot = await currentEditorSnapshot();
+        if (snapshot.worldbookName !== session.worldbookName) throw new WorldbookSnapshotError('绑定世界书已切换，请重新载入编辑器');
+        if (snapshot.revision !== session.revision) throw new WorldbookRevisionConflictError(session.revision, snapshot.revision, snapshot.worldbookName);
+        return { session, snapshot };
+      }
+      async function protectedCategory(uid) {
+        if (typeof protectedEntryClassifier !== 'function') return '';
+        const category = await protectedEntryClassifier(uid);
+        return category === 'core' || category === 'variable' ? category : '';
+      }
+      function publicEditorPlan(plan) {
+        return {
+          planId:plan.planId,
+          kind:plan.kind,
+          worldbookName:plan.worldbookName,
+          expectedRevision:plan.expectedRevision,
+          uid:plan.uid,
+          category:plan.category,
+          requiresProtectedConfirmation:plan.requiresProtectedConfirmation,
+          diff:plan.diff,
+          validation:plan.validation,
+          activation:plan.activation,
+          expiresAt:plan.expiresAt,
+          noop:false,
+        };
+      }
+      function managedIdentityChanged(beforeMeta, afterMeta) {
+        return ['source','kind','packageId','packageType','packageTarget','programOnly'].some(key => stableStringify(beforeMeta?.[key]) !== stableStringify(afterMeta?.[key]));
+      }
+      function isWorkshopPackageMeta(meta) { return meta?.kind === KIND.WORKSHOP_PACKAGE && meta?.source === tags.workshop; }
+      function isBoundaryMeta(meta) { return meta?.kind === KIND.BOUNDARY_START || meta?.kind === KIND.BOUNDARY_END; }
+      async function prepareEntryEdit({ sessionId, uid, draft } = {}) {
+        if (!Number.isInteger(uid) || uid < 0) throw new WorldbookValidationError([{ rule:'V14', message:'编辑目标 UID 无效' }]);
+        const { session, snapshot } = await requireFreshEditorSession(sessionId);
+        const previousRaw = snapshot.rawEntries.find(entry => entryUid(entry) === uid);
+        if (!previousRaw) throw new WorldbookValidationError([{ rule:'V14', message:'编辑目标 UID 不存在：' + uid }]);
+        const previous = runtimeAdapter.fromRuntime(previousRaw);
+        if (isBoundaryMeta(previous.meta)) throw new WorldbookValidationError([{ rule:'V14', message:'工坊边界条目为内部结构，不能作为正文编辑' }]);
+        const incomingMeta = draft?.meta && typeof draft.meta === 'object' ? draft.meta : previous.meta;
+        if (managedIdentityChanged(previous.meta, incomingMeta) || stableStringify(incomingMeta) !== stableStringify(previous.meta)) {
+          throw new WorldbookValidationError([{ rule:'V14', message:'编辑器不得直接修改受管元数据' }]);
+        }
+        const next = makeCanonical({ ...previous, ...(draft || {}), uid, meta:{ ...previous.meta } });
+        if (previous.meta?.programOnly === true && (next.enabled !== false || next.strategyType !== 'constant'
+          || next.recursion?.prevent_incoming !== true || next.recursion?.prevent_outgoing !== true || next.recursion?.delay_until !== null)) {
+          throw new WorldbookValidationError([{ rule:'V14', message:'programOnly 条目必须保持禁用、constant 与递归双禁；如需启用请先脱离为用户副本' }]);
+        }
+        let nextRaw = mergeRuntimeEntry(previousRaw, runtimeAdapter.toRuntime(next));
+        if (worldbookRevision([previousRaw]) === worldbookRevision([nextRaw])) {
+          const validation = validateEntries(snapshot.rawEntries.map(runtimeAdapter.fromRuntime), { surface:'runtime' });
+          return { noop:true, worldbookName:session.worldbookName, expectedRevision:session.revision, uid, diff:diffWorldbookEntries({ before:[previousRaw], after:[nextRaw] }), validation };
+        }
+        if (isWorkshopPackageMeta(previous.meta)) {
+          next.meta = { ...previous.meta, localModifiedAt:now() };
+          nextRaw = mergeRuntimeEntry(previousRaw, runtimeAdapter.toRuntime(next));
+        }
+        const category = await protectedCategory(uid);
+        const allAfter = snapshot.rawEntries.map(entry => entryUid(entry) === uid ? nextRaw : entry);
+        const validation = validateEntries(allAfter.map(runtimeAdapter.fromRuntime), { surface:'runtime' });
+        if (!validation.ok) throw new WorldbookValidationError(validation.errors);
+        const planId = freshPlanId('editor-save');
+        const plan = {
+          planId,
+          kind:'edit',
+          worldbookName:session.worldbookName,
+          expectedRevision:session.revision,
+          uid,
+          category,
+          requiresProtectedConfirmation:category === 'core' || category === 'variable',
+          canonical:next,
+          validation,
+          diff:diffWorldbookEntries({ before:[previousRaw], after:[nextRaw] }),
+          activation:previewActivation(allAfter.map(runtimeAdapter.fromRuntime), { text:next.content }),
+          expiresAt:Date.now() + Math.max(1000, Number(editorPlanTtlMs) || 600000),
+        };
+        editorPlans.set(planId, plan);
+        return publicEditorPlan(plan);
+      }
+      async function prepareDetachProgramOnly({ sessionId, uid, name = '' } = {}) {
+        if (!Number.isInteger(uid) || uid < 0) throw new WorldbookValidationError([{ rule:'V14', message:'脱离目标 UID 无效' }]);
+        const { session, snapshot } = await requireFreshEditorSession(sessionId);
+        const previousRaw = snapshot.rawEntries.find(entry => entryUid(entry) === uid);
+        if (!previousRaw) throw new WorldbookValidationError([{ rule:'V14', message:'脱离目标 UID 不存在：' + uid }]);
+        const previous = runtimeAdapter.fromRuntime(previousRaw);
+        if (previous.meta?.programOnly !== true || !isWorkshopPackageMeta(previous.meta)) {
+          throw new WorldbookValidationError([{ rule:'V14', message:'只有受管 programOnly 工坊记录可脱离为用户副本' }]);
+        }
+        const occupied = new Set(snapshot.rawEntries.map(entry => String(entry?.name || '')));
+        const stem = String(name || `${previous.name}（用户副本）`).trim() || `${previous.name}（用户副本）`;
+        let uniqueName = stem, suffix = 2;
+        while (occupied.has(uniqueName)) uniqueName = `${stem} ${suffix++}`;
+        const detachedMeta = { ...previous.meta };
+        ['source','kind','packageId','packageType','packageTarget','programOnly','revision','contentHash','installedAt','localModifiedAt','version'].forEach(key => { delete detachedMeta[key]; });
+        let nextUid = Math.max(-1, ...snapshot.rawEntries.map(entryUid).filter(value => value !== null)) + 1;
+        while (await protectedCategory(nextUid)) nextUid += 1;
+        const detached = makeCanonical({ ...previous, uid:nextUid, name:uniqueName, enabled:false, meta:detachedMeta });
+        const detachedRaw = mergeRuntimeEntry(previousRaw, runtimeAdapter.toRuntime(detached));
+        detachedRaw.uid = nextUid;
+        detachedRaw.extra = cloneSnapshotValue(detachedMeta);
+        const allAfter = [...snapshot.rawEntries, detachedRaw];
+        const planId = freshPlanId('editor-detach');
+        const validation = validateEntries(allAfter.map(runtimeAdapter.fromRuntime), { surface:'runtime' });
+        if (!validation.ok) throw new WorldbookValidationError(validation.errors);
+        const plan = {
+          planId,
+          kind:'detach',
+          worldbookName:session.worldbookName,
+          expectedRevision:session.revision,
+          uid,
+          category:'programOnly',
+          requiresProtectedConfirmation:true,
+          canonical:detached,
+          replacement:allAfter,
+          validation,
+          diff:diffWorldbookEntries({ before:snapshot.rawEntries, after:allAfter }),
+          activation:previewActivation(allAfter.map(runtimeAdapter.fromRuntime), { text:detached.content }),
+          expiresAt:Date.now() + Math.max(1000, Number(editorPlanTtlMs) || 600000),
+        };
+        editorPlans.set(planId, plan);
+        return publicEditorPlan(plan);
+      }
+      async function commitPreparedEditorPlan(planId, { confirmProtected = false } = {}) {
+        pruneEditorState();
+        const plan = editorPlans.get(planId);
+        if (!plan) throw new WorldbookSnapshotError('编辑保存计划不存在或已使用');
+        if (plan.requiresProtectedConfirmation && confirmProtected !== true) {
+          throw new WorldbookValidationError([{ rule:'V14', message:'核心、变量或脱离操作需要额外确认' }]);
+        }
+        try {
+          return await commitTransaction({
+            upserts:plan.kind === 'detach' ? [] : [plan.canonical],
+            replacement:plan.kind === 'detach' ? plan.replacement : null,
+            expectedRevision:plan.expectedRevision,
+            expectedWorldbookName:plan.worldbookName,
+            validationSurface:'runtime',
+            reason:plan.kind === 'detach' ? 'before-editor-detach' : (plan.requiresProtectedConfirmation ? 'before-editor-save-protected' : 'before-editor-save'),
+          });
+        } finally { editorPlans.delete(planId); }
+      }
+      function discardPreparedEditorPlan(planId) { return editorPlans.delete(planId); }
+      function normalizeWorkshopBlock(entries) {
+        const list = Array.isArray(entries) ? entries : [];
+        const managed = list.filter(entry => isWorkshopManaged(entry, tags, scheme));
+        const packages = managed.filter(entry => entryMeta(entry).kind === KIND.WORKSHOP_PACKAGE);
+        if (!packages.length) return list;
+        const start = managed.find(entry => entryMeta(entry).kind === KIND.BOUNDARY_START);
+        const end = managed.find(entry => entryMeta(entry).kind === KIND.BOUNDARY_END);
+        if (!start || !end) throw new WorldbookValidationError([{ rule:'V12', message:'工坊条目必须由唯一边界完整包裹' }]);
+        const base = list.filter(entry => !isWorkshopManaged(entry, tags, scheme));
+        return [...base, start, ...packages, end];
+      }
+      function runtimeSafetyErrors(entries) {
+        const canonical = (Array.isArray(entries) ? entries : []).map(runtimeAdapter.fromRuntime).filter(entry => entry?.meta?.programOnly === true
+          || (programOnlyPolicy && typeof programOnlyPolicy.requires === 'function' && programOnlyPolicy.requires(entry) === true));
+        if (!canonical.length) return [];
+        return validateEntries(canonical).errors;
+      }
+      async function saveRequiredSnapshot(worldbookName, entries, reason) {
+        if (!snapshotStore?.save) {
+          if (snapshotRequired) throw new WorldbookSnapshotError('世界书写入要求强制备份，但快照存储未配置');
+          return null;
+        }
+        return snapshotStore.save({ worldbookName, entries:cloneSnapshotValue(entries), reason });
+      }
+      function baselineHash(entries) { return worldbookSha256Hex(JSON.stringify(entries)); }
+      function validateFactoryBaseline(baseline) {
+        if (!baseline || baseline.schema !== 'worldbook-factory-baseline-v1' || !Array.isArray(baseline.entries)) throw new WorldbookSnapshotError('出厂基线格式无效');
+        if (!/^[a-f0-9]{64}$/.test(String(baseline.sha256 || '')) || baseline.sha256 !== baselineHash(baseline.entries)) throw new WorldbookSnapshotError('出厂基线 SHA-256 校验失败');
+        const seen = new Set();
+        baseline.entries.forEach(record => {
+          if (!['core','variable'].includes(record?.category) || !Number.isInteger(record?.uid) || !record?.entry) throw new WorldbookSnapshotError('出厂基线条目分类或 UID 无效');
+          if (seen.has(record.uid)) throw new WorldbookSnapshotError('出厂基线存在重复 UID：' + record.uid);
+          seen.add(record.uid);
+          if (entryUid(record.entry) !== record.uid) throw new WorldbookSnapshotError('出厂基线 UID 与条目不一致：' + record.uid);
+          if (record.uid === 68 || isOpeningManaged(record.entry, tags, scheme) || isWorkshopManaged(record.entry, tags, scheme) || entryMeta(record.entry).programOnly === true) {
+            throw new WorldbookSnapshotError('出厂基线包含受保护的动态/工坊条目：' + record.uid);
+          }
+        });
+        return baseline;
+      }
+      function mergeFactoryEntries(current, baseline, categories) {
+        const selected = baseline.entries.filter(record => categories.includes(record.category));
+        const selectedByUid = new Map(selected.map(record => [record.uid, record]));
+        (Array.isArray(current) ? current : []).forEach(entry => {
+          if (!selectedByUid.has(entryUid(entry))) return;
+          const factoryEntry = selectedByUid.get(entryUid(entry)).entry;
+          if (isOpeningManaged(entry, tags, scheme) || isWorkshopManaged(entry, tags, scheme) || entryMeta(entry).programOnly === true) {
+            throw new WorldbookSnapshotError('出厂 UID 与受保护的 opening/workshop 条目冲突：' + entryUid(entry));
+          }
+          if (String(entry?.name || '') !== String(factoryEntry?.name || '')) throw new WorldbookSnapshotError('出厂 UID 与非出厂条目名称冲突：' + entryUid(entry));
+        });
+        const output = (Array.isArray(current) ? current : []).map(entry => selectedByUid.has(entryUid(entry)) ? cloneSnapshotValue(selectedByUid.get(entryUid(entry)).entry) : cloneSnapshotValue(entry));
+        const present = new Set(output.map(entryUid));
+        selected.forEach((record, index) => {
+          if (present.has(record.uid)) return;
+          const nextRecord = selected.slice(index + 1).find(item => present.has(item.uid));
+          const previousRecord = selected.slice(0, index).reverse().find(item => present.has(item.uid));
+          const insertion = cloneSnapshotValue(record.entry);
+          if (nextRecord) output.splice(output.findIndex(entry => entryUid(entry) === nextRecord.uid), 0, insertion);
+          else if (previousRecord) output.splice(output.findIndex(entry => entryUid(entry) === previousRecord.uid) + 1, 0, insertion);
+          else output.unshift(insertion);
+          present.add(record.uid);
+        });
+        return output;
+      }
+      function publicRestorePlan(plan) {
+        return {
+          planId: plan.planId,
+          kind: plan.kind,
+          worldbookName: plan.worldbookName,
+          expectedRevision: plan.expectedRevision,
+          targetRevision: worldbookRevision(plan.entries),
+          diff: plan.diff,
+          expiresAt: plan.expiresAt,
+          baselineSha256: plan.baselineSha256 || '',
+          snapshotId: plan.snapshotId || '',
+        };
+      }
+      async function prepareRestore({ kind, baseline = null, snapshotId = '' } = {}) {
+        await transactionTail;
+        for (const [id, plan] of restorePlans) if (Date.now() > plan.expiresAt) restorePlans.delete(id);
+        const host = apiHost();
+        if (!host?.getWorldbook) throw new WorldbookSnapshotError('未检测到 Tavern Helper 世界书 API');
+        const worldbookName = await resolveWorldbookName(host);
+        if (!worldbookName) throw new WorldbookSnapshotError('未能定位角色卡绑定的世界书');
+        const current = await host.getWorldbook(worldbookName);
+        const before = Array.isArray(current) ? cloneSnapshotValue(current) : [];
+        let candidate;
+        let baselineSha256 = '';
+        if (kind === 'core' || kind === 'core-variable') {
+          const validBaseline = validateFactoryBaseline(baseline);
+          baselineSha256 = validBaseline.sha256;
+          candidate = mergeFactoryEntries(before, validBaseline, kind === 'core' ? ['core'] : ['core','variable']);
+        } else if (kind === 'snapshot') {
+          if (!snapshotStore?.get) throw new WorldbookSnapshotError('历史快照存储未配置');
+          const snapshot = await snapshotStore.get(snapshotId, worldbookName);
+          candidate = cloneSnapshotValue(snapshot.entries);
+        } else throw new WorldbookSnapshotError('未知恢复类型：' + String(kind || ''));
+        const safetyErrors = runtimeSafetyErrors(candidate);
+        if (safetyErrors.length) throw new WorldbookValidationError(safetyErrors);
+        const expectedRevision = worldbookRevision(before);
+        const planId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+        const plan = {
+          planId,
+          kind,
+          worldbookName,
+          expectedRevision,
+          entries:candidate,
+          diff:diffWorldbookEntries({ before, after:candidate }),
+          expiresAt:Date.now() + Math.max(1000, Number(restorePlanTtlMs) || 300000),
+          baselineSha256,
+          snapshotId,
+        };
+        restorePlans.set(planId, plan);
+        return publicRestorePlan(plan);
+      }
+      async function commitPreparedRestore(planId) {
+        const plan = restorePlans.get(planId);
+        if (!plan) throw new WorldbookSnapshotError('恢复计划不存在或已使用');
+        if (Date.now() > plan.expiresAt) { restorePlans.delete(planId); throw new WorldbookSnapshotError('恢复计划已过期，请重新预览 diff'); }
+        try {
+          return await commitTransaction({ replacement:plan.entries, expectedRevision:plan.expectedRevision, expectedWorldbookName:plan.worldbookName, reason:`before-restore-${plan.kind}` });
+        } finally { restorePlans.delete(planId); }
+      }
+      function discardPreparedRestore(planId) { return restorePlans.delete(planId); }
+      async function listSnapshots() {
+        await transactionTail;
+        const host = apiHost();
+        if (!host) return { backend:snapshotStore?.backend?.() || 'unavailable', worldbookName:'', snapshots:[] };
+        const worldbookName = await resolveWorldbookName(host);
+        if (!worldbookName || !snapshotStore?.list) return { backend:snapshotStore?.backend?.() || 'unavailable', worldbookName, snapshots:[] };
+        const records = await snapshotStore.list(worldbookName);
+        return {
+          backend:snapshotStore.backend?.() || 'custom',
+          worldbookName,
+          snapshots:records.map(record => ({ id:record.id, createdAt:record.createdAt, createdAtMs:record.createdAtMs, reason:record.reason, beforeRevision:record.beforeRevision, entryCount:Number(record.entryCount ?? record.entries?.length ?? 0), checksum:record.checksum })),
+        };
+      }
+      async function commitTransactionNow({ upserts = [], deletes = [], expectedRevision, expectedWorldbookName = '', render = 'debounced', deleteScopes = [], matchManaged = false, normalizeWorkshop = false, guard = null, replacement = null, reason = 'before-save', validationSurface = 'canonical', publicMode = false } = {}) {
+        const list = Array.isArray(upserts) ? upserts : [];
+        const ids = Array.isArray(deletes) ? deletes : [];
+        const validation = validateEntries(list, { surface:validationSurface });
+        if (!validation.ok) throw new WorldbookValidationError(validation.errors);
+        if (ids.some(uid => !Number.isInteger(uid) || uid < 0)) throw new WorldbookValidationError([{ rule:'V10', message:'deletes 只接受非负整数 UID' }]);
+        if (new Set(ids).size !== ids.length) throw new WorldbookValidationError([{ rule:'V10', message:'deletes 含重复 UID' }]);
+        const upsertUids = list.map(entryUid).filter(uid => uid !== null);
+        if (new Set(upsertUids).size !== upsertUids.length) throw new WorldbookValidationError([{ rule:'V10', message:'upserts 含重复 UID' }]);
+        const overlap = upsertUids.find(uid => ids.includes(uid));
+        if (overlap !== undefined) throw new WorldbookValidationError([{ rule:'V10', message:'同一 UID 不能同时 delete 与 upsert：' + overlap }]);
+        const host = apiHost();
+        const dry = { applied:false, worldbookName:null, beforeRevision:null, afterRevision:null, entries:[], diff:diffWorldbookEntries(), warnings:validation.warnings };
+        if (!host) { dry.warning='未检测到 Tavern Helper 世界书 API，已仅生成预览事件（dry-run）。'; dispatchPreview({ ...dry, dryRun:true }); return dry; }
+        const worldbookName = await resolveWorldbookName(host);
+        if (!worldbookName) { dry.warning='未能定位角色卡绑定的世界书。'; dispatchPreview({ ...dry, dryRun:true }); return dry; }
+        if (expectedWorldbookName && worldbookName !== expectedWorldbookName) throw new WorldbookSnapshotError('绑定世界书已切换，请重新预览恢复 diff');
+        if (!list.length && !ids.length && !deleteScopes.length && replacement === null) {
+          const current = host.getWorldbook ? await host.getWorldbook(worldbookName) : [];
+          const revision = worldbookRevision(current);
+          return { ...dry, worldbookName, beforeRevision:revision, afterRevision:revision, entries:(current || []).map(runtimeAdapter.fromRuntime) };
+        }
+        let before = [], candidate = [], beforeRevision = null;
+        const saved = await host.updateWorldbookWith(worldbookName, async current => {
+          before = Array.isArray(current) ? cloneSnapshotValue(current) : [];
+          const uidErrors = duplicateUidErrors(before);
+          if (uidErrors.length) throw new WorldbookValidationError(uidErrors);
+          beforeRevision = worldbookRevision(before);
+          if (typeof guard === 'function') guard({ current:before, revision:beforeRevision, worldbookName });
+          if (expectedRevision !== undefined && expectedRevision !== null && expectedRevision !== beforeRevision) {
+            throw new WorldbookRevisionConflictError(expectedRevision, beforeRevision, worldbookName);
+          }
+          const existingUids = new Set(before.map(entryUid).filter(uid => uid !== null));
+          ids.forEach(uid => { if (!existingUids.has(uid)) throw new WorldbookValidationError([{ rule:'V10', message:'删除目标 UID 不存在：' + uid }]); });
+          if (publicMode) {
+            ids.forEach(uid => {
+              const previous = before.find(entry => entryUid(entry) === uid);
+              const meta = entryMeta(previous);
+              if (meta.programOnly === true || isWorkshopPackageMeta(meta) || isBoundaryMeta(meta)) {
+                throw new WorldbookValidationError([{ rule:'V14', message:'公开事务不得删除受管工坊/programOnly 条目，请使用专用卸载或脱离流程' }]);
+              }
+            });
+          }
+          const protectedPublicUids = new Map();
+          if (publicMode) {
+            for (const uid of ids) {
+              const category = await protectedCategory(uid);
+              if (category) throw new WorldbookValidationError([{ rule:'V14', message:`公开事务不得直接删除${category === 'core' ? '核心' : '变量'}条目，请使用受保护编辑计划` }]);
+            }
+            for (const canonical of list) {
+              const uid = entryUid(canonical);
+              if (uid === null) continue;
+              const category = await protectedCategory(uid);
+              if (category) protectedPublicUids.set(uid, category);
+            }
+          }
+          let next;
+          if (replacement !== null) {
+            if (!Array.isArray(replacement)) throw new WorldbookValidationError([{ rule:'V13', message:'replacement 必须是完整世界书条目数组' }]);
+            next = cloneSnapshotValue(replacement);
+          } else {
+            next = before.filter(entry => !ids.includes(entryUid(entry)) && !deleteScopes.some(scope => managedDelete(scope, entry)));
+            let nextUid = Math.max(-1, ...before.map(entryUid).filter(uid => uid !== null)) + 1;
+            const claimedManagedUids = new Set(upsertUids);
+            for (const canonical of list) {
+              let uid = entryUid(canonical);
+              let previous = uid === null ? null : before.find(entry => entryUid(entry) === uid);
+              if (uid !== null && !previous) throw new WorldbookValidationError([{ rule:'V10', message:'更新目标 UID 不存在：' + uid }]);
+              if (!previous && matchManaged && managedEntryKey(canonical)) {
+                const matches = before.filter(entry => sameManagedEntry(entry, canonical) && !claimedManagedUids.has(entryUid(entry)));
+                if (matches.length > 1) throw new WorldbookValidationError([{ rule:'V11', message:'受管业务键匹配到多个旧条目：' + managedEntryKey(canonical) }]);
+                previous = matches[0] || null; uid = previous ? entryUid(previous) : null;
+                if (uid !== null) claimedManagedUids.add(uid);
+              }
+              if (uid === null) {
+                while (await protectedCategory(nextUid)) nextUid += 1;
+                uid = nextUid++;
+              }
+              if (publicMode && previous) {
+                const previousCanonical = runtimeAdapter.fromRuntime(previous);
+                const protectedClass = protectedPublicUids.get(uid);
+                if (protectedClass) throw new WorldbookValidationError([{ rule:'V14', message:`公开事务不得直接修改${protectedClass === 'core' ? '核心' : '变量'}条目，请使用受保护编辑计划` }]);
+                if (isBoundaryMeta(previousCanonical.meta)) throw new WorldbookValidationError([{ rule:'V14', message:'公开事务不得编辑工坊边界条目' }]);
+                if (isWorkshopPackageMeta(previousCanonical.meta) || previousCanonical.meta?.programOnly === true) {
+                  if (managedIdentityChanged(previousCanonical.meta, canonical?.meta)) throw new WorldbookValidationError([{ rule:'V14', message:'公开事务不得剥离或改写受管工坊身份' }]);
+                  if (stableStringify(previousCanonical.meta) !== stableStringify(canonical?.meta || {})) throw new WorldbookValidationError([{ rule:'V14', message:'公开事务不得改写工坊上游元数据；本地修改时间由内核维护' }]);
+                  if (previousCanonical.meta?.programOnly === true && (canonical.enabled !== false || canonical.strategyType !== 'constant'
+                    || canonical.recursion?.prevent_incoming !== true || canonical.recursion?.prevent_outgoing !== true || canonical.recursion?.delay_until !== null)) {
+                    throw new WorldbookValidationError([{ rule:'V14', message:'公开事务不得直接启用或放宽 programOnly 条目' }]);
+                  }
+                }
+              }
+              const previousInstalledAt = previous?.extra?.installedAt;
+              const previousLocalModifiedAt = previous?.extra?.localModifiedAt;
+              let nextCanonical = previousInstalledAt && canonical?.meta?.kind === KIND.WORKSHOP_PACKAGE
+                ? { ...canonical, meta:{ ...canonical.meta, installedAt:previousInstalledAt, ...(previousLocalModifiedAt ? { localModifiedAt:previousLocalModifiedAt } : {}) } }
+                : canonical;
+              if (publicMode && previous && isWorkshopPackageMeta(runtimeAdapter.fromRuntime(previous).meta)) {
+                const withoutDirty = { ...nextCanonical, meta:{ ...runtimeAdapter.fromRuntime(previous).meta } };
+                const rawWithoutDirty = mergeRuntimeEntry(previous, runtimeAdapter.toRuntime({ ...withoutDirty, uid }));
+                if (worldbookRevision([rawWithoutDirty]) !== worldbookRevision([previous])) {
+                  nextCanonical = { ...withoutDirty, meta:{ ...withoutDirty.meta, localModifiedAt:now() } };
+                }
+              }
+              const runtime = mergeRuntimeEntry(previous, runtimeAdapter.toRuntime({ ...nextCanonical, uid }));
+              const index = next.findIndex(entry => entryUid(entry) === uid);
+              if (index >= 0) next[index] = runtime; else next.push(runtime);
+            }
+            if (normalizeWorkshop) next = normalizeWorkshopBlock(next);
+          }
+          const nextUidErrors = duplicateUidErrors(next);
+          if (nextUidErrors.length) throw new WorldbookValidationError(nextUidErrors);
+          const fullValidation = validateEntries(next.map(runtimeAdapter.fromRuntime), { surface:'runtime' });
+          if (!fullValidation.ok) throw new WorldbookValidationError(fullValidation.errors);
+          const safetyErrors = runtimeSafetyErrors(next);
+          if (safetyErrors.length) throw new WorldbookValidationError(safetyErrors);
+          if (worldbookRevision(next) !== beforeRevision) await saveRequiredSnapshot(worldbookName, before, reason);
+          candidate = next;
+          return next;
+        }, { render });
+        const actual = Array.isArray(saved) ? saved : candidate;
+        const afterRevision = worldbookRevision(actual);
+        const diff = diffWorldbookEntries({ before, after:actual });
+        const result = { applied:afterRevision !== beforeRevision, worldbookName, beforeRevision, afterRevision, entries:actual.map(runtimeAdapter.fromRuntime), added:diff.added, updated:diff.updated, deleted:diff.deleted, diff, warnings:validation.warnings };
+        dispatchPreview(result);
+        return result;
+      }
+      function commitTransaction(transaction = {}) {
+        const scheduled = transactionTail.then(() => commitTransactionNow(transaction));
+        transactionTail = scheduled.then(() => undefined, () => undefined);
+        return scheduled;
+      }
+      async function applyTransaction(transaction = {}) {
+        const forbidden = ['replacement','reason','expectedWorldbookName','deleteScopes','matchManaged','normalizeWorkshop'].find(key => Object.prototype.hasOwnProperty.call(transaction, key));
+        if (forbidden) throw new WorldbookValidationError([{ rule:'V13', message:'公开事务不接受内部字段：' + forbidden }]);
+        const { upserts = [], deletes = [], expectedRevision, render = 'debounced', guard = null } = transaction;
+        return commitTransaction({ upserts, deletes, expectedRevision, render, guard, matchManaged:false, publicMode:true });
+      }
+      async function write(payload = {}) {
+        const scope = payload.scope || 'all';
+        const { opening, workshop } = buildCanonical(payload);
+        const toValidate = scope === 'identity' ? opening : scope === 'workshop' ? workshop : [...opening, ...workshop];
+        const validation = validateEntries(toValidate);
+        if (!validation.ok) throw new WorldbookValidationError(validation.errors);
+        const summary = { scope, applied:false, warnings:validation.warnings, worldbookName:null, preview:toValidate.map(c => c.name) };
+        if (scope === 'identity' && !opening.length && payload.allowEmptyIdentity !== true) { summary.warning='没有可写入的身份/世界因子内容。'; dispatchPreview({ ...summary, dryRun:true }); return summary; }
+        if (scope === 'workshop' && !workshop.length) { summary.warning='没有已启用的工坊内容可注入。'; dispatchPreview({ ...summary, dryRun:true }); return summary; }
+        const upserts = scope === 'identity' ? opening.slice() : scope === 'workshop' ? workshop.slice() : [...opening, ...workshop];
+        if (scope !== 'identity' && workshop.length) upserts.push(boundaryCanonical('start'), boundaryCanonical('end'));
+        const deleteScopes = scope === 'identity' ? ['opening'] : scope === 'workshop' ? ['workshop'] : ['opening','workshop'];
+        const tx = await commitTransaction({ upserts, deleteScopes, expectedRevision:payload.expectedRevision, matchManaged:true, normalizeWorkshop:scope !== 'identity' && workshop.length > 0, guard:payload.guard });
+        return { ...summary, ...tx, scope, warnings:[...validation.warnings, ...(tx.warnings || [])] };
+      }
+      async function writeBatch(canonicalEntries = [], options = {}) {
+        const list = Array.isArray(canonicalEntries) ? canonicalEntries.slice() : [];
+        if (list.some(entry => entry?.meta?.kind === KIND.WORKSHOP_PACKAGE)) list.push(boundaryCanonical('start'), boundaryCanonical('end'));
+        const tx = await commitTransaction({ upserts:list, expectedRevision:options.expectedRevision, matchManaged:true, normalizeWorkshop:list.some(entry => entry?.meta?.kind === KIND.WORKSHOP_PACKAGE) });
+        return { ...tx, count:canonicalEntries.length };
+      }
+      async function uninstallWorkshop(options = {}) {
+        const tx = await commitTransaction({ deleteScopes:['workshop'], expectedRevision:options.expectedRevision, matchManaged:true });
+        return { ...tx, scope:'workshop', uninstalled:true };
+      }
+    
+      // ---- 对外：preview（dry-run，返回预期 Canonical 条目，不落盘）----
+      function preview(payload = {}) {
+        const { opening, workshop } = buildCanonical(payload);
+        return [...opening, ...workshop];
+      }
+    
+      // ---- 对外：readManaged / readAll ----
+      async function readManaged(scopeFilter) {
+        const host = apiHost();
+        if (!host) return [];
+        const worldbookName = await resolveWorldbookName(host);
+        if (!worldbookName || !host.getWorldbook) return [];
+        const all = await host.getWorldbook(worldbookName);
+        return (Array.isArray(all) ? all : [])
+          .filter(e => {
+            if (scopeFilter === 'identity') return isOpeningManaged(e, tags, scheme);
+            if (scopeFilter === 'workshop') return isWorkshopManaged(e, tags, scheme);
+            return isOpeningManaged(e, tags, scheme) || isWorkshopManaged(e, tags, scheme);
+          })
+          .map(runtimeAdapter.fromRuntime);
+      }
+    
+      async function readAll() {
+        const host = apiHost();
+        if (!host || !host.getWorldbook) return [];
+        const worldbookName = await resolveWorldbookName(host);
+        if (!worldbookName) return [];
+        const all = await host.getWorldbook(worldbookName);
+        return (Array.isArray(all) ? all : []).map(runtimeAdapter.fromRuntime);
+      }
+    
+      return {
+        write,
+        writeBatch,
+        uninstallWorkshop,
+        applyTransaction,
+        getRevision,
+        openEditorSession,
+        prepareEntryEdit,
+        prepareDetachProgramOnly,
+        commitPreparedEditorPlan,
+        discardPreparedEditorPlan,
+        diff: diffWorldbookEntries,
+        previewActivation,
+        prepareRestore,
+        commitPreparedRestore,
+        discardPreparedRestore,
+        listSnapshots,
+        preview,
+        readManaged,
+        readAll,
+        validate: validateEntries,
+        // 工具暴露（仿真器 / 创作平台 adapter 往返用）
+        toCanonicalFromCard: cardAdapter.toCanonical,
+        toCardFromCanonical: cardAdapter.fromCanonical,
+        toRuntimeFromCanonical: runtimeAdapter.toRuntime,
+        fromRuntimeToCanonical: runtimeAdapter.fromRuntime,
+        _config: { sourcePrefix, tags, scheme },
+      };
+    }
+    return { createWorldbookManager, createWorldbookSnapshotStore, WorldbookRevisionConflictError, WorldbookSnapshotError, diffWorldbookEntries, previewActivation };
+  })();
+  // </shared-worldbook-manager-v0.4.0>
+  // <shared-worldbook-manager-ui-v0.1.0 source-sha256="ac66658e36062b280be4b9cdac81191ab17b5e597412d803404cab239a75b047">
+  const SHARED_WORLDBOOK_MANAGER_UI_SOURCE_SHA256 = 'ac66658e36062b280be4b9cdac81191ab17b5e597412d803404cab239a75b047';
+  const sharedWorldbookManagerUI = (() => {
+    const WBM_UI_STYLE_ID = 'worldbook-manager-ui-v0-1-0-style';
+    
+    function createWorldbookManagerUI(options = {}) {
+      const manager = options.manager;
+      const hostDocument = options.hostDocument || (typeof document !== 'undefined' ? document : null);
+      const baselineProvider = options.baselineProvider;
+      const previewOpeningBodyRestore = options.previewOpeningBodyRestore;
+      const restoreOpeningBody = options.restoreOpeningBody;
+      const undoOpeningBodyRestore = options.undoOpeningBodyRestore;
+      if (!manager || !hostDocument) throw new Error('createWorldbookManagerUI 需要 manager 与 hostDocument');
+    
+      let root = null;
+      let baseline = null;
+      let pendingPlan = null;
+      let loading = false;
+      let destroyed = false;
+      let openingUndoAvailable = false;
+      let view = { entries:[], revision:'', snapshotInfo:{ backend:'unavailable', worldbookName:'', snapshots:[] }, message:'' };
+    
+      const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+      const shortHash = value => value ? `${String(value).slice(0, 12)}…` : '未载入';
+      const diffCount = diff => Number(diff?.summary?.added || 0) + Number(diff?.summary?.deleted || 0) + Number(diff?.summary?.updated || 0) + Number(diff?.summary?.moved || 0);
+      const baselineCounts = () => {
+        const core = Number.isFinite(Number(baseline?.counts?.core)) ? Math.max(0, Number(baseline.counts.core)) : 0;
+        const variable = Number.isFinite(Number(baseline?.counts?.variable)) ? Math.max(0, Number(baseline.counts.variable)) : 0;
+        return { core, variable, total:core + variable };
+      };
+    
+      function ensureStyle() {
+        if (hostDocument.getElementById(WBM_UI_STYLE_ID)) return;
+        const style = hostDocument.createElement('style');
+        style.id = WBM_UI_STYLE_ID;
+        style.textContent = `
+          .wbm-shell{position:fixed;inset:0;z-index:2147482500;background:rgba(5,9,18,.82);backdrop-filter:blur(14px);display:grid;place-items:center;padding:18px;color:#eaf2ff;font-family:Inter,"Microsoft YaHei",sans-serif}.wbm-shell[hidden]{display:none!important}
+          .wbm-panel{width:min(1120px,100%);height:min(820px,100%);background:linear-gradient(160deg,#111c2c,#0a111d 62%);border:1px solid rgba(132,181,255,.28);border-radius:22px;box-shadow:0 30px 90px rgba(0,0,0,.55);display:grid;grid-template-rows:auto 1fr;overflow:hidden}
+          .wbm-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:20px 22px;border-bottom:1px solid rgba(132,181,255,.16)}
+          .wbm-head h2{margin:2px 0 5px;font-size:22px}.wbm-head p{margin:0;color:#9fb1c9;font-size:13px}.wbm-kicker{font-size:11px;letter-spacing:.14em;color:#76c9ff}.wbm-close{border:1px solid rgba(255,255,255,.2);background:#121d2d;color:#dcecff;border-radius:12px;padding:8px 12px;cursor:pointer}
+          .wbm-main{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);min-height:0}.wbm-col{min-height:0;overflow:auto;padding:18px}.wbm-col+.wbm-col{border-left:1px solid rgba(132,181,255,.14)}
+          .wbm-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-bottom:14px}.wbm-stat{background:rgba(91,138,190,.1);border:1px solid rgba(130,179,235,.16);border-radius:14px;padding:10px}.wbm-stat span{display:block;color:#8fa6c0;font-size:11px}.wbm-stat b{display:block;margin-top:5px;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+          .wbm-section{background:rgba(5,11,20,.38);border:1px solid rgba(130,179,235,.14);border-radius:16px;padding:14px;margin-bottom:12px}.wbm-section h3{font-size:14px;margin:0 0 10px}.wbm-actions{display:flex;flex-wrap:wrap;gap:8px}.wbm-button{border:1px solid rgba(119,182,255,.28);background:#14253b;color:#dfefff;border-radius:11px;padding:9px 11px;cursor:pointer;font-size:12px}.wbm-button:hover{background:#1b3351}.wbm-button.primary{background:#17659a;border-color:#48a9e7}.wbm-button.danger{background:#6b2934;border-color:#d16778}.wbm-button:disabled{opacity:.45;cursor:not-allowed}
+          .wbm-note{font-size:12px;line-height:1.6;color:#9eb0c7;margin:8px 0 0}.wbm-safe{color:#8ee6b0}.wbm-warning{color:#ffcc82}.wbm-error{color:#ff8b9a}.wbm-message{min-height:20px;margin:8px 0;color:#b9cae0;font-size:12px}
+          .wbm-list{display:grid;gap:7px}.wbm-entry,.wbm-snapshot{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:9px;align-items:center;border:1px solid rgba(132,181,255,.12);background:rgba(19,32,49,.7);border-radius:11px;padding:9px 10px}.wbm-uid{font:11px ui-monospace,monospace;color:#7f9bb8}.wbm-name{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.wbm-badge{font-size:10px;padding:3px 7px;border-radius:999px;background:#203a54;color:#a8d8ff}.wbm-badge.variable{background:#463b70;color:#d7c9ff}.wbm-badge.workshop{background:#603846;color:#ffc1d1}.wbm-badge.user{background:#2c4d3c;color:#a8ecc8}
+          .wbm-diff{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:9px 0}.wbm-diff span{border-radius:10px;background:#131f30;padding:8px;text-align:center;font-size:11px}.wbm-confirm{border:1px solid rgba(255,196,112,.35);background:rgba(94,59,23,.35);border-radius:13px;padding:11px;margin-top:10px}.wbm-confirm strong{display:block;font-size:13px;margin-bottom:6px}.wbm-select{width:100%;border:1px solid rgba(132,181,255,.22);background:#0e1927;color:#e4efff;border-radius:10px;padding:9px;margin:7px 0 10px}
+          .wbm-diff-detail{margin:8px 0;border:1px solid rgba(255,196,112,.18);border-radius:10px;padding:7px}.wbm-diff-detail summary{cursor:pointer;color:#ffd29a;font-size:11px}.wbm-diff-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;padding:6px 2px;border-top:1px solid rgba(255,255,255,.07);font-size:10px}.wbm-diff-row:first-of-type{margin-top:6px}.wbm-diff-kind{color:#82cfff}.wbm-diff-paths{color:#aebfd3;overflow-wrap:anywhere}
+          @media(max-width:760px){.wbm-shell{padding:0}.wbm-panel{height:100%;border-radius:0}.wbm-main{grid-template-columns:1fr;overflow:auto}.wbm-col{overflow:visible}.wbm-col+.wbm-col{border-left:0;border-top:1px solid rgba(132,181,255,.14)}.wbm-stats{grid-template-columns:repeat(2,1fr)}.wbm-head{padding:15px}.wbm-col{padding:13px}.wbm-entry{grid-template-columns:auto minmax(0,1fr)}}
+        `;
+        (hostDocument.head || hostDocument.documentElement).appendChild(style);
+      }
+    
+      function entryRole(entry) {
+        const uid = Number(entry?.uid);
+        const factory = baseline?.entries?.find(record => record.uid === uid);
+        if (factory) return factory.category;
+        if (entry?.meta?.programOnly === true || entry?.meta?.source?.includes('workshop')) return 'workshop';
+        return 'user';
+      }
+    
+      function renderEntries() {
+        if (!view.entries.length) return '<p class="wbm-note">当前未读取到世界书条目。</p>';
+        return `<div class="wbm-list">${view.entries.map(entry => {
+          const role = entryRole(entry);
+          const label = role === 'core' ? '核心' : role === 'variable' ? '变量' : role === 'workshop' ? (entry.meta?.programOnly ? '工坊·锁定' : '工坊') : '用户';
+          return `<div class="wbm-entry"><span class="wbm-uid">UID ${escapeHtml(entry.uid ?? '—')}</span><span class="wbm-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name || '无名条目')}</span><span class="wbm-badge ${role}">${label}</span></div>`;
+        }).join('')}</div>`;
+      }
+    
+      function renderSnapshots() {
+        const snapshots = view.snapshotInfo.snapshots || [];
+        if (!snapshots.length) return '<p class="wbm-note">尚无历史快照；下一次保存或恢复前会自动建立。</p>';
+        const optionsHtml = snapshots.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.createdAt)} · ${escapeHtml(item.reason)} · ${item.entryCount} 条</option>`).join('');
+        return `<select class="wbm-select" data-wbm-snapshot>${optionsHtml}</select><div class="wbm-actions"><button class="wbm-button danger" data-wbm-action="preview-snapshot">预览完整历史恢复</button></div><p class="wbm-note wbm-warning">历史快照会恢复完整世界书，可能回退用户与工坊条目；提交前仍会再建一份当前快照。</p>`;
+      }
+    
+      function renderDiffDetails(diff) {
+        const rows = [];
+        (diff?.added || []).forEach(item => rows.push({ kind:'新增', uid:item.uid, name:item.entry?.name || '无名条目', paths:[] }));
+        (diff?.deleted || []).forEach(item => rows.push({ kind:'删除', uid:item.uid, name:item.entry?.name || '无名条目', paths:[] }));
+        (diff?.updated || []).forEach(item => rows.push({ kind:'更新', uid:item.uid, name:item.nameAfter || item.nameBefore || '无名条目', paths:(item.changes || []).map(change => change.path).slice(0, 8) }));
+        (diff?.moved || []).forEach(item => rows.push({ kind:'移动', uid:item.uid, name:`索引 ${item.fromIndex} → ${item.toIndex}`, paths:[] }));
+        if (!rows.length) return '<p class="wbm-note">没有字段差异；确认后仍会建立恢复前快照。</p>';
+        const visible = rows.slice(0, 16);
+        return `<details class="wbm-diff-detail" open><summary>受影响条目 ${rows.length} 项${rows.length > visible.length ? `（显示前 ${visible.length} 项）` : ''}</summary>${visible.map(row => `<div class="wbm-diff-row"><span class="wbm-diff-kind">${escapeHtml(row.kind)} · UID ${escapeHtml(row.uid ?? '—')}</span><span><b>${escapeHtml(row.name)}</b>${row.paths.length ? `<br><span class="wbm-diff-paths">${row.paths.map(escapeHtml).join(' · ')}</span>` : ''}</span></div>`).join('')}</details>`;
+      }
+    
+      function renderPending() {
+        if (!pendingPlan) return '';
+        const summary = pendingPlan.diff?.summary || {};
+        const counts = baselineCounts();
+        const label = pendingPlan.kind === 'core' ? `恢复核心 ${counts.core} 条` : pendingPlan.kind === 'core-variable' ? `恢复核心 + 变量 ${counts.total} 条` : pendingPlan.kind === 'opening-body' ? '恢复开局正文出厂模板' : '恢复完整历史快照';
+        const openingDetail = pendingPlan.kind === 'opening-body'
+          ? `<details class="wbm-diff-detail" open><summary>正文草稿变化</summary><div class="wbm-diff-row"><span class="wbm-diff-kind">更新 · /openingDay/body</span><span>当前 ${escapeHtml(shortHash(pendingPlan.openingPreview?.currentHash))}<br>出厂 ${escapeHtml(shortHash(pendingPlan.openingPreview?.factoryHash))}</span></div></details><p class="wbm-note">此动作不修改世界书；执行前会在当前聊天内保留一份可撤销正文。</p>`
+          : renderDiffDetails(pendingPlan.diff);
+        const revisionNote = pendingPlan.kind === 'opening-body' ? '' : `<p class="wbm-note">计划基于 ${escapeHtml(shortHash(pendingPlan.expectedRevision))}；若世界书已变化，提交会被 revision 冲突门拒绝。</p>`;
+        return `<div class="wbm-confirm"><strong>${escapeHtml(label)} · 请再次确认</strong><div class="wbm-diff"><span>新增 ${Number(summary.added || 0)}</span><span>更新 ${Number(summary.updated || 0)}</span><span>删除 ${Number(summary.deleted || 0)}</span><span>移动 ${Number(summary.moved || 0)}</span></div>${openingDetail}${revisionNote}<div class="wbm-actions"><button class="wbm-button danger" data-wbm-action="commit-restore">确认执行恢复</button><button class="wbm-button" data-wbm-action="cancel-restore">取消</button></div></div>`;
+      }
+    
+      function render() {
+        if (!root) return;
+        const counts = baselineCounts();
+        root.innerHTML = `<div class="wbm-panel" role="dialog" aria-modal="true" aria-label="世界书备份与恢复">
+          <header class="wbm-head"><div><div class="wbm-kicker">WORLDBOOK MANAGER · P5</div><h2>世界书备份与恢复</h2><p>只读列表与可回滚恢复；条目正文编辑将在 P6 独立页面提供。</p></div><button class="wbm-close" data-wbm-action="close">关闭</button></header>
+          <main class="wbm-main"><section class="wbm-col"><div class="wbm-stats">
+            <div class="wbm-stat"><span>绑定世界书</span><b title="${escapeHtml(view.snapshotInfo.worldbookName)}">${escapeHtml(view.snapshotInfo.worldbookName || '未定位')}</b></div>
+            <div class="wbm-stat"><span>当前 revision</span><b>${escapeHtml(shortHash(view.revision))}</b></div>
+            <div class="wbm-stat"><span>出厂基线 SHA</span><b>${escapeHtml(shortHash(baseline?.sha256))}</b></div>
+            <div class="wbm-stat"><span>备份后端</span><b>${escapeHtml(view.snapshotInfo.backend || 'unavailable')}</b></div>
+          </div>
+          <div class="wbm-section"><h3>出厂恢复</h3><div class="wbm-actions"><button class="wbm-button primary" data-wbm-action="preview-core" ${loading || !baseline ? 'disabled' : ''}>恢复核心 ${counts.core}</button><button class="wbm-button" data-wbm-action="preview-all" ${loading || !baseline ? 'disabled' : ''}>恢复核心 + 变量 ${counts.total}</button></div><p class="wbm-note wbm-safe">不会删除或启用：用户条目、当前身份/世界因子、工坊包与 program-only 开局模板。</p>${renderPending()}</div>
+          <div class="wbm-section"><h3>当前条目 · 只读</h3>${renderEntries()}</div></section>
+          <aside class="wbm-col"><div class="wbm-section"><h3>历史快照 · 最近 ${view.snapshotInfo.snapshots?.length || 0} / 10</h3>${renderSnapshots()}</div>
+          <div class="wbm-section"><h3>开局正文出厂模板</h3><p class="wbm-note">这是当前聊天的开局正文草稿，不属于世界书核心恢复。</p><div class="wbm-actions"><button class="wbm-button" data-wbm-action="restore-opening" ${typeof restoreOpeningBody === 'function' ? '' : 'disabled'}>单独恢复开局正文</button>${openingUndoAvailable && typeof undoOpeningBodyRestore === 'function' ? '<button class="wbm-button" data-wbm-action="undo-opening">撤销刚才的正文恢复</button>' : ''}</div></div>
+          <div class="wbm-section"><h3>状态</h3><div class="wbm-message ${view.message.startsWith('错误：') ? 'wbm-error' : ''}">${escapeHtml(view.message || '就绪')}</div><div class="wbm-actions"><button class="wbm-button" data-wbm-action="refresh">刷新</button></div></div></aside></main></div>`;
+      }
+    
+      async function refresh() {
+        if (loading || destroyed) return;
+        loading = true;
+        view.message = '正在读取世界书与快照…';
+        render();
+        try {
+          let baselineError = null;
+          if (!baseline && typeof baselineProvider === 'function') {
+            try { baseline = await baselineProvider(); } catch (error) { baselineError = error; }
+          }
+          const [entries, revision, snapshotInfo] = await Promise.all([manager.readAll(), manager.getRevision(), manager.listSnapshots()]);
+          view = { ...view, entries, revision, snapshotInfo, message:baselineError
+            ? `已读取 ${entries.length} 条与本地历史快照；出厂基线暂不可用：${baselineError?.message || String(baselineError)}`
+            : `已读取 ${entries.length} 条；出厂恢复集 ${baselineCounts().total} 条。` };
+        } catch (error) { view.message = '错误：' + (error?.message || String(error)); }
+        finally { loading = false; render(); }
+      }
+    
+      async function previewRestore(kind, snapshotId = '') {
+        if (loading) return;
+        loading = true;
+        pendingPlan = null;
+        view.message = '正在生成恢复 diff…';
+        render();
+        try {
+          pendingPlan = await manager.prepareRestore({ kind, baseline:kind === 'snapshot' ? null : baseline, snapshotId });
+          view.message = diffCount(pendingPlan.diff) ? '恢复计划已生成，请检查 diff 后再次确认。' : '当前内容已与目标一致；仍可确认执行并留下恢复前快照。';
+        } catch (error) { view.message = '错误：' + (error?.message || String(error)); }
+        finally { loading = false; render(); }
+      }
+    
+      async function commitRestore() {
+        if (!pendingPlan || loading) return;
+        loading = true;
+        if (pendingPlan.kind === 'opening-body') {
+          view.message = '正在保存当前正文并恢复出厂模板…';
+          render();
+          try {
+            const result = await restoreOpeningBody(pendingPlan.openingPreview);
+            openingUndoAvailable = result?.undoAvailable !== false;
+            pendingPlan = null;
+            view.message = '开局正文已恢复；世界书未改动，可用“撤销刚才的正文恢复”回退。';
+          } catch (error) { view.message = '错误：' + (error?.message || String(error)); }
+          finally { loading = false; render(); }
+          return;
+        }
+        const planId = pendingPlan.planId;
+        view.message = '正在建立恢复前快照并提交…';
+        render();
+        try {
+          await manager.commitPreparedRestore(planId);
+          pendingPlan = null;
+          view.message = '恢复完成；恢复前状态已进入历史快照，可立即回退。';
+          loading = false;
+          await refresh();
+        } catch (error) { view.message = '错误：' + (error?.message || String(error)); loading = false; render(); }
+      }
+    
+      async function onClick(event) {
+        const button = event.target.closest('[data-wbm-action]');
+        if (!button || !root?.contains(button)) return;
+        const action = button.dataset.wbmAction;
+        if (action === 'close') close();
+        else if (action === 'refresh') await refresh();
+        else if (action === 'preview-core') await previewRestore('core');
+        else if (action === 'preview-all') await previewRestore('core-variable');
+        else if (action === 'preview-snapshot') await previewRestore('snapshot', root.querySelector('[data-wbm-snapshot]')?.value || '');
+        else if (action === 'commit-restore') await commitRestore();
+        else if (action === 'cancel-restore') { if (pendingPlan?.kind !== 'opening-body') manager.discardPreparedRestore?.(pendingPlan?.planId); pendingPlan = null; view.message = '已取消，世界书未改动。'; render(); }
+        else if (action === 'restore-opening' && typeof restoreOpeningBody === 'function') {
+          try {
+            const openingPreview = typeof previewOpeningBodyRestore === 'function' ? await previewOpeningBodyRestore() : {};
+            if (openingPreview?.changed === false) {
+              pendingPlan = null;
+              view.message = '当前开局正文已经是出厂模板；未执行重复恢复，原撤销点保持不变。';
+              render();
+              return;
+            }
+            pendingPlan = { planId:'opening-body', kind:'opening-body', openingPreview, diff:{ summary:{ added:0, updated:openingPreview?.changed === false ? 0 : 1, deleted:0, moved:0 } } };
+            view.message = '开局正文恢复预览已生成，请检查 hash 后再次确认。';
+          } catch (error) { view.message = '错误：' + (error?.message || String(error)); }
+          render();
+        } else if (action === 'undo-opening' && typeof undoOpeningBodyRestore === 'function') {
+          try { await undoOpeningBodyRestore(); openingUndoAvailable = false; view.message = '已撤销刚才的开局正文恢复；世界书未改动。'; }
+          catch (error) { view.message = '错误：' + (error?.message || String(error)); }
+          render();
+        }
+      }
+    
+      function mount() {
+        if (destroyed) throw new Error('worldbook manager UI 已销毁');
+        if (root?.isConnected) return root;
+        ensureStyle();
+        root = hostDocument.createElement('div');
+        root.className = 'wbm-shell';
+        root.hidden = true;
+        root.addEventListener('click', onClick);
+        (hostDocument.body || hostDocument.documentElement).appendChild(root);
+        render();
+        return root;
+      }
+      async function open() { mount(); root.hidden = false; await refresh(); return root; }
+      function close() { if (root) root.hidden = true; if (pendingPlan?.kind !== 'opening-body') manager.discardPreparedRestore?.(pendingPlan?.planId); pendingPlan = null; }
+      function destroy() { if (destroyed) return; destroyed = true; if (pendingPlan?.kind !== 'opening-body') manager.discardPreparedRestore?.(pendingPlan?.planId); if (root) { root.removeEventListener('click', onClick); root.remove(); } root = null; pendingPlan = null; }
+    
+      return { mount, open, close, refresh, destroy, get root() { return root; }, get pendingPlan() { return pendingPlan; } };
+    }
+    return { createWorldbookManagerUI };
+  })();
+  // </shared-worldbook-manager-ui-v0.1.0>
+  function worldbookStorageCapability(name) {
+    try { return hostWindow()?.[name] || window?.[name] || null; } catch (_) { return null; }
   }
-  function makeWorkshopPackageEntry(item, installedAt = new Date().toISOString()) {
-    return makeConstantEntry(item.comment, item.content, {
-      source: WORKSHOP_SOURCE,
-      kind: 'workshop_package',
-      packageId: item.packageId,
-      packageType: item.packageType,
-      revision: item.revision,
-      installedAt,
-      __options: { order: 110 },
+  const worldbookSnapshotStore = sharedWorldbookManager.createWorldbookSnapshotStore({
+    indexedDB:worldbookStorageCapability('indexedDB'),
+    localStorage:worldbookStorageCapability('localStorage'),
+    maxPerWorldbook:10,
+    now:() => new Date().toISOString(),
+    randomUUID:() => {
+      try { return hostWindow()?.crypto?.randomUUID?.() || window?.crypto?.randomUUID?.() || createRuntimeOwnerId(); }
+      catch (_) { return createRuntimeOwnerId(); }
+    },
+  });
+  const WORLDBOOK_FACTORY_PROTECTED_UIDS = Object.freeze({
+    0:'core', 1:'core', 9:'core', 10:'core', 11:'core', 12:'core', 13:'core', 14:'core',
+    27:'variable', 30:'core', 31:'core', 32:'core', 33:'core', 34:'core', 35:'core', 36:'core', 37:'core', 38:'core', 39:'core', 40:'core', 41:'core', 42:'core', 43:'core', 44:'core', 45:'core', 46:'core', 47:'core',
+    55:'variable', 56:'variable', 57:'variable', 58:'variable', 61:'core', 62:'core', 63:'core', 64:'core', 65:'core', 66:'core', 67:'core', 69:'core',
+  });
+  const worldbookManager = sharedWorldbookManager.createWorldbookManager({
+    nameMatchers: [/星月私立高等学院\s*ver/],
+    sourcePrefix: 'xingyue',
+    entryNameScheme: {
+      identity: IDENTITY_COMMENT,
+      worldFactor: WORLD_FACTOR_COMMENT,
+      workshopStart: WORKSHOP_START_COMMENT,
+      workshopEnd: WORKSHOP_END_COMMENT,
+    },
+    version: VERSION,
+    now: () => new Date().toISOString(),
+    eventTarget: window,
+    snapshotStore:worldbookSnapshotStore,
+    snapshotRequired:true,
+    protectedEntryClassifier:uid => WORLDBOOK_FACTORY_PROTECTED_UIDS[uid] || '',
+    programOnlyPolicy: {
+      detect: ({ packageType, packageTarget }) => packageType === 'world_factor' && packageTarget === 'xingyue.opening_day_body',
+      requires: entry => entry?.meta?.packageTarget === 'xingyue.opening_day_body',
+      validate: entry => entry?.meta?.source === WORKSHOP_SOURCE && entry?.meta?.kind === 'workshop_package'
+        && entry?.meta?.packageType === 'world_factor' && entry?.meta?.packageTarget === 'xingyue.opening_day_body'
+        ? true
+        : '星月 programOnly 条目必须来自 xingyue-workshop 且是 world_factor + xingyue.opening_day_body',
+    },
+  });
+  const WORLDBOOK_FACTORY_BASELINE_URLS = [
+    RUNTIME_BASE_URL + '/worldbook-factory-baseline.json?v=p6-r1',
+    'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.0/worldbook-factory-baseline.json?v=p6-r1',
+    'https://raw.githubusercontent.com/LiarMTTT/rolecard-diy-workshop/main/runtime/xingyue/3.4.0/worldbook-factory-baseline.json?v=p6-r1',
+  ];
+  const WORLDBOOK_FACTORY_BASELINE_SHA256 = '6c2c2aa8ed4d0ee166864997740fcf646b5a34f8ce7165fec4796cdd4b6ef17c';
+  let worldbookFactoryBaselinePromise = null;
+  async function loadWorldbookFactoryBaseline() {
+    if (worldbookFactoryBaselinePromise) return worldbookFactoryBaselinePromise;
+    worldbookFactoryBaselinePromise = (async () => {
+      let lastError = null;
+      for (const url of WORLDBOOK_FACTORY_BASELINE_URLS) {
+        try {
+          const response = await fetch(url, { cache:'no-store' });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          const data = await response.json();
+          if (data?.schema !== 'worldbook-factory-baseline-v1' || data?.cardVersion !== VERSION || data?.sha256 !== WORLDBOOK_FACTORY_BASELINE_SHA256 || data?.counts?.core !== 34 || data?.counts?.variable !== 5 || data?.counts?.total !== 39) throw new Error('3.4.0 出厂基线契约或固定 SHA-256 不匹配');
+          return data;
+        } catch (error) { lastError = error; }
+      }
+      throw lastError || new Error('无法加载 3.4.0 世界书出厂基线');
+    })().catch(error => { worldbookFactoryBaselinePromise = null; throw error; });
+    return worldbookFactoryBaselinePromise;
+  }
+  let openingDayFactoryUndo = null;
+  function openingDayFactoryRestoreFingerprint(value) {
+    const normalized = normalizeOpeningDayDraft(value);
+    const Encoder = typeof TextEncoder === 'function' ? TextEncoder : null;
+    return sha256HexFallback(JSON.stringify(normalized), Encoder);
+  }
+  function previewOpeningDayFactoryRestore() {
+    const status = openingDraftService.status();
+    if (!status.ready) throw new Error('开局草稿仍在初始化，请稍后重试');
+    const current = normalizeOpeningDayDraft(readOpeningDraft().openingDay);
+    const factory = copyOfficialOpeningDay();
+    return {
+      schema:'xingyue-opening-factory-restore-v1',
+      chatId:status.chatId,
+      uuid:status.uuid,
+      changed:current.bodyHash !== factory.bodyHash || current.origin !== factory.origin || current.sourceRevision !== factory.sourceRevision,
+      currentHash:current.bodyHash,
+      currentFingerprint:openingDayFactoryRestoreFingerprint(current),
+      factoryHash:factory.bodyHash,
+      factoryFingerprint:openingDayFactoryRestoreFingerprint(factory),
+      currentOrigin:current.origin,
+      currentBytes:openingStoryUtf8Bytes(current.body),
+      factoryBytes:openingStoryUtf8Bytes(factory.body),
+    };
+  }
+  function restoreOpeningDayFactoryDraft(plan) {
+    if (!plan || plan.schema !== 'xingyue-opening-factory-restore-v1') throw new Error('开局正文恢复计划无效，请重新预览');
+    const status = openingDraftService.status();
+    if (!status.ready) throw new Error('开局草稿仍在初始化，请稍后重试');
+    if (status.chatId !== plan.chatId || status.uuid !== plan.uuid) throw new Error('聊天已切换，请在当前聊天重新预览开局正文恢复');
+    const current = normalizeOpeningDayDraft(readOpeningDraft().openingDay);
+    const currentFingerprint = openingDayFactoryRestoreFingerprint(current);
+    if (current.bodyHash !== plan.currentHash || currentFingerprint !== plan.currentFingerprint) throw new Error('开局正文已在预览后变化，请重新预览 diff');
+    const factory = copyOfficialOpeningDay();
+    const factoryFingerprint = openingDayFactoryRestoreFingerprint(factory);
+    if (plan.factoryHash !== factory.bodyHash || plan.factoryFingerprint !== factoryFingerprint) throw new Error('出厂正文已更新，请重新预览 diff');
+    const sameUndo = openingDayFactoryUndo && openingDayFactoryUndo.chatId === status.chatId && openingDayFactoryUndo.uuid === status.uuid;
+    if (currentFingerprint === factoryFingerprint) return { changed:false, undoAvailable:!!sameUndo, draft:readOpeningDraft() };
+    if (!sameUndo) {
+      openingDayFactoryUndo = {
+        chatId:status.chatId,
+        uuid:status.uuid,
+        openingDay:clone(current),
+        restoredFingerprint:factoryFingerprint,
+      };
+    }
+    const draft = writeOpeningDraft({ openingDay:factory }, { immediate:true });
+    return { changed:true, undoAvailable:true, draft };
+  }
+  function undoOpeningDayFactoryRestore() {
+    if (!openingDayFactoryUndo) throw new Error('没有可撤销的开局正文恢复');
+    const status = openingDraftService.status();
+    if (status.chatId !== openingDayFactoryUndo.chatId || status.uuid !== openingDayFactoryUndo.uuid) throw new Error('聊天已切换，不能把上一聊天的正文恢复到当前聊天');
+    const currentFingerprint = openingDayFactoryRestoreFingerprint(readOpeningDraft().openingDay);
+    if (currentFingerprint !== openingDayFactoryUndo.restoredFingerprint) throw new Error('开局正文已在恢复后再次编辑，拒绝用旧撤销点覆盖新内容');
+    const previous = openingDayFactoryUndo;
+    const draft = writeOpeningDraft({ openingDay:previous.openingDay }, { immediate:true });
+    openingDayFactoryUndo = null;
+    return { changed:true, draft };
+  }
+  let worldbookManagerUi = null;
+  function ensureWorldbookManagerUi() {
+    if (worldbookManagerUi) return worldbookManagerUi;
+    worldbookManagerUi = sharedWorldbookManagerUI.createWorldbookManagerUI({
+      manager:worldbookManager,
+      hostDocument:hostDocument(),
+      baselineProvider:loadWorldbookFactoryBaseline,
+      previewOpeningBodyRestore:async () => previewOpeningDayFactoryRestore(),
+      restoreOpeningBody:async plan => restoreOpeningDayFactoryDraft(plan),
+      undoOpeningBodyRestore:async () => undoOpeningDayFactoryRestore(),
     });
+    return worldbookManagerUi;
+  }
+  async function openWorldbookManager() { return ensureWorldbookManagerUi().open(); }
+  function closeWorldbookManager() { worldbookManagerUi?.close(); }
+  const WORLDBOOK_EDITOR_SOURCE_SHA256 = '00367c90578c5fa32cbf703c5ccfd251bd8003751b3bb2389e353b71f21b224e';
+  const WORLDBOOK_EDITOR_URLS = [
+    RUNTIME_BASE_URL + '/worldbook-editor.js?v=p7-r1',
+    'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.0/worldbook-editor.js?v=p7-r1',
+    'https://raw.githubusercontent.com/LiarMTTT/rolecard-diy-workshop/main/runtime/xingyue/3.4.0/worldbook-editor.js?v=p7-r1',
+  ];
+  let worldbookEditorModulePromise = null;
+  let worldbookEditor = null;
+  async function loadWorldbookEditorModule() {
+    if (worldbookEditorModulePromise) return worldbookEditorModulePromise;
+    worldbookEditorModulePromise = (async () => {
+      let lastError = null;
+      for (const url of WORLDBOOK_EDITOR_URLS) {
+        try {
+          const response = await fetch(url, { cache:'no-store' });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          const code = await response.text();
+          const digest = sha256HexFallback(code, typeof TextEncoder === 'function' ? TextEncoder : null);
+          if (digest !== WORLDBOOK_EDITOR_SOURCE_SHA256) throw new Error('P7 编辑器 SHA-256 不匹配');
+          const blobUrl = URL.createObjectURL(new Blob([code], { type:'text/javascript' }));
+          try {
+            const module = await import(blobUrl);
+            if (module?.WORLDBOOK_EDITOR_VERSION !== '0.2.0' || module?.WORLDBOOK_EDITOR_BUILD !== 'xingyue-p7-r1' || typeof module?.createWorldbookEditor !== 'function') throw new Error('P7 编辑器版本或导出契约不匹配');
+            return module;
+          } finally { try { URL.revokeObjectURL(blobUrl); } catch (_) {} }
+        } catch (error) { lastError = error; }
+      }
+      throw lastError || new Error('无法加载 P7 世界书编辑器');
+    })().catch(error => { worldbookEditorModulePromise = null; throw error; });
+    return worldbookEditorModulePromise;
+  }
+  function focusCurrentChatOpeningEditor() {
+    const doc = hostDocument();
+    const input = doc.querySelector?.('[data-xy-opening-story-body]');
+    if (!input) throw new Error('当前聊天未找到开局正文编辑框');
+    try { input.closest?.('details')?.setAttribute?.('open',''); } catch (_) {}
+    try { input.scrollIntoView?.({ block:'center', behavior:'smooth' }); } catch (_) {}
+    input.focus?.();
+    return true;
+  }
+  async function ensureWorldbookEditor() {
+    if (runtimeDestroyed) throw new Error('控制中心已销毁，不能打开世界书编辑器');
+    if (worldbookEditor) return worldbookEditor;
+    const module = await loadWorldbookEditorModule();
+    if (runtimeDestroyed) throw new Error('控制中心已销毁，已放弃迟到的编辑器模块');
+    const editor = module.createWorldbookEditor({
+      manager:worldbookManager,
+      hostDocument:hostDocument(),
+      baselineProvider:loadWorldbookFactoryBaseline,
+      aiAssistant:worldbookAiAssistant,
+      openRecovery:async () => { worldbookEditor?.close?.(); return openWorldbookManager(); },
+      openCurrentChatOpeningEditor:async () => { worldbookEditor?.close?.(); return focusCurrentChatOpeningEditor(); },
+    });
+    if (runtimeDestroyed) { try { editor.destroy?.(); } catch (_) {} throw new Error('控制中心已销毁，已清理迟到的编辑器实例'); }
+    worldbookEditor = editor;
+    return worldbookEditor;
+  }
+  async function openWorldbookEditor() {
+    try { const editor = await ensureWorldbookEditor(); if (runtimeDestroyed) throw new Error('控制中心已销毁，不能打开世界书编辑器'); return await editor.open(); }
+    catch (error) { if (!runtimeDestroyed) toast('error', '世界书编辑器加载失败，可重试：' + (error?.message || String(error))); throw error; }
+  }
+  function closeWorldbookEditor() { worldbookEditor?.close?.(); }
+  async function previewWorldbookRestore(options = {}) {
+    const kind = options.kind;
+    const baseline = kind === 'snapshot' ? null : await loadWorldbookFactoryBaseline();
+    return worldbookManager.prepareRestore({ kind, baseline, snapshotId:options.snapshotId || '' });
+  }
+  function commitWorldbookRestore(planId) { return worldbookManager.commitPreparedRestore(planId); }
+  function workshopBusinessItem(pkg, item = null) {
+    const target = String(item?.packageTarget || pkg?.payload?.target || pkg?.packageTarget || pkg?.type || item?.packageType || 'generic');
+    const programOnly = item?.programOnly === true || pkg?.programOnly === true || target === 'xingyue.opening_day_body';
+    return {
+      comment: item?.comment || '[星月工坊][' + pkg.type + ']' + pkg.title,
+      title: pkg.title,
+      content: item?.content || packageToWorldbookText(pkg),
+      packageId: item?.packageId || pkg.id,
+      packageType: item?.packageType || pkg.type,
+      packageTarget: target,
+      programOnly,
+      enabled: programOnly ? false : (item?.enabled !== false),
+      revision: item?.revision || packageRevision(pkg),
+      contentHash: item?.contentHash,
+      installedAt: item?.installedAt,
+    };
   }
   async function writeOpeningWorldbookEntries(draft = readOpeningDraft(), options = {}) {
-    const scope = options.scope || 'all'; // #2(2.9.8)：'identity' 只身份/世界因子 · 'workshop' 只工坊内容 · 'all' 两者
+    const scope = options.scope || 'all';
+    assertOpeningChatContext(options.expectedContext);
     const payload = openingWorldbookPayload(draft);
-    const apiHost = worldbookApiHost();
-    if (!apiHost) {
-      payload.warning = '当前环境未检测到 Tavern Helper 世界书 API，已仅生成预览事件。';
-      dispatchOpeningWorldbookPreview(payload);
-      return payload;
-    }
-    const worldbookName = await resolveCardWorldbookName(apiHost);
-    if (!worldbookName) {
-      payload.warning = '未能定位角色卡绑定的世界书，已仅生成预览事件。请确认已在 ST 正常打开本角色卡。';
-      dispatchOpeningWorldbookPreview(payload);
-      return payload;
-    }
-    const openingEntries = [];
-    if (payload.identity) openingEntries.push(makeConstantEntry(IDENTITY_COMMENT, payload.identity, { kind: 'identity' }));
-    if (payload.worldFactor) openingEntries.push(makeConstantEntry(WORLD_FACTOR_COMMENT, payload.worldFactor, { kind: 'world_factor' }));
-    const installedAt = new Date().toISOString();
-    const workshopEntries = payload.workshopEntries.map(item => makeWorkshopPackageEntry(item, installedAt));
-    if (scope === 'identity' && !openingEntries.length) {
-      payload.warning = '没有可写入的身份/世界因子内容。'; dispatchOpeningWorldbookPreview(payload); return payload;
-    }
-    if (scope === 'workshop' && !workshopEntries.length) {
-      payload.warning = '没有已启用的工坊内容可注入。'; dispatchOpeningWorldbookPreview(payload); return payload;
-    }
-    await apiHost.updateWorldbookWith(worldbookName, worldbook => {
-      // #2(2.9.8)：拆 scope 时保留未更新的那一类，避免「只写身份」误删工坊条目（反之亦然）。
-      const cur = Array.isArray(worldbook) ? worldbook : [];
-      const keepOpening = cur.filter(isOpeningManagedEntry);
-      const keepWorkshopPkgs = cur.filter(e => isWorkshopManagedEntry(e) && e.extra?.kind === 'workshop_package');
-      const finalOpening = scope === 'workshop' ? keepOpening : openingEntries;
-      const finalWorkshop = scope === 'identity' ? keepWorkshopPkgs : workshopEntries;
-      return upsertEntries(worldbook, finalOpening, finalWorkshop);
-    }, { render: 'debounced' });
-    payload.worldbookName = worldbookName;
-    payload.applied = true;
+    const workshopEntries = payload.workshopEntries.map(item => workshopBusinessItem({
+      id:item.packageId, type:item.packageType, title:String(item.comment || '').replace(/^.*?]/, ''),
+      payload:{ target:item.packageTarget }, revision:item.revision,
+    }, item));
+    const guard = () => {
+      assertOpeningChatContext(options.expectedContext);
+      if (payload.identitySuppressedByPersona) {
+        const latestAuthority = personaIdentityAuthority(draft);
+        if (!latestAuthority.suppressWorldbook || latestAuthority.snapshot?.fingerprint !== payload.identityAuthority.fingerprint) {
+          throw new Error('Persona 已切换或内容已变化，取消身份世界书去重');
+        }
+      }
+    };
+    const result = await worldbookManager.write({
+      scope,
+      identity:payload.identity,
+      worldFactor:payload.worldFactor,
+      workshopEntries,
+      allowEmptyIdentity:payload.identitySuppressedByPersona,
+      expectedRevision:options.expectedRevision,
+      guard,
+    });
+    payload.worldbookName = result.worldbookName;
+    payload.applied = result.applied === true;
+    payload.warning = result.warning || '';
     payload.scope = scope;
+    payload.beforeRevision = result.beforeRevision || null;
+    payload.revision = result.afterRevision || null;
+    payload.diff = result.diff || null;
     dispatchOpeningWorldbookPreview(payload);
     return payload;
   }
-  async function installWorkshopPackageEntries(pkg) {
-    const payload = {
-      worldFactor: '',
-      workshopEntries: [{
-        comment: '[星月工坊][' + pkg.type + ']' + pkg.title,
-        content: packageToWorldbookText(pkg),
-        packageId: pkg.id,
-        packageType: pkg.type,
-        revision: packageRevision(pkg),
-      }],
-      worldbookName: null,
-      applied: false,
-      warning: '',
-    };
-    const apiHost = worldbookApiHost();
-    if (!apiHost) {
-      payload.warning = '当前环境未检测到 Tavern Helper 世界书 API，已仅生成预览事件。';
-      dispatchOpeningWorldbookPreview(payload);
-      return payload;
-    }
-    const worldbookName = await resolveCardWorldbookName(apiHost);
-    if (!worldbookName) {
-      payload.warning = '未能定位角色卡绑定的世界书，已仅生成预览事件。请确认已在 ST 正常打开本角色卡。';
-      dispatchOpeningWorldbookPreview(payload);
-      return payload;
-    }
-    const item = payload.workshopEntries[0];
-    const entry = makeWorkshopPackageEntry(item);
-    await apiHost.updateWorldbookWith(worldbookName, worldbook => installSingleWorkshopEntry(worldbook, entry), { render: 'debounced' });
-    payload.worldbookName = worldbookName;
-    payload.applied = true;
+  async function installWorkshopPackageEntries(pkg, options = {}) {
+    const item = workshopBusinessItem(pkg);
+    const payload = { worldFactor:'', workshopEntries:[item], worldbookName:null, applied:false, warning:'' };
+    const canonical = worldbookManager.preview({ workshopEntries:[item] });
+    const result = await worldbookManager.writeBatch(canonical, { expectedRevision:options.expectedRevision });
+    payload.worldbookName = result.worldbookName;
+    payload.applied = result.applied === true;
+    payload.warning = result.warning || '';
+    payload.beforeRevision = result.beforeRevision || null;
+    payload.revision = result.afterRevision || null;
+    payload.diff = result.diff || null;
     dispatchOpeningWorldbookPreview(payload);
     return payload;
+  }
+  function workshopEntryMatchesPackage(entry, pkg) {
+    const meta = entry?.meta || {};
+    const target = String(pkg?.payload?.target || pkg?.packageTarget || pkg?.type || 'generic');
+    return meta.kind === 'workshop_package' && meta.source === WORKSHOP_SOURCE
+      && String(meta.packageId || '') === String(pkg?.id || '')
+      && String(meta.packageType || '') === String(pkg?.type || '')
+      && String(meta.packageTarget || '') === target;
+  }
+  function installedEntryContentHash(entry) {
+    return sha256HexFallback(String(entry?.content || ''), typeof TextEncoder === 'function' ? TextEncoder : null);
+  }
+  function workshopEntryBehaviorSignature(entry) {
+    const keys = ['enabled','strategyType','positionType','role','depth','order','group','groupOverride','groupWeight','probability','recursion','primaryKeys','secondaryKeys'];
+    return stableStringify(Object.fromEntries(keys.map(key => [key, entry?.[key]])));
+  }
+  function expectedWorkshopEntry(pkg) {
+    return worldbookManager.preview({ workshopEntries:[workshopBusinessItem(pkg)] })[0];
+  }
+  async function inspectWorkshopPackage(pkg) {
+    pkg = validatePackage(pkg);
+    const managed = await worldbookManager.readManaged('workshop');
+    const entry = managed.find(item => workshopEntryMatchesPackage(item, pkg)) || null;
+    const recordedHash = String(entry?.meta?.contentHash || '');
+    const actualHash = entry ? installedEntryContentHash(entry) : '';
+    const expected = expectedWorkshopEntry(pkg);
+    const expectedHash = installedEntryContentHash(expected);
+    const contentDirty = !!entry && (!/^[a-f0-9]{64}$/.test(recordedHash) || actualHash !== recordedHash);
+    const behaviorDirty = !!entry?.meta?.localModifiedAt && workshopEntryBehaviorSignature(entry) !== workshopEntryBehaviorSignature(expected);
+    return {
+      installed:!!entry,
+      dirty:contentDirty || behaviorDirty,
+      contentDirty,
+      behaviorDirty,
+      expectedHash,
+      uid:entry?.uid ?? null,
+      title:entry?.name || pkg.title,
+      recordedHash,
+      actualHash,
+      localModifiedAt:String(entry?.meta?.localModifiedAt || ''),
+      revision:entry?.meta?.revision ?? null,
+      entry:entry ? clone(entry) : null,
+    };
+  }
+  function detachedWorkshopCopy(entry) {
+    const copyEntry = clone(entry);
+    delete copyEntry.uid;
+    copyEntry.name = String(copyEntry.name || '工坊条目') + '（用户副本 ' + new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-') + '）';
+    const meta = { ...(copyEntry.meta || {}) };
+    ['source','kind','packageId','packageType','packageTarget','programOnly','revision','contentHash','installedAt','localModifiedAt','version'].forEach(key => { delete meta[key]; });
+    meta.detachedFromPackageId = String(entry?.meta?.packageId || '');
+    meta.detachedFromPackageType = String(entry?.meta?.packageType || '');
+    meta.detachedFromPackageTarget = String(entry?.meta?.packageTarget || '');
+    meta.detachedFromContentHash = installedEntryContentHash(entry);
+    copyEntry.meta = meta;
+    if (entry?.meta?.programOnly === true) copyEntry.enabled = false;
+    return copyEntry;
+  }
+  async function installOrUpdateWorkshopPackage(pkg, options = {}) {
+    pkg = validatePackage(pkg);
+    const opening = pkg.cardScope === OPENING_PACKAGE_SCOPE;
+    if (opening && (!Number.isInteger(Number(pkg.revision)) || Number(pkg.revision) < 1)) {
+      throw new Error('开局正文包必须来自带有效 revision 的工坊详情；本地 JSON 可预览或导入，但不能伪装为已安装来源');
+    }
+    const inspected = await inspectWorkshopPackage(pkg);
+    const incomingRevision = Number(pkg.revision);
+    const installedRevision = Number(inspected.revision);
+    if (inspected.installed && Number.isInteger(incomingRevision) && Number.isInteger(installedRevision)) {
+      if (incomingRevision < installedRevision) throw new Error('拒绝用旧 revision 回滚已安装工坊包');
+      if (incomingRevision === installedRevision && inspected.expectedHash !== inspected.recordedHash) throw new Error('同 revision 的包正文与已安装来源不一致，请刷新工坊详情');
+    }
+    const decision = String(options.dirtyDecision || '').toLowerCase();
+    if (inspected.dirty && !['overwrite','keep','detach'].includes(decision)) {
+      const error = new Error('本地工坊条目已修改，更新前必须选择：覆盖 / 保留当前 / 脱离为用户副本');
+      error.code = 'workshop-dirty-decision-required';
+      error.inspection = inspected;
+      throw error;
+    }
+    if (inspected.dirty && decision === 'keep') return { applied:false, kept:true, inspection:inspected };
+    const incoming = worldbookManager.preview({ workshopEntries:[workshopBusinessItem(pkg)] });
+    const upserts = inspected.dirty && decision === 'detach' ? [detachedWorkshopCopy(inspected.entry), ...incoming] : incoming;
+    const result = await worldbookManager.writeBatch(upserts, { expectedRevision:options.expectedRevision });
+    return { ...result, updated:inspected.installed, detached:inspected.dirty && decision === 'detach', inspection:inspected };
+  }
+  async function uninstallWorkshopPackage(pkg, options = {}) {
+    pkg = validatePackage(pkg);
+    const baseRevision = options.expectedRevision ?? await worldbookManager.getRevision();
+    const managed = await worldbookManager.readManaged('workshop');
+    const target = managed.find(item => workshopEntryMatchesPackage(item, pkg));
+    if (!target) return { applied:false, uninstalled:false, warning:'该包尚未安装到世界书' };
+    const allEntries = await worldbookManager.readAll();
+    const alreadyPreserved = allEntries.some(entry => entry?.meta?.detachedFromPackageId === String(target.meta.packageId || '')
+      && entry?.meta?.detachedFromPackageType === String(target.meta.packageType || '')
+      && entry?.meta?.detachedFromPackageTarget === String(target.meta.packageTarget || '')
+      && entry?.meta?.detachedFromContentHash === installedEntryContentHash(target));
+    const currentRevision = await worldbookManager.getRevision();
+    if (alreadyPreserved && baseRevision !== null && baseRevision !== undefined && currentRevision !== baseRevision) throw new Error('世界书已在卸载预览后变化，请重新执行卸载');
+    const preserved = alreadyPreserved
+      ? { applied:false, afterRevision:currentRevision, reused:true }
+      : await worldbookManager.writeBatch([detachedWorkshopCopy(target)], { expectedRevision:baseRevision });
+    const removalRevision = preserved.afterRevision || options.expectedRevision;
+    const latestManaged = await worldbookManager.readManaged('workshop');
+    const remaining = latestManaged.filter(item => item?.meta?.kind === 'workshop_package' && !workshopEntryMatchesPackage(item, pkg));
+    let result;
+    if (remaining.length) {
+      result = await worldbookManager.write({
+        scope:'workshop',
+        expectedRevision:removalRevision,
+        workshopEntries:remaining.map(entry => ({
+          comment:entry.name, content:entry.content, enabled:entry.enabled,
+          packageId:entry.meta.packageId, packageType:entry.meta.packageType, packageTarget:entry.meta.packageTarget,
+          programOnly:entry.meta.programOnly === true, revision:entry.meta.revision, contentHash:entry.meta.contentHash, installedAt:entry.meta.installedAt,
+        })),
+      });
+    } else result = await worldbookManager.uninstallWorkshop({ expectedRevision:removalRevision });
+    const draft = readOpeningDraft();
+    const source = draft.openingDay?.sourcePackage;
+    if (source && String(source.id) === String(pkg.id) && String(source.type || 'world_factor') === String(pkg.type)) {
+      const openingDay = normalizeOpeningDayDraft(draft.openingDay);
+      delete openingDay.sourcePackage;
+      openingDay.origin = 'user';
+      openingDay.localModifiedAt = new Date().toISOString();
+      writeOpeningDraft({ openingDay }, { immediate:true });
+    }
+    return { ...result, uninstalled:true, preservedOpeningDraft:true, preservedUserCopy:true, preserveResult:preserved };
+  }
+  async function previewApplyOpeningPackage(pkg) {
+    pkg = validatePackage(pkg, ['world_factor']);
+    if (pkg.cardScope !== OPENING_PACKAGE_SCOPE || pkg.payload?.target !== OPENING_PACKAGE_TARGET) throw new Error('该包不是 3.4.0 开局正文模板');
+    const inspected = await inspectWorkshopPackage(pkg);
+    if (!inspected.installed) throw new Error('请先把正文模板安装为禁用来源，再应用到本局');
+    if (inspected.dirty) throw new Error('已安装来源存在本地修改，请先完成覆盖 / 保留 / 脱离更新决策');
+    if (Number(inspected.revision) !== Number(pkg.revision) || inspected.actualHash !== inspected.expectedHash || inspected.recordedHash !== inspected.expectedHash) throw new Error('当前详情不是已安装的同一 revision，请先安装或更新来源');
+    const body = String(pkg.payload.worldFactors?.[0]?.content || '');
+    validateOpeningStory(body, { grade:resolveEffectiveGrade(readOpeningDraft()).value });
+    const effectiveGrade = resolveEffectiveGrade(readOpeningDraft());
+    const band = gradeBand(effectiveGrade.value);
+    const scope = pkg.payload.gradeScope || [];
+    if (!scope.includes('all') && !scope.includes(band)) throw new Error('当前年级（' + (effectiveGrade.value || '未填写') + '）不在模板适用范围：' + scope.join(' / '));
+    const current = normalizeOpeningDayDraft(readOpeningDraft().openingDay);
+    return {
+      schema:'xingyue-opening-package-apply-v1',
+      package:clone(pkg),
+      currentHash:current.bodyHash,
+      nextHash:openingStoryHash(body),
+      currentBody:current.body,
+      nextBody:body,
+      gradeScope:pkg.payload.gradeScope.slice(),
+      expectedContext:openingChatContextSnapshot(),
+      gradeValue:effectiveGrade.value,
+      gradeBand:band,
+      changed:current.bodyHash !== openingStoryHash(body),
+    };
+  }
+  async function applyOpeningPackageToDraft(plan) {
+    if (!plan || plan.schema !== 'xingyue-opening-package-apply-v1') throw new Error('开局正文应用计划无效，请重新预览');
+    const pkg = validatePackage(plan.package, ['world_factor']);
+    assertOpeningChatContext(plan.expectedContext);
+    const latestDraft = readOpeningDraft();
+    const latestGrade = resolveEffectiveGrade(latestDraft);
+    const latestBand = gradeBand(latestGrade.value);
+    if (latestGrade.value !== plan.gradeValue || latestBand !== plan.gradeBand) throw new Error('年级已在预览后变化，请重新检查模板适用范围');
+    if (!plan.gradeScope.includes('all') && !plan.gradeScope.includes(latestBand)) throw new Error('当前年级已不在模板适用范围');
+    const current = normalizeOpeningDayDraft(latestDraft.openingDay);
+    if (current.bodyHash !== plan.currentHash) throw new Error('当前正文已在预览后变化，请重新查看 diff');
+    const inspected = await inspectWorkshopPackage(pkg);
+    if (!inspected.installed) throw new Error('模板来源已被卸载，不能应用');
+    if (inspected.dirty || Number(inspected.revision) !== Number(pkg.revision) || inspected.actualHash !== inspected.expectedHash || inspected.recordedHash !== inspected.expectedHash) throw new Error('模板来源已变化，请重新安装并预览');
+    const body = String(pkg.payload.worldFactors[0].content);
+    validateOpeningStory(body, { grade:latestGrade.value });
+    if (openingStoryHash(body) !== plan.nextHash) throw new Error('模板正文已变化，请重新预览');
+    const next = normalizeOpeningDayDraft({
+      body, origin:'workshop', sourceRevision:String(pkg.revision), baseHash:openingStoryHash(body), bodyHash:openingStoryHash(body),
+      gradeScope:pkg.payload.gradeScope,
+      sourcePackage:{ id:pkg.id, type:pkg.type, target:OPENING_PACKAGE_TARGET, title:pkg.title, revision:Number(pkg.revision), contentHash:String(pkg.contentHash || '') },
+    });
+    assertOpeningChatContext(plan.expectedContext);
+    const draft = writeOpeningDraft({ openingDay:next }, { immediate:true });
+    return { applied:true, draft, openingDay:next };
   }
   function previewOpeningWrites(draft = readOpeningDraft()) {
-    const payload = {
-      identity: identityContent(draft),
-      worldFactor: worldFactorContent(draft),
-      workshopEntries: workshopWorldbookEntries(draft).map(item => item.comment),
-    };
-    return payload;
+    const payload = openingWorldbookPayload(draft);
+    worldbookManager.preview({
+      scope:'all', identity:payload.identity, worldFactor:payload.worldFactor,
+      workshopEntries:payload.workshopEntries.map(item => ({ ...item, packageTarget:item.packageTarget || item.packageType })),
+    });
+    return { identity:payload.identity, worldFactor:payload.worldFactor, workshopEntries:payload.workshopEntries.map(item => item.comment) };
   }
+
   function readCurrentStatSafe() {
     try { return statRoot(getCurrentMvuData()); } catch (_) { return null; }
   }
@@ -1264,7 +4643,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.8 的当前楼变量重算器，只输出一个内含 <analysis> 和 <JSONPatch> 的 <UpdateVariable> 块，不生成正文。' },
+        { role: 'system', content: '你是星月 3.4.0 的当前楼变量重算器，只输出一个内含 <analysis> 和 <JSONPatch> 的 <UpdateVariable> 块，不生成正文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim(), '整楼重算：依据当前楼正文重新推导本楼变量变化。');
@@ -1301,7 +4680,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.8 的变量定点修正器，只输出一个内含 <analysis> 和 <JSONPatch> 的最小 <UpdateVariable> 块，不生成正文。' },
+        { role: 'system', content: '你是星月 3.4.0 的变量定点修正器，只输出一个内含 <analysis> 和 <JSONPatch> 的最小 <UpdateVariable> 块，不生成正文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim(), '定点修正：按玩家要求只更新指定变量。');
@@ -1450,7 +4829,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.8 的当前楼变量重算器，依据玩家给定的变量预分析与正文，只输出一个内含 <analysis> 和 <JSONPatch> 的 <UpdateVariable> 块，不生成正文。' },
+        { role: 'system', content: '你是星月 3.4.0 的当前楼变量重算器，依据玩家给定的变量预分析与正文，只输出一个内含 <analysis> 和 <JSONPatch> 的 <UpdateVariable> 块，不生成正文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim(), analysis || '按玩家编辑后的预分析重算本楼变量。');
@@ -1528,7 +4907,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.8 的变量格式修复器，只输出一个内含 <analysis> 和 <JSONPatch> 的最小 <UpdateVariable> 块，只修格式不改语义。' },
+        { role: 'system', content: '你是星月 3.4.0 的变量格式修复器，只输出一个内含 <analysis> 和 <JSONPatch> 的最小 <UpdateVariable> 块，只修格式不改语义。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim(), 'LLM 格式修复：只修正变量结构和类型问题，不改变语义。');
@@ -2400,8 +5779,8 @@
   // 真身 status-bar.html 从 git runtime 拉取(双源回退)，Blob iframe 挂进顶层居中面板(绝对像素·绕 transform 劫持)。
   // 桥：CC 先在顶层窗口放 __XY_HUD_BRIDGE 函数包(函数与文档无关可跨窗)，blob 内同步引导脚本在**解析期**
   // 取包装桥(与 3.2.0 已证变量桥同模式、无 load 竞态)；getVariables 走 Mvu+最新楼强取(N4 数据源切 latest)。
-  const HUD_RT_BASE = 'https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.8';
-  const HUD_RT_BASE_CF = 'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.8';
+  const HUD_RT_BASE = 'https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.0';
+  const HUD_RT_BASE_CF = 'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.0';
   let hudPanel = null;
   let hudDrawer = null;
   const hudSession = {
@@ -3517,7 +6896,7 @@
       should_silence: true,
       max_chat_history: 0,
       ordered_prompts: [
-        { role: 'system', content: '你是星月 3.3.8 的楼层内临时旁观视角生成器。结果只供玩家娱乐阅读，不进入后续上下文。' },
+        { role: 'system', content: '你是星月 3.4.0 的楼层内临时旁观视角生成器。结果只供玩家娱乐阅读，不进入后续上下文。' },
         { role: 'user', content: prompt },
       ],
     }) || '').trim();
@@ -3546,6 +6925,14 @@
         const action = actionNode.getAttribute('data-xy-action');
         if (!action) return;
         if (action === 'close') { togglePanel(false); return; }
+        if (action === 'open-worldbook-editor') {
+          try { await openWorldbookEditor(); } catch (_) {}
+          return;
+        }
+        if (action === 'open-worldbook-recovery') {
+          try { await openWorldbookManager(); } catch (error) { toast('error', error?.message || String(error)); }
+          return;
+        }
         if (action === 'toggle-setting') {
           const key = actionNode.closest?.('[data-key]')?.getAttribute?.('data-key');
           if (key && Object.prototype.hasOwnProperty.call(settings, key)) saveSettings({ [key]: !settings[key] });
@@ -3697,7 +7084,7 @@
     panel.innerHTML = '<div class="xy-head"><div class="xy-title">控制中心</div><button class="xy-close" data-xy-action="close">关闭</button></div>' +
       '<div class="xy-grid">' +
       '<div class="xy-section"><h4>运行状态</h4>' + safe('运行状态', () => row('版本', VERSION) + row('开局页接管', openingCount ? '已接管' : '等待首条消息') + row('当前楼变量', currentRoot ? '可读取' : '不可读取')) + '</div>' +
-      '<div class="xy-section"><h4>开局与状态栏</h4><div class="xy-actions"></div>' + safe('开局与状态栏', renderPolicyControls) + '</div>' +
+      '<div class="xy-section"><h4>开局与状态栏</h4><div class="xy-actions"><button data-xy-action="open-worldbook-editor">世界书条目编辑</button><button data-xy-action="open-worldbook-recovery">备份与恢复</button></div>' + safe('开局与状态栏', renderPolicyControls) + '</div>' +
       '<div class="xy-section"><h4>媒体库</h4>' + safe('媒体库', renderMediaLibrarySection) + '</div>' +
       '</div><div class="xy-resize" aria-hidden="true"></div>';
     applyPanelRect(panel);
@@ -3750,16 +7137,26 @@
   const openingTimers = new Set();
   const openingFetchControllers = new Set();
   function scheduleOpeningTimer(callback, delay) {
+    if (runtimeDestroyed) return null;
     const timer = setTimeout(() => {
       openingTimers.delete(timer);
-      callback();
+      if (!runtimeDestroyed) callback();
     }, delay);
     openingTimers.add(timer);
     return timer;
   }
   function bindOpeningPage(root) {
-    if (!root || root.dataset.xyOpeningBound === 'true') return false;
+    if (!root) return false;
+    const previousBindingOwner = root.dataset.xyOpeningBoundOwner || '';
+    if (root.dataset.xyOpeningBound === 'true' && previousBindingOwner === runtimeOwner.id) return false;
+    if (root.dataset.xyOpeningBound === 'true' && previousBindingOwner !== runtimeOwner.id) {
+      try { root.__xyOpeningFlushState?.(); } catch (_) {}
+      try { root.__xyOpeningAbort?.abort?.(); } catch (_) {}
+      try { root.__xyPrefixObs?.disconnect?.(); } catch (_) {}
+      try { root.__xyOpeningViewportCleanup?.(); } catch (_) {}
+    }
     root.dataset.xyOpeningBound = 'true';
+    root.dataset.xyOpeningBoundOwner = runtimeOwner.id;
     boundOpeningRoots.add(root);
     const AbortCtor = root.ownerDocument?.defaultView?.AbortController || window.AbortController;
     const openingAbort = AbortCtor ? new AbortCtor() : null;
@@ -3883,10 +7280,9 @@
       }
     } catch (_viewportErr) {}
 
-  const STORAGE_KEY = 'xingyue-opening-draft-v333';
   const TYPE_LABELS = { character:'角色范本', user_identity:'身份模板', world_factor:'世界因子', shop_item:'商店道具', blueprint:'蓝图', recipe:'配方', skill:'技能', function:'功能' };
-  const ATTRIBUTE_KEYS = ['格斗','平衡','反应','感知','技巧','精神'];
-  const DEFAULT_ATTRIBUTES = { 格斗:0, 平衡:0, 反应:0, 感知:0, 技巧:0, 精神:0 };
+  const ATTRIBUTE_KEYS = IDENTITY_ATTRIBUTE_KEYS;
+  const DEFAULT_ATTRIBUTES = IDENTITY_DEFAULT_ATTRIBUTES;
   const IDENTITY_ATTRIBUTE_PRESETS = {
     '普通入学生': { ...DEFAULT_ATTRIBUTES },
     '交换生': { 格斗:3, 平衡:4, 反应:5, 感知:7, 技巧:7, 精神:4 },
@@ -3905,17 +7301,18 @@
   const WORKSHOP_SAMPLE_PACKAGES = [
     { packageVersion:'1.0.0', id:'sample-transfer-identity', type:'user_identity', cardScope:'xingyue', title:'本地示例：插班观察者', summary:'给 {{user}} 一个低侵入的插班身份，适合先观察校园结构。', authorName:'本地示例', tags:['身份','开局'], rating:'general', language:'zh-CN', createdAt:'2026-06-23T00:00:00.000Z', updatedAt:'2026-06-23T00:00:00.000Z', payload:{ identity:'插班观察者', callname:'转学生', background:'通过临时交换名额进入星月学园，对校园规则和腕表制度仍在适应。' } },
     { packageVersion:'1.0.0', id:'sample-club-senior', type:'character', cardScope:'xingyue', title:'本地示例：社团前辈范本', summary:'追加一名可作为引导者或竞争者的社团前辈，不包含变量写入。', authorName:'本地示例', tags:['角色','关系'], rating:'general', language:'zh-CN', createdAt:'2026-06-23T00:00:00.000Z', updatedAt:'2026-06-23T00:00:00.000Z', payload:{ name:'未命名前辈', role:'社团前辈', relationship:'可作为引导者、竞争者或传闻来源。', mediaRefs:{ normal:'media://character/senior/normal' } } },
-    { packageVersion:'1.0.0', id:'sample-night-curfew', type:'world_factor', cardScope:'xingyue', title:'本地示例：夜间通行许可', summary:'让腕表权限影响夜间区域通行，适合都市异能与校园调查线。', authorName:'本地示例', tags:['世界因子','腕表'], rating:'general', language:'zh-CN', createdAt:'2026-06-23T00:00:00.000Z', updatedAt:'2026-06-23T00:00:00.000Z', payload:{ factors:['夜间校区分区开放，腕表权限决定可进入区域。','部分社团拥有临时通行权限。'] } },
+    { packageVersion:'1.0.0', id:'sample-night-curfew', type:'world_factor', cardScope:'xingyue', title:'本地示例：夜间通行许可', summary:'让腕表权限影响夜间区域通行，适合都市异能与校园调查线。', authorName:'本地示例', tags:['世界因子','腕表'], rating:'general', language:'zh-CN', createdAt:'2026-06-23T00:00:00.000Z', updatedAt:'2026-06-23T00:00:00.000Z', payload:{ worldFactors:[{ title:'夜间校区分区开放', content:'腕表权限决定可进入区域。' },{ title:'社团临时许可', content:'部分社团拥有临时通行权限。' }] } },
     { packageVersion:'1.0.0', id:'sample-lilith-ticket', type:'shop_item', cardScope:'xingyue', title:'本地示例：莉莉丝折扣券', summary:'给莉莉丝商店添加一次性折扣券条目，仅作为世界书内容。', authorName:'本地示例', tags:['商店','道具'], rating:'general', language:'zh-CN', createdAt:'2026-06-23T00:00:00.000Z', updatedAt:'2026-06-23T00:00:00.000Z', payload:{ item:{ name:'莉莉丝折扣券', effect:'购买指定服务时减少一次资源消耗。', limit:'一次性' } } },
     { packageVersion:'1.0.0', id:'sample-watch-shell-blueprint', type:'blueprint', cardScope:'xingyue', title:'本地示例：腕表外壳蓝图', summary:'提供一个可供制造/改造系统读取的蓝图文本来源。', authorName:'本地示例', tags:['蓝图','制造'], rating:'general', language:'zh-CN', createdAt:'2026-06-23T00:00:00.000Z', updatedAt:'2026-06-23T00:00:00.000Z', payload:{ blueprint:{ name:'腕表保护外壳', materials:['通用聚合物','微型扣件'], result:'提升腕表耐久叙事表现。' } } },
     { packageVersion:'1.0.0', id:'sample-energy-gel-recipe', type:'recipe', cardScope:'xingyue', title:'本地示例：能量凝胶配方', summary:'演示配方包如何作为世界书条目进入制造/改造系统。', authorName:'本地示例', tags:['配方','资源'], rating:'general', language:'zh-CN', createdAt:'2026-06-23T00:00:00.000Z', updatedAt:'2026-06-23T00:00:00.000Z', payload:{ recipe:{ name:'能量凝胶', requires:{ 基础营养剂:1, 凝胶载体:1 }, products:{ 能量凝胶:1 } } } },
     { packageVersion:'1.0.0', id:'sample-campus-rumor-skill', type:'skill', cardScope:'xingyue', title:'本地示例：传言嗅探', summary:'追加一个偏调查向的技能说明，用于引导从 NPC 口中获取新闻/传言。', authorName:'本地示例', tags:['技能','传言'], rating:'general', language:'zh-CN', createdAt:'2026-06-23T00:00:00.000Z', updatedAt:'2026-06-23T00:00:00.000Z', payload:{ skill:{ name:'传言嗅探', trigger:'与 NPC 闲聊或调查社团公告时', effect:'更容易得到新闻类线索。' } } },
     { packageVersion:'1.0.0', id:'sample-roster-function', type:'function', cardScope:'xingyue', title:'本地示例：关系名册视图', summary:'作为功能包范例，描述关系网名册模式的启用规则。', authorName:'本地示例', tags:['功能','关系网'], rating:'general', language:'zh-CN', createdAt:'2026-06-23T00:00:00.000Z', updatedAt:'2026-06-23T00:00:00.000Z', payload:{ function:{ name:'关系名册视图', behavior:'以名册优先级展示互动角色、羁绊角色与关系网节点。' } } },
   ];
+  const savedOpeningUi = openingDraftService.readUi();
   const state = {
-    view: root.dataset.xyOpeningView || 'boot',
+    view: savedOpeningUi.view || root.dataset.xyOpeningView || 'boot',
     returnView: 'boot',
-    step: Number(root.dataset.xyOpeningStep || 1) || 1,
+    step: Number(savedOpeningUi.step || root.dataset.xyOpeningStep || 1) || 1,
     deps: [],
     depsReady: false,
     workshopTab: 'character',
@@ -3930,14 +7327,68 @@
     lastWorkshopError: '',
     workshopAuth: { checked: false, loggedIn: false, publisherId: '', error: '' },
     previewMode: false,
+    identityMediaSlot: 'avatar',
+    personaSnapshot: null,
+    personaFingerprint: '',
+    pendingPersonaImport: null,
   };
 
   // 任务4.19：删除与顶层完全相同的 hostWindow/toast/escapeHtml 重复定义，直接引用外层
   // hostWindow/toast/escapeHtml 均来自外层闭包，无需在此重声明（遮蔽外层各自演化是屎山根因A）
   function controlCenter() { return window.XingyueControlCenter || hostWindow().XingyueControlCenter || null; }
-  function readDraft() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {}; } catch (_) { return {}; } }
+  const playerTextTemplates = new Map();
+  const playerAttributeTemplates = new Map();
+  function isPortablePayloadPreview(node) {
+    try { return !!node?.parentElement?.closest?.('[data-xy-package-detail]'); } catch (_) { return false; }
+  }
+  function capturePlayerFacingTemplates() {
+    const doc = root.ownerDocument || document;
+    const NodeFilterCtor = doc.defaultView?.NodeFilter || window.NodeFilter;
+    try {
+      const walker = doc.createTreeWalker(root, NodeFilterCtor?.SHOW_TEXT || 4);
+      let node = walker.nextNode();
+      while (node) {
+        const parentTag = String(node.parentElement?.tagName || '').toUpperCase();
+        const persistedTemplate = typeof node.__xyPlayerTemplate === 'string' ? node.__xyPlayerTemplate : '';
+        if (!['SCRIPT', 'STYLE'].includes(parentTag) && !isPortablePayloadPreview(node) && (persistedTemplate || /\{\{\s*user\s*\}\}/i.test(node.nodeValue || ''))) {
+          const template = persistedTemplate || node.nodeValue || '';
+          node.__xyPlayerTemplate = template;
+          if (!playerTextTemplates.has(node)) playerTextTemplates.set(node, template);
+        }
+        node = walker.nextNode();
+      }
+    } catch (_) {}
+    try {
+      root.querySelectorAll('*').forEach(element => {
+        if (element.closest?.('[data-xy-package-detail]')) return;
+        const templates = { ...(isObject(element.__xyPlayerAttributeTemplates) ? element.__xyPlayerAttributeTemplates : {}), ...(playerAttributeTemplates.get(element) || {}) };
+        ['placeholder', 'title', 'aria-label', 'alt'].forEach(name => {
+          const value = element.getAttribute?.(name);
+          if (value && /\{\{\s*user\s*\}\}/i.test(value) && templates[name] === undefined) templates[name] = value;
+        });
+        if (Object.keys(templates).length) {
+          element.__xyPlayerAttributeTemplates = { ...templates };
+          playerAttributeTemplates.set(element, templates);
+        }
+      });
+    } catch (_) {}
+  }
+  function renderPlayerFacingText() {
+    capturePlayerFacingTemplates();
+    playerTextTemplates.forEach((template, node) => {
+      if (!root.contains(node)) { playerTextTemplates.delete(node); return; }
+      try { node.nodeValue = resolvePlayerText(template); } catch (_) {}
+    });
+    playerAttributeTemplates.forEach((templates, element) => {
+      if (!root.contains(element)) { playerAttributeTemplates.delete(element); return; }
+      Object.keys(templates).forEach(name => {
+        try { element.setAttribute(name, resolvePlayerText(templates[name])); } catch (_) {}
+      });
+    });
+  }
+  function readDraft() { return readOpeningDraft(); }
   function normalizeDraft(next) {
-    const draft = next && typeof next === 'object' ? next : {};
+    const draft = normalizeOpeningDraftData(next);
     if (!draft.core_attributes || typeof draft.core_attributes !== 'object') draft.core_attributes = { ...DEFAULT_ATTRIBUTES };
     ATTRIBUTE_KEYS.forEach(key => { draft.core_attributes[key] = Math.max(0, Math.min(30, Number(draft.core_attributes[key] ?? DEFAULT_ATTRIBUTES[key]) || 0)); });
     if (!draft.enabledPackages || typeof draft.enabledPackages !== 'object') {
@@ -3948,8 +7399,106 @@
     }
     return draft;
   }
-  function writeDraft(next) { const draft = normalizeDraft(next || {}); try { localStorage.setItem(STORAGE_KEY, JSON.stringify(draft)); } catch (_) {} return draft; }
-  function saveDraft(patch) { return writeDraft({ ...readDraft(), ...(patch || {}) }); }
+  function openingStoryDiffText(currentBody, officialBody = OFFICIAL_OPENING_DAY.body) {
+    const currentLines = canonicalizeOpeningStoryBody(currentBody).split('\n');
+    const officialLines = canonicalizeOpeningStoryBody(officialBody).split('\n');
+    if (currentLines.join('\n') === officialLines.join('\n')) return '当前正文与 3.4.0 出厂版一致。';
+    const lines = [];
+    const count = Math.max(currentLines.length, officialLines.length);
+    for (let index = 0; index < count; index += 1) {
+      const officialLine = officialLines[index];
+      const currentLine = currentLines[index];
+      if (officialLine === currentLine) {
+        if (officialLine !== undefined) lines.push('  ' + officialLine);
+        continue;
+      }
+      if (officialLine !== undefined) lines.push('- ' + officialLine);
+      if (currentLine !== undefined) lines.push('+ ' + currentLine);
+    }
+    return lines.join('\n');
+  }
+  function saveOpeningDayBody(body, options = {}) {
+    const draft = normalizeDraft(readDraft());
+    const current = normalizeOpeningDayDraft(draft.openingDay);
+    draft.openingDay = normalizeOpeningDayDraft({
+      ...current,
+      body: canonicalizeOpeningStoryBody(body),
+      gradeScope: Array.isArray(options.gradeScope) && options.gradeScope.length ? options.gradeScope.map(String) : current.gradeScope,
+      origin: 'user',
+      localModifiedAt: new Date().toISOString(),
+    });
+    return writeDraft(draft, { immediate: options.immediate === true });
+  }
+  function restoreOfficialOpeningDay() {
+    const draft = normalizeDraft(readDraft());
+    draft.openingDay = copyOfficialOpeningDay();
+    return writeDraft(draft, { immediate: true });
+  }
+  function captureOpeningDayField(options = {}) {
+    const input = root.querySelector('[data-xy-opening-story-body]');
+    if (!input) return normalizeDraft(readDraft());
+    return saveOpeningDayBody(input.value, options);
+  }
+  function renderOpeningDayEditor(draft = readDraft()) {
+    draft = normalizeDraft(draft);
+    const openingDay = normalizeOpeningDayDraft(draft.openingDay);
+    const input = root.querySelector('[data-xy-opening-story-body]');
+    if (input && input.value !== openingDay.body) {
+      const doc = input.ownerDocument || root.ownerDocument || document;
+      const focused = doc.activeElement === input;
+      const start = focused ? input.selectionStart : null;
+      const end = focused ? input.selectionEnd : null;
+      input.value = openingDay.body;
+      if (focused && start !== null && end !== null) {
+        try { input.setSelectionRange(Math.min(start, input.value.length), Math.min(end, input.value.length)); } catch (_) {}
+      }
+    }
+    const bytes = openingStoryUtf8Bytes(openingDay.body);
+    const dirty = openingDay.origin === 'user' || openingDay.bodyHash !== OFFICIAL_OPENING_DAY.baseHash;
+    const byteNode = root.querySelector('[data-xy-opening-story-bytes]');
+    const sourceNode = root.querySelector('[data-xy-opening-story-source]');
+    const statusNode = root.querySelector('[data-xy-opening-story-status]');
+    const previewNode = root.querySelector('[data-xy-opening-story-preview]');
+    const diffNode = root.querySelector('[data-xy-opening-story-diff]');
+    const diffPane = root.querySelector('[data-xy-opening-story-diff-pane]');
+    const finalPreview = root.querySelector('[data-xy-opening-final-preview]');
+    const compatibilityNode = root.querySelector('[data-xy-opening-grade-compatibility]');
+    const compatibilityButton = root.querySelector('[data-xy-opening-action="use-grade-compatible-story"]');
+    if (byteNode) byteNode.textContent = bytes + ' / ' + OPENING_DAY_MAX_BYTES + ' bytes';
+    if (sourceNode) {
+      sourceNode.textContent = openingDay.sourcePackage?.title ? ('工坊：' + openingDay.sourcePackage.title) : (dirty ? '用户修改' : '官方出厂版');
+      sourceNode.className = 'xy-pill ' + (openingDay.sourcePackage ? 'ok' : (dirty ? 'warn' : 'ok'));
+    }
+    if (diffPane) diffPane.hidden = !dirty;
+    if (diffNode) diffNode.textContent = openingStoryDiffText(openingDay.body);
+    root.querySelectorAll('[data-xy-opening-action="restore-opening-source"],[data-xy-opening-action="restore-opening-official"]').forEach(button => {
+      button.disabled = !dirty;
+    });
+    const compatibility = openingStoryCompatibility(draft);
+    if (compatibilityNode) {
+      compatibilityNode.hidden = compatibility.compatible;
+      compatibilityNode.textContent = compatibility.compatible ? '' : compatibility.message;
+    }
+    if (compatibilityButton) compatibilityButton.hidden = compatibility.compatible;
+    try {
+      const validation = validateOpeningStory(openingDay.body, { grade:compatibility.grade.value });
+      const resolved = resolveOpeningStory(draft, { playerName: resolveCurrentPlayerName() });
+      if (statusNode) {
+        statusNode.dataset.state = 'ok';
+        statusNode.textContent = '正文有效 · ' + validation.bytes + ' bytes · ' + (dirty ? '已按当前聊天保存修改' : '正在使用 3.4.0 出厂版');
+      }
+      if (previewNode) previewNode.textContent = resolved;
+      if (finalPreview) finalPreview.textContent = composeOpeningMessage(draft);
+    } catch (error) {
+      const message = error?.message || String(error);
+      if (statusNode) { statusNode.dataset.state = 'error'; statusNode.textContent = message; }
+      if (previewNode) previewNode.textContent = '无法预览：' + message;
+      if (finalPreview) finalPreview.textContent = '无法生成最终消息：' + message;
+    }
+    return { openingDay, dirty, bytes };
+  }
+  function writeDraft(next, options = {}) { return openingDraftService.replaceDraft(normalizeDraft(next || {}), options); }
+  function saveDraft(patch, options = {}) { return openingDraftService.patchDraft(patch || {}, options); }
   function packages() { const draft = readDraft(); return Array.isArray(draft.packages) ? draft.packages : []; }
   function enabledPackageMap(draft = readDraft()) { return (draft.enabledPackages && typeof draft.enabledPackages === 'object') ? draft.enabledPackages : {}; }
   function enabledPackages(typeGroup) {
@@ -3993,41 +7542,55 @@
     if (!source) throw new Error('请先选择、导入或打开一个工坊包，再发布/导出。');
     const form = publishForm();
     const createdAt = new Date().toISOString();
+    const title = String(form.title || source.title || source.id).slice(0, 120);
+    const payload = clone(source.payload || {});
+    if (source.cardScope === OPENING_PACKAGE_SCOPE && Array.isArray(payload.worldFactors) && payload.worldFactors.length === 1) {
+      payload.worldFactors[0].title = title;
+      delete payload.factors;
+    }
     return {
       ...source,
-      packageVersion: '1.0.0',
-      id: source.id || safeSlug(form.title || source.title || 'package', 'package-' + Date.now()),
-      type: source.type,
-      cardScope: source.cardScope || 'xingyue',
-      title: String(form.title || source.title || source.id).slice(0, 120),
-      summary: form.summary || source.summary || '星月工坊内容包。导入前请查看影响预览。',
-      authorName: source.authorName || '未署名',
-      tags: Array.isArray(source.tags) ? source.tags : [],
-      rating: form.rating,
-      language: source.language || 'zh-CN',
-      createdAt: source.createdAt || createdAt,
-      updatedAt: createdAt,
-      payload: source.payload,
+      packageVersion:'1.0.0', id:source.id || safeSlug(title || 'package', 'package-' + Date.now()),
+      type:source.type, cardScope:source.cardScope || 'xingyue', title,
+      summary:form.summary || source.summary || '星月工坊内容包。导入前请查看影响预览。',
+      authorName:source.authorName || '未署名', tags:Array.isArray(source.tags) ? source.tags : [],
+      rating:form.rating, language:source.language || 'zh-CN', createdAt:source.createdAt || createdAt, updatedAt:createdAt, payload,
     };
+  }
+  function openingDraftAsPackage() {
+    const draft = normalizeDraft(readDraft());
+    const openingDay = normalizeOpeningDayDraft(draft.openingDay);
+    validateOpeningStory(openingDay.body, { grade:resolveEffectiveGrade(draft).value });
+    const source = isObject(openingDay.sourcePackage) ? openingDay.sourcePackage : {};
+    const title = String(source.title || '我的入学日正文').slice(0, 120);
+    const pkg = {
+      packageVersion:'1.0.0',
+      id:String(source.id || ('opening-' + openingDay.bodyHash.slice(0, 16))),
+      type:'world_factor', cardScope:OPENING_PACKAGE_SCOPE, title,
+      summary:'由 3.4.0 入学日正文编辑器生成的纯文本模板。', authorName:'未署名',
+      tags:['开局正文'], rating:'general', language:'zh-CN',
+      payload:{
+        target:OPENING_PACKAGE_TARGET, schemaVersion:1, compatibility:{ minRuntimeVersion:'3.4.0' },
+        gradeScope:Array.isArray(openingDay.gradeScope) && openingDay.gradeScope.length ? openingDay.gradeScope.slice() : ['all'],
+        worldFactors:[{ title, content:openingDay.body }],
+      },
+    };
+    if (Number.isInteger(Number(source.revision)) && Number(source.revision) >= 1) pkg.revision = Number(source.revision);
+    return validatePackage(pkg, ['world_factor']);
   }
   function identityDraftAsPackage() {
     const draft = readDraft();
-    const identity = String(draft.player_identity || '').trim();
-    if (!identity) return null;
+    if (!userIdentityDraftHasContent(draft)) return null;
+    const payload = buildUserIdentityPayload(draft);
+    const title = payload.identity || payload.callname || (payload.grade ? payload.grade + '身份模板' : (payload.media.avatar || payload.media.portrait ? '媒体身份模板' : '属性身份模板'));
     return {
       type: 'user_identity',
-      id: 'identity-' + safeSlug(identity, 'template'),
-      title: identity,
-      summary: String(draft.player_background || '').slice(0, 120) || ('身份模板 · ' + identity),
+      id: 'identity-' + safeSlug(title, 'template'),
+      title,
+      summary: payload.background.slice(0, 120) || payload.appearance.slice(0, 120) || ('身份模板 · ' + title),
       authorName: '未署名',
       tags: ['身份模板'],
-      payload: {
-        identity,
-        callname: String(draft.player_callname || '').trim(),
-        background: String(draft.player_background || '').trim(),
-        avatar: String(draft.player_avatar || '').trim(),
-        core_attributes: { ...(draft.core_attributes || {}) },
-      },
+      payload,
     };
   }
   function identityPublishForm() {
@@ -4159,17 +7722,59 @@
     };
   }
 
-  function setView(view) {
-    state.view = view;
-    root.dataset.xyOpeningView = view;
-    root.querySelectorAll('[data-xy-view]').forEach(node => { node.hidden = node.dataset.xyView !== view; });
+  let openingScrollSaveTimer = null;
+  function openingScrollSnapshot() {
+    const previous = openingDraftService.readUi().scroll || { root: 0, workshop: 0, panes: {} };
+    const pane = root.querySelector('[data-xy-opening-pane="' + state.step + '"]');
+    const workshopMain = root.querySelector('[data-xy-view="workshop"] .xy-workshop-main');
+    return {
+      ...previous,
+      root: Math.max(0, Number(root.scrollTop) || 0),
+      workshop: Math.max(0, Number(workshopMain?.scrollTop) || 0),
+      panes: { ...(previous.panes || {}), [String(state.step)]: Math.max(0, Number(pane?.scrollTop) || 0) },
+    };
+  }
+  function saveOpeningScroll(options = {}) {
+    if (openingScrollSaveTimer) { clearTimeout(openingScrollSaveTimer); openingTimers.delete(openingScrollSaveTimer); openingScrollSaveTimer = null; }
+    return openingDraftService.patchUi({ scroll: openingScrollSnapshot() }, { immediate: options.immediate === true });
+  }
+  function scheduleOpeningScrollSave() {
+    if (openingScrollSaveTimer) { clearTimeout(openingScrollSaveTimer); openingTimers.delete(openingScrollSaveTimer); }
+    openingScrollSaveTimer = scheduleOpeningTimer(() => {
+      openingScrollSaveTimer = null;
+      openingDraftService.patchUi({ scroll: openingScrollSnapshot() });
+    }, 140);
+  }
+  function restoreOpeningScroll() {
+    const snapshot = openingDraftService.readUi().scroll || {};
+    scheduleOpeningTimer(() => {
+      try { root.scrollTop = Math.max(0, Number(snapshot.root) || 0); } catch (_) {}
+      try {
+        const pane = root.querySelector('[data-xy-opening-pane="' + state.step + '"]');
+        if (pane) pane.scrollTop = Math.max(0, Number(snapshot.panes?.[String(state.step)]) || 0);
+      } catch (_) {}
+      try {
+        const workshopMain = root.querySelector('[data-xy-view="workshop"] .xy-workshop-main');
+        if (workshopMain) workshopMain.scrollTop = Math.max(0, Number(snapshot.workshop) || 0);
+      } catch (_) {}
+    }, 0);
+  }
+  function setView(view, options = {}) {
+    const nextView = ['boot', 'wizard', 'workshop'].includes(view) ? view : 'boot';
+    if (options.savePreviousScroll !== false) saveOpeningScroll({ immediate: true });
+    state.view = nextView;
+    root.dataset.xyOpeningView = nextView;
+    root.querySelectorAll('[data-xy-view]').forEach(node => { node.hidden = node.dataset.xyView !== nextView; });
+    if (options.persist !== false) openingDraftService.patchUi({ view: nextView }, { immediate: true });
     render();
+    if (options.restoreScroll !== false) restoreOpeningScroll();
   }
 
-  function setStep(next) {
+  function setStep(next, options = {}) {
+    if (options.savePreviousScroll !== false) saveOpeningScroll({ immediate: true });
     state.step = Math.max(1, Math.min(6, Number(next) || 1));
     root.dataset.xyOpeningStep = String(state.step);
-    saveDraft({ last_step: state.step });
+    if (options.persist !== false) openingDraftService.patchUi({ step: state.step }, { immediate: true });
     root.querySelectorAll('[data-xy-opening-pane]').forEach(pane => { pane.hidden = Number(pane.dataset.xyOpeningPane) !== state.step; });
     root.querySelectorAll('.xy-step').forEach(button => {
       const active = Number(button.dataset.xyStepTarget) === state.step;
@@ -4178,6 +7783,7 @@
     const progress = root.querySelector('[data-xy-opening-progress]');
     if (progress) progress.style.width = String(state.step * 100 / 6) + '%';
     render();
+    if (options.restoreScroll !== false) restoreOpeningScroll();
   }
 
   function checkDep(id, label, required, test, fix) {
@@ -4321,6 +7927,7 @@
     });
     root.querySelectorAll('[data-xy-choice-group]').forEach(group => {
       const key = group.dataset.xyChoiceGroup;
+      if (key === 'player_identity' || key === 'player_grade') return; // 自由输入是唯一真相源；预设控件只负责填入对应输入框
       const selected = group.querySelector('.xy-choice.selected');
       if (selected) patch[key] = selected.dataset.xyChoiceValue || '';
     });
@@ -4331,9 +7938,126 @@
     return saveDraft(patch);
   }
 
+  function renderIdentityChoiceState(value) {
+    const group = root.querySelector('[data-xy-choice-group="player_identity"]');
+    if (!group) return;
+    const current = String(value || '');
+    group.querySelectorAll('.xy-choice').forEach(button => button.classList.toggle('selected', !!current && button.dataset.xyChoiceValue === current));
+  }
+  function renderGradeControlState(draft = readDraft()) {
+    const grade = normalizeGrade(draft.player_grade);
+    const select = root.querySelector('[data-xy-grade-preset]');
+    const status = root.querySelector('[data-xy-grade-status]');
+    if (select) select.value = GRADE_PRESET_VALUES.includes(grade) ? grade : (grade ? '__custom__' : '');
+    if (status) {
+      const effective = resolveEffectiveGrade(draft);
+      status.textContent = grade ? ('当前年级：' + grade + ' · ' + effective.band) : (effective.fallback ? '未填写；发送时沿用旧版初三兜底，但不会写回草稿' : '未提供年级');
+      status.dataset.state = grade || effective.fallback ? 'ok' : 'warn';
+    }
+  }
+  function personaDiffText(rows) {
+    if (!rows.length) return '当前草稿与 Persona 星月结构块内容一致。';
+    return rows.map(row => row.field + '\n  当前：' + (row.current || '（空）') + '\n  Persona：' + (row.persona || '（空）')).join('\n\n');
+  }
+  function currentPersonaSnapshot() {
+    return resolveActivePersonaSnapshot(getSillyTavernContext(), hostDocument());
+  }
+  function renderPersonaStatus() {
+    const card = root.querySelector('[data-xy-persona-sync]');
+    const label = root.querySelector('[data-xy-persona-status]');
+    const detail = root.querySelector('[data-xy-persona-detail]');
+    const importButton = root.querySelector('[data-xy-opening-action="import-current-persona"]');
+    const syncButton = root.querySelector('[data-xy-opening-action="sync-current-persona"]');
+    if (!card || !label) return null;
+    const snapshot = currentPersonaSnapshot();
+    state.personaSnapshot = snapshot;
+    state.personaFingerprint = personaSnapshotFingerprint(snapshot);
+    if (!snapshot.resolved) {
+      card.dataset.state = 'error';
+      label.textContent = snapshot.reason || '当前 Persona 不可用';
+      if (detail) detail.textContent = snapshot.ambiguous ? '请在 ST 笑脸 Persona 列表中明确选中唯一项后重试。' : '可继续使用本地草稿；不会自动导入或清空。';
+      if (importButton) importButton.disabled = true;
+      if (syncButton) syncButton.disabled = true;
+      return snapshot;
+    }
+    const parsed = parsePersonaIdentityBlock(snapshot.description);
+    const blockReady = parsed.found && parsed.valid && !parsed.multiple && parsed.count === 1;
+    card.dataset.state = parsed.valid ? (blockReady ? 'ok' : 'warn') : 'error';
+    label.textContent = '当前 Persona：' + (snapshot.name || snapshot.id);
+    if (detail) {
+      detail.textContent = !parsed.found
+        ? '尚无星月结构块；可把当前草稿同步追加到 Persona。'
+        : (!parsed.valid ? ('结构块无效：' + (parsed.errors?.[0]?.message || '无法解析'))
+          : (parsed.multiple ? '检测到多个星月结构块；同步时可合并为一个规范块。'
+            : ('结构块有效 · 年级 ' + parsed.gradeLabel + ' · SHA-256 ' + parsed.contentHash.slice(0, 12) + '…' + (snapshot.position === PERSONA_DESCRIPTION_DISABLED_POSITION ? ' · 当前注入已禁用' : ''))));
+    }
+    if (importButton) importButton.disabled = !blockReady;
+    if (syncButton) syncButton.disabled = false;
+    return snapshot;
+  }
+  function closePersonaImportDialog() {
+    const modal = root.querySelector('[data-xy-persona-import-modal]');
+    if (modal) modal.hidden = true;
+    state.pendingPersonaImport = null;
+  }
+  function openPersonaImportDialog() {
+    const snapshot = currentPersonaSnapshot();
+    if (!snapshot.resolved) throw new Error(snapshot.reason || '当前 Persona 无法唯一定位');
+    const parsed = parsePersonaIdentityBlock(snapshot.description);
+    if (!parsed.found) throw new Error('当前 Persona 没有星月结构块');
+    if (!parsed.valid || parsed.multiple || parsed.count !== 1) throw new Error(parsed.multiple ? '当前 Persona 有多个结构块，请先同步合并' : (parsed.errors?.[0]?.message || 'Persona 结构块无效'));
+    const rows = userIdentityPayloadDiff(readDraft(), parsed.payload, parsed.rawPayload);
+    state.pendingPersonaImport = { snapshot, parsed, rows };
+    const modal = root.querySelector('[data-xy-persona-import-modal]');
+    const title = root.querySelector('[data-xy-persona-import-title]');
+    const diff = root.querySelector('[data-xy-persona-import-diff]');
+    if (title) title.textContent = '从 Persona 导入 · ' + snapshot.name;
+    if (diff) diff.textContent = personaDiffText(rows);
+    if (modal) modal.hidden = false;
+  }
+  function applyPendingPersonaImport(mode) {
+    if (mode === 'cancel') { closePersonaImportDialog(); return; }
+    const pending = state.pendingPersonaImport;
+    if (!pending) throw new Error('没有待导入的 Persona 内容');
+    const current = currentPersonaSnapshot();
+    if (!current.resolved || current.id !== pending.snapshot.id || current.fingerprint !== pending.snapshot.fingerprint) throw new Error('Persona 已切换或内容已变化，请重新打开导入');
+    const merged = mergePersonaIdentityIntoDraft(readDraft(), pending.parsed, mode);
+    writeDraft(merged, { immediate:true });
+    closePersonaImportDialog();
+    applyDraftToFields();
+    renderWizard({ collect:false });
+    toast('success', mode === 'replace' ? '已用 Persona 全部替换身份草稿' : '已从 Persona 填入草稿空项');
+  }
+  async function syncCurrentDraftToPersona() {
+    const draft = collectFields();
+    if (!userIdentityDraftHasContent(draft)) throw new Error('当前身份草稿为空，无法同步到 Persona');
+    const snapshot = currentPersonaSnapshot();
+    if (!snapshot.resolved) throw new Error(snapshot.reason || '当前 Persona 无法唯一定位');
+    const parsed = parsePersonaIdentityBlock(snapshot.description);
+    if (parsed.found && (!parsed.valid || parsed.matchedCount !== parsed.count)) throw new Error(parsed.errors?.[0]?.message || 'Persona 结构块无效');
+    const payload = buildUserIdentityPayload(draft);
+    const replacement = replacePersonaIdentityBlocks(snapshot.description, payload);
+    if (replacement.description === snapshot.description || (parsed.count === 1 && parsed.contentHash === replacement.contentHash)) {
+      toast('info', 'Persona 星月结构块内容已一致，无需更新');
+      renderPersonaStatus();
+      return;
+    }
+    const rows = parsed.found ? userIdentityPayloadDiff(draft, parsed.payload) : [];
+    const prompt = replacement.mode === 'merge'
+      ? '检测到多个星月结构块。确认合并为一个规范块？块外原有人设文本和 descriptor 其他字段将保持不变。'
+      : (replacement.mode === 'replace'
+        ? 'Persona 中已有不同的星月结构块。确认只替换该结构块？\n\n' + personaDiffText(rows)
+        : 'Persona 中尚无星月结构块。确认追加当前身份草稿？');
+    if (!confirm(prompt)) return;
+    await writeActivePersonaDescription(snapshot, replacement.description);
+    state.personaFingerprint = '';
+    renderPersonaStatus();
+    renderPlayerFacingText();
+    toast('success', replacement.mode === 'merge' ? '已合并并同步 Persona 星月结构块' : '已同步到当前 Persona');
+  }
   function applyDraftToFields() {
     const draft = normalizeDraft(readDraft());
-    root.querySelectorAll('[data-xy-opening-field]').forEach(input => { if (draft[input.dataset.xyOpeningField] !== undefined) input.value = draft[input.dataset.xyOpeningField] || ''; });
+    root.querySelectorAll('[data-xy-opening-field]').forEach(input => { input.value = draft[input.dataset.xyOpeningField] ?? ''; });
     root.querySelectorAll('[data-xy-choice-group]').forEach(group => {
       const key = group.dataset.xyChoiceGroup;
       const value = draft[key] || (key === 'opening_mode' ? 'enrollment_day' : '');
@@ -4346,7 +8070,51 @@
     });
     renderAttributes(draft);
     renderAvatar(draft);
+    renderGradeControlState(draft);
+    renderPersonaStatus();
+    renderOpeningDayEditor(draft);
   }
+  function flushOpeningRootState() {
+    try { saveOpeningScroll({ immediate: true }); } catch (_) {}
+    try { captureOpeningDayField({ immediate: true }); } catch (_) {}
+    try { collectFields(); } catch (_) {}
+    try { openingDraftService.flushSync(); } catch (_) {}
+  }
+  function refreshOpeningContext() {
+    const ui = openingDraftService.readUi();
+    state.step = Math.max(1, Math.min(6, Number(ui.step) || 1));
+    state.view = ['boot', 'wizard', 'workshop'].includes(ui.view) ? ui.view : 'boot';
+    applyDraftToFields();
+    setStep(state.step, { persist: false, savePreviousScroll: false, restoreScroll: false });
+    setView(state.view, { persist: false, savePreviousScroll: false, restoreScroll: false });
+    renderPlayerFacingText();
+    restoreOpeningScroll();
+  }
+  root.__xyOpeningFlushState = flushOpeningRootState;
+  root.__xyOpeningRefreshContext = refreshOpeningContext;
+  root.__xyOpeningRefreshWorkshop = async () => {
+    await refreshWorkshopAuth();
+    await refreshWorkshop();
+  };
+  root.__xyOpeningRefreshPlayer = () => {
+    renderPlayerFacingText();
+    renderPersonaStatus();
+    renderOpeningDayEditor(readDraft());
+  };
+  const personaPollTimer = setInterval(() => {
+    if (openingAbort?.signal?.aborted) return;
+    if (root.isConnected === false) {
+      try { openingAbort?.abort?.(); } catch (_) { clearInterval(personaPollTimer); }
+      return;
+    }
+    const fingerprint = personaSnapshotFingerprint(currentPersonaSnapshot());
+    if (fingerprint === state.personaFingerprint) return;
+    state.personaFingerprint = fingerprint;
+    renderPersonaStatus();
+    renderPlayerFacingText();
+    renderOpeningDayEditor(readDraft());
+  }, 1000);
+  try { openingAbort?.signal?.addEventListener('abort', () => clearInterval(personaPollTimer), { once:true }); } catch (_) {}
   function attributeTotal(attrs) {
     return ATTRIBUTE_KEYS.reduce((sum, key) => sum + (Number(attrs?.[key]) || 0), 0);
   }
@@ -4403,32 +8171,91 @@
     }).join('');
     svg.innerHTML = web + axes + '<polygon points="' + points.map(point => point.map(n => n.toFixed(1)).join(',')).join(' ') + '" fill="rgba(244,165,215,.28)" stroke="#ffd47a" stroke-width="2"/><circle cx="' + cx + '" cy="' + cy + '" r="2" fill="#ffd47a"/>';
   }
-  function renderAvatar(draft = readDraft()) {
-    const preview = root.querySelector('[data-xy-avatar-preview]');
-    const label = root.querySelector('[data-xy-avatar-label]');
-    if (!preview) return;
-    const avatar = String(draft.player_avatar || '').trim();
-    if (!avatar) {
-      preview.textContent = '未选择';
-      if (label) label.textContent = '可使用媒体库、本地图片或图床 URL。';
-      return;
-    }
-    // 任务4.1：非 URL 时按统一协议（bond/avatar/normal/{{user}}）查媒体库；取不到时显示占位文字，不贴裸 key
-    let src = '';
-    if (/^(https?:\/\/|data:image)/i.test(avatar)) {
-      src = avatar;
-    } else {
-      try {
-        const asset = mediaLibrary()?.getExactAsset({ type: 'bond', slot: 'avatar', name: '{{user}}', variant: 'normal' });
-        src = (asset && (asset.dataUrl || asset.url || asset.src)) || '';
-      } catch (_) {}
-    }
-    if (src) {
-      preview.innerHTML = '<img src="' + escapeHtml(src) + '" alt="">';
-    } else {
-      preview.textContent = '已选头像（媒体库）';
-    }
-    if (label) label.textContent = avatar;
+  function identityMediaField(slot) { return slot === 'portrait' ? 'player_portrait' : 'player_avatar'; }
+  function identityMediaLabel(slot) { return slot === 'portrait' ? '立绘' : '头像'; }
+  function identityMediaMeta(slot) { return { type:'bond', slot:slot === 'portrait' ? 'portrait' : 'avatar', name:'{{user}}', variant:'normal' }; }
+  function resolveIdentityMediaReference(reference, slot) {
+    const normalized = normalizeIdentityMediaReference(reference);
+    if (!normalized) return null;
+    if (/^https?:\/\//i.test(normalized)) return { key:normalized, src:normalized, displayName:normalized, external:true };
+    try {
+      const lib = mediaLibrary();
+      const exact = lib?.listManagedAssets?.().find(item => String(item?.key || '') === normalized);
+      if (exact) return { ...exact, src: exact.dataUrl || exact.url || exact.src || '' };
+      const fallback = lib?.getExactAsset?.(identityMediaMeta(slot));
+      if (fallback && String(fallback.key || '') === normalized) return { ...fallback, src:fallback.dataUrl || fallback.url || fallback.src || '' };
+    } catch (_) {}
+    return { key:normalized, src:'', displayName:normalized };
+  }
+  function setIdentityMediaReference(slot, reference) {
+    const field = identityMediaField(slot);
+    const value = normalizeIdentityMediaReference(reference);
+    saveDraft({ [field]: value });
+    const input = root.querySelector('[data-xy-opening-field="' + field + '"]');
+    if (input) input.value = value;
+    renderIdentityMedia(readDraft());
+    renderWizard();
+    return value;
+  }
+  function selectIdentityMediaReference(slot, reference) {
+    const key = normalizeIdentityMediaReference(reference);
+    if (!key) throw new Error('请先选择媒体库资源');
+    return setIdentityMediaReference(slot, key);
+  }
+  function clearIdentityMediaReference(slot) {
+    return setIdentityMediaReference(slot, '');
+  }
+  async function importIdentityMediaUrl(slot, url) {
+    const sourceUrl = String(url || '').trim();
+    if (!sourceUrl) throw new Error('请先输入图片 URL');
+    const lib = mediaLibrary();
+    if (!lib?.importUrlAsset) throw new Error('媒体库 URL 导入 API 未就绪');
+    const item = await lib.importUrlAsset(sourceUrl, identityMediaMeta(slot));
+    if (!item?.key) throw new Error('媒体库未返回可保存引用');
+    return setIdentityMediaReference(slot, item.key);
+  }
+  async function importIdentityMediaLocal(slot) {
+    const lib = mediaLibrary();
+    if (!lib?.requestLocalImport) throw new Error('媒体库导入 API 未就绪');
+    const item = await lib.requestLocalImport(identityMediaMeta(slot));
+    return item?.key ? setIdentityMediaReference(slot, item.key) : '';
+  }
+  function renderIdentityMedia(draft = readDraft()) {
+    ['avatar','portrait'].forEach(slot => {
+      const card = root.querySelector('[data-xy-identity-media="' + slot + '"]');
+      if (!card) return;
+      const reference = normalizeIdentityMediaReference(draft[identityMediaField(slot)]);
+      const item = resolveIdentityMediaReference(reference, slot);
+      const preview = card.querySelector('[data-xy-identity-media-preview]');
+      const label = card.querySelector('[data-xy-identity-media-label]');
+      if (preview) {
+        if (item?.src) preview.innerHTML = '<img src="' + escapeHtml(item.src) + '" alt="' + identityMediaLabel(slot) + '预览">';
+        else preview.textContent = reference ? '引用已保存' : '未选择';
+      }
+      if (label) label.textContent = reference ? (item?.displayName || reference) : '媒体库、本地图片或 URL';
+    });
+  }
+  function renderAvatar(draft = readDraft()) { renderIdentityMedia(draft); }
+  function renderIdentityMediaPicker() {
+    const modal = root.querySelector('[data-xy-identity-media-modal]');
+    if (!modal || modal.hidden) return;
+    const slot = state.identityMediaSlot === 'portrait' ? 'portrait' : 'avatar';
+    const title = modal.querySelector('[data-xy-identity-media-title]');
+    const input = modal.querySelector('[data-xy-identity-media-url]');
+    const filterInput = modal.querySelector('[data-xy-identity-media-filter]');
+    const list = modal.querySelector('[data-xy-identity-media-list]');
+    if (title) title.textContent = '选择' + identityMediaLabel(slot);
+    if (input) input.placeholder = 'https://.../' + slot + '.png';
+    if (!list) return;
+    const query = String(filterInput?.value || '').trim().toLocaleLowerCase();
+    let assets = [];
+    try { assets = mediaLibrary()?.listManagedAssets?.() || []; } catch (_) {}
+    assets = assets.filter(item => item?.slot === slot).filter(item => !query || [item.name,item.displayName,item.key].some(value => String(value || '').toLocaleLowerCase().includes(query)));
+    if (!assets.length) { list.innerHTML = '<div class="xy-identity-media-empty">当前媒体库没有匹配的' + identityMediaLabel(slot) + '。可从本地或 URL 导入。</div>'; return; }
+    list.innerHTML = assets.map(item => {
+      const src = item.dataUrl || item.url || item.src || '';
+      return '<button type="button" class="xy-identity-media-option" data-xy-opening-action="select-identity-media" data-key="' + escapeHtml(item.key || '') + '"><span class="xy-identity-media-option-preview">' + (src ? '<img src="' + escapeHtml(src) + '" alt="">' : '无预览') + '</span><strong>' + escapeHtml(item.displayName || item.name || item.key) + '</strong><small>' + escapeHtml(item.builtIn ? '内置媒体' : '本地媒体') + '</small></button>';
+    }).join('');
   }
   function renderEnableLists() {
     const draft = readDraft();
@@ -4453,6 +8280,7 @@
       node.textContent = items.length ? items.map(pkg => '[' + packageTypeLabel(pkg.type) + '] ' + pkg.title + '\n' + (pkg.summary || '')).join('\n\n') : '暂无启用内容。';
     });
     renderWorldFactorList();
+    renderPlayerFacingText();
   }
   function renderWorldFactorList() {
     const box = root.querySelector('[data-xy-world-factor-list]');
@@ -4470,8 +8298,11 @@
   function summaryText(draft) {
     const lines = [];
     lines.push('身份：' + (draft.player_identity || '未填写'));
+    const effectiveGrade = resolveEffectiveGrade(draft);
+    lines.push('年级：' + effectiveGrade.label);
     if (draft.player_callname) lines.push('称呼：' + draft.player_callname);
     if (draft.player_avatar) lines.push('玩家头像：' + draft.player_avatar);
+    if (draft.player_portrait) lines.push('玩家立绘：' + draft.player_portrait);
     if (draft.core_attributes) lines.push('核心属性：' + ATTRIBUTE_KEYS.map(key => key + ' ' + (draft.core_attributes[key] ?? 0)).join(' / '));
     if (draft.player_background) lines.push('背景：' + draft.player_background);
     if (draft.player_appearance) lines.push('外貌：' + draft.player_appearance);
@@ -4494,7 +8325,7 @@
     const cc = controlCenter();
     const preview = cc?.previewOpeningWrites ? cc.previewOpeningWrites(draft) : { identity: '', worldFactor: draft.custom_world_factor || '', workshopEntries: [] };
     const lines = [
-      '写入目标：聊天世界书',
+      '写入目标：角色卡绑定世界书',
       '写入边界：--/星月工坊开始 与 --/星月工坊结束 之间',
       '写入方式：只整理开局与工坊条目，角色状态仍由正文与变量系统自然推进',
       '',
@@ -4520,7 +8351,7 @@
       return '[' + packageTypeLabel(pkg.type) + '] ' + pkg.title + '\n' +
         'id: ' + pkg.id + '\n' +
         '状态：' + on + '\n' +
-        '写入：启用后进入聊天世界书 / 星月工坊边界内\n' +
+        '写入：启用后进入角色卡绑定世界书 / 星月工坊边界内\n' +
         '摘要：' + (pkg.summary || '无');
     }).join('\n\n');
   }
@@ -4553,8 +8384,9 @@
     list.innerHTML = pkgs.map(pkg => '<div class="xy-draft-item"><span>' + escapeHtml('[' + packageTypeLabel(pkg.type) + '] ' + pkg.title) + '</span><button type="button" data-xy-opening-action="remove-workshop-package" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type) + '">移除</button></div>').join('');
   }
 
-  function renderWizard() {
-    const draft = collectFields();
+  function renderWizard(options = {}) {
+    const draft = options.collect === false ? normalizeDraft(readDraft()) : collectFields();
+    renderIdentityChoiceState(draft.player_identity);
     const summary = root.querySelector('[data-xy-opening-summary]');
     if (summary) summary.textContent = summaryText(draft);
     const preview = root.querySelector('[data-xy-opening-preview]');
@@ -4564,6 +8396,9 @@
     renderAttributes(draft);
     renderAvatar(draft);
     renderEnableLists();
+    renderOpeningDayEditor(draft);
+    renderPersonaStatus();
+    renderPlayerFacingText();
   }
 
   function renderConfirmRail(draft) {
@@ -4577,6 +8412,7 @@
     const extensionCount = enabledPackages('extension').length;
     rail.innerHTML = [
       '<div class="xy-preview-card"><strong>身份</strong><span>' + escapeHtml(draft.player_identity || '未填写') + '</span></div>',
+      '<div class="xy-preview-card"><strong>年级</strong><span>' + escapeHtml(resolveEffectiveGrade(draft).label) + '</span></div>',
       '<div class="xy-preview-card"><strong>世界因子</strong><span>' + worldFactorCount + ' 条待写入/预览</span></div>',
       '<div class="xy-preview-card"><strong>工坊包</strong><span>' + pkgCount + ' 个已启用</span></div>',
       '<div class="xy-preview-card"><strong>扩展包</strong><span>' + extensionCount + ' 个已启用</span></div>',
@@ -4647,10 +8483,12 @@
     grid.classList.toggle('single', state.workshopLoading || !items.length);
     if (state.workshopLoading) {
       grid.innerHTML = '<div class="xy-empty-state"><h4>正在读取创意工坊</h4><p>若连接暂时失败，可继续使用本地 JSON 或本地示例。</p></div>';
+      renderPlayerFacingText();
       return;
     }
     if (!items.length) {
       grid.innerHTML = renderEmptyWorkshopState(source.length, items.length);
+      renderPlayerFacingText();
       return;
     }
     grid.classList.remove('single');
@@ -4663,15 +8501,19 @@
       const voteBar = '<div class="xy-vote-bar"><button type="button" class="xy-vote' + (myVote === 'up' ? ' on' : '') + '" data-xy-opening-action="vote-package" data-id="' + escapeHtml(pkg.id) + '" data-vote="up" aria-label="点赞">▲ ' + (votes.up || 0) + '</button><button type="button" class="xy-vote' + (myVote === 'down' ? ' on' : '') + '" data-xy-opening-action="vote-package" data-id="' + escapeHtml(pkg.id) + '" data-vote="down" aria-label="点踩">▼ ' + (votes.down || 0) + '</button></div>';
       return '<article class="xy-package"><h4>' + escapeHtml(pkg.title || pkg.id) + '</h4><p>' + escapeHtml(pkg.summary || '暂无摘要') + '</p><div class="xy-package-meta"><span class="xy-pill">' + escapeHtml(meta) + '</span>' + tags + '</div><p>作者：' + escapeHtml(pkg.authorName || '未署名') + ' · 更新：' + escapeHtml(pkg.updatedAt || pkg.createdAt || '未知') + '</p>' + voteBar + '<div class="xy-package-actions"><button type="button" data-xy-opening-action="show-package-detail" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '">详情</button><button type="button" data-xy-opening-action="download-package" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '">下载缓存</button>' + withdraw + '</div></article>';
     }).join('');
+    renderPlayerFacingText();
   }
 
   function renderPackageDetail(pkg, detailText) {
     const modal = root.querySelector('[data-xy-package-modal]');
     if (!modal) return;
-    root.querySelector('[data-xy-package-title]').textContent = pkg?.title || '工坊包详情';
-    root.querySelector('[data-xy-package-subtitle]').textContent = '[' + packageTypeLabel(pkg?.type) + '] ' + (pkg?.summary || '');
+    root.querySelector('[data-xy-package-title]').textContent = resolvePlayerText(pkg?.title || '工坊包详情');
+    root.querySelector('[data-xy-package-subtitle]').textContent = resolvePlayerText('[' + packageTypeLabel(pkg?.type) + '] ' + (pkg?.summary || ''));
     root.querySelector('[data-xy-package-detail]').textContent = detailText;
+    const openingPackage = pkg?.cardScope === 'xingyue-opening-v1' && pkg?.payload?.target === 'xingyue.opening_day_body';
+    root.querySelectorAll('[data-xy-opening-package-action]').forEach(button => { button.hidden = !openingPackage; });
     modal.hidden = false;
+    renderPlayerFacingText();
   }
 
   function impactPreview(pkg) {
@@ -4681,10 +8523,10 @@
     lines.push('评级：' + (pkg.rating || 'general'));
     lines.push('适用范围：' + (pkg.cardScope || 'xingyue'));
     lines.push('');
-    lines.push('安装位置：聊天世界书');
+    lines.push('安装位置：角色卡绑定世界书');
     lines.push('重复导入：覆盖同 ID 的旧版本');
     lines.push('');
-    lines.push('摘要：' + (pkg.summary || '无'));
+    lines.push('摘要：' + resolvePlayerText(pkg.summary || '无'));
     if (pkg.tags?.length) lines.push('标签：' + pkg.tags.join('、'));
     lines.push('');
     lines.push('payload 预览：');
@@ -4740,11 +8582,13 @@
 
   async function importPackageObject(pkg, allowedTypes) {
     const cc = controlCenter();
-    const imported = cc?.importPackage ? await cc.importPackage(pkg, { allowedTypes: allowedTypes || [] }) : pkg;
-    // 任务4.8：统一走 importPackageToDraft 的选择性启用逻辑（user_identity 自动启用，其余默认 false），
-    // 删除原先强制 enabledPackages[key]=true（会绕过选择性策略导致所有类型包均强制启用）
-    if (cc?.importPackageToDraft) {
-      cc.importPackageToDraft(imported);
+    let imported = pkg;
+    if (cc?.importPackage) {
+      // importPackage 已包含 validate + importPackageToDraft，禁止在 UI 层重复导入。
+      imported = await cc.importPackage(pkg, { allowedTypes: allowedTypes || [] });
+    } else if (cc?.importPackageToDraft) {
+      cc.importPackageToDraft(pkg);
+      imported = pkg;
     } else {
       const draft = readDraft();
       const key = packageIdentity(imported);
@@ -4753,7 +8597,10 @@
       if (draft.enabledPackages[key] === undefined) draft.enabledPackages[key] = imported.type === 'user_identity';
       writeDraft(draft);
     }
+    // 导入身份后先把新草稿回填 DOM，再允许 renderWizard 采集，避免旧表单值反向覆盖导入结果。
+    if (imported?.type === 'user_identity') applyDraftToFields();
     toast('success', '已导入：' + imported.title);
+    renderWizard({ collect:false });
     render();
     return imported;
   }
@@ -4762,8 +8609,19 @@
     if (!cc?.installPackageToWorldbook) throw new Error('控制中心世界书安装 API 未就绪');
     const result = await cc.installPackageToWorldbook(pkg, { allowedTypes: allowedTypes || [] });
     if (result?.warning) toast('info', result.warning);
-    else toast('success', '已安装到聊天世界书：' + (pkg.title || pkg.id));
+    else toast('success', '已安装到角色卡绑定世界书：' + (pkg.title || pkg.id));
     return result;
+  }
+  async function installPackageObjectWithDecision(pkg, allowedTypes) {
+    try { return await installPackageObject(pkg, allowedTypes); }
+    catch (error) {
+      if (error?.code !== 'workshop-dirty-decision-required') throw error;
+      const answer = String(hostWindow().prompt?.('检测到本地编辑。请输入：覆盖 / 保留 / 脱离（取消则不更新）', '保留') || '').trim();
+      const map = { 覆盖:'overwrite', 保留:'keep', 脱离:'detach', overwrite:'overwrite', keep:'keep', detach:'detach' };
+      const dirtyDecision = map[answer];
+      if (!dirtyDecision) throw new Error('已取消更新，本地内容未改变');
+      return controlCenter().installPackageToWorldbook(pkg, { allowedTypes:allowedTypes || [], dirtyDecision });
+    }
   }
 
   async function importLocalPackage(allowedTypes) {
@@ -4789,9 +8647,16 @@
     updateWorkshopStatusPills();
     if (state.view === 'wizard') renderWizard();
     renderWorkshop();
+    renderPlayerFacingText();
   }
 
   root.addEventListener('input', event => {
+    if (event.target.matches('[data-xy-opening-story-body]')) {
+      saveOpeningDayBody(event.target.value);
+      renderOpeningDayEditor(readDraft());
+      return;
+    }
+    if (event.target.matches('[data-xy-identity-media-filter]')) { renderIdentityMediaPicker(); return; }
     if (event.target.matches('[data-xy-opening-field]')) renderWizard();
     if (event.target.matches('[data-xy-attribute]')) {
       // #4：拖动时只做轻量更新（数值/总计/雷达），不调 setAttributes/renderAttributes——
@@ -4824,6 +8689,15 @@
   }, openingListenerOptions);
 
   root.addEventListener('change', event => {
+    if (event.target.matches('[data-xy-grade-preset]')) {
+      const input = root.querySelector('[data-xy-opening-field="player_grade"]');
+      const value = event.target.value || '';
+      if (value === '__custom__') { input?.focus?.(); return; }
+      if (input) input.value = value;
+      saveDraft({ player_grade:normalizeGrade(value) });
+      renderWizard({ collect:false });
+      return;
+    }
     if (event.target.matches('[data-xy-attribute]')) {
       // #4：拖拽结束做一次完整同步（重建滑块反映钳值 + 刷新右侧预览）。
       renderAttributes(readDraft());
@@ -4853,6 +8727,10 @@
     }
   }, openingListenerOptions);
 
+  root.addEventListener('scroll', () => scheduleOpeningScrollSave(), openingAbort
+    ? { capture: true, passive: true, signal: openingAbort.signal }
+    : { capture: true, passive: true });
+
   root.addEventListener('click', async event => {
     const choice = event.target.closest('.xy-choice');
     if (choice && root.contains(choice)) {
@@ -4877,6 +8755,11 @@
     const action = button.dataset.xyOpeningAction;
 
     try {
+      if (action === 'import-current-persona') openPersonaImportDialog();
+      if (action === 'sync-current-persona') await syncCurrentDraftToPersona();
+      if (action === 'persona-import-replace') applyPendingPersonaImport('replace');
+      if (action === 'persona-import-fill') applyPendingPersonaImport('fill-empty');
+      if (action === 'persona-import-cancel') applyPendingPersonaImport('cancel');
       if (action === 'check-deps') runDependencyChecks();
       if (action === 'enter-entry') {
         if (!setAgreementState()) throw new Error('请先勾选协议确认');
@@ -4932,6 +8815,27 @@
         }
       }
       if (action === 'refresh-workshop') await refreshWorkshop();
+      if (action === 'export-opening-package') {
+        captureOpeningDayField({ immediate:true });
+        const pkg = openingDraftAsPackage();
+        downloadJson(pkg.id + '.json', pkg);
+        toast('success', '已导出开局正文模板包');
+      }
+      if (action === 'prepare-opening-package') {
+        captureOpeningDayField({ immediate:true });
+        const pkg = openingDraftAsPackage();
+        state.selectedPackage = pkg;
+        state.selectedAllowedTypes = ['world_factor'];
+        state.returnView = state.view === 'wizard' ? 'wizard' : 'boot';
+        state.workshopTab = 'mine';
+        setView('workshop');
+        const titleInput = root.querySelector('[data-xy-publish-title]');
+        const summaryInput = root.querySelector('[data-xy-publish-summary]');
+        if (titleInput) titleInput.value = pkg.title;
+        if (summaryInput) summaryInput.value = pkg.summary;
+        renderWorkshop();
+        toast('info', '已生成规范 JSON；请核对标题、摘要与详情后发布');
+      }
       if (action === 'open-identity-publish') {
         const src = identityDraftAsPackage();
         if (!src) throw new Error('请先填写身份补充，再发布身份模板');
@@ -4957,6 +8861,18 @@
         if (!cc?.publishPackage) throw new Error('控制中心发布 API 未就绪');
         const pkg = buildIdentityPackage();
         if (!pkg) throw new Error('请先填写身份补充，再发布身份模板');
+        const mediaValues = [pkg.payload?.media?.avatar, pkg.payload?.media?.portrait].filter(Boolean);
+        const localMedia = mediaValues.filter(value => !/^https?:\/\//i.test(String(value)));
+        if (localMedia.length) {
+          const keep = confirm('身份模板包含本地媒体库 key，其他玩家可能无法显示。\n\n确定：保留媒体并发布\n取消：进入“移除媒体后发布 / 取消”');
+          if (!keep) {
+            const portablePayload = clone(pkg.payload);
+            portablePayload.media = { avatar:'', portrait:'' };
+            if (!userIdentityPayloadHasContent(portablePayload)) throw new Error('该身份模板只有媒体内容，不能移除后发布；请先补充至少一项文字或非零属性');
+            if (!confirm('是否移除头像与立绘引用后继续发布？取消将终止发布。')) return;
+            pkg.payload = portablePayload;
+          }
+        }
         await cc.publishPackage(pkg);
         toast('success', '身份模板已提交发布');
         const modal = root.querySelector('[data-xy-identity-publish-modal]');
@@ -5133,48 +9049,62 @@
         await importPackageObject(state.selectedPackage, state.selectedAllowedTypes);
         root.querySelector('[data-xy-package-modal]').hidden = true;
       }
-      if (action === 'open-avatar-modal') {
-        root.querySelector('[data-xy-avatar-modal]').hidden = false;
+      if (action === 'install-selected-package') {
+        if (!state.selectedPackage) throw new Error('未选择工坊包');
+        await installPackageObjectWithDecision(state.selectedPackage, state.selectedAllowedTypes);
+        root.querySelector('[data-xy-package-modal]').hidden = true;
       }
-      if (action === 'close-avatar-modal') {
-        root.querySelector('[data-xy-avatar-modal]').hidden = true;
+      if (action === 'apply-selected-opening-package') {
+        if (!state.selectedPackage) throw new Error('未选择工坊包');
+        const cc = controlCenter();
+        const plan = await cc.previewApplyOpeningPackage(state.selectedPackage);
+        const diff = openingStoryDiffText(plan.nextBody, plan.currentBody);
+        if (!confirm('应用到本局只会替换当前聊天草稿，不写 MVU、不改消息、不自动发送。\n\n' + diff + '\n\n确认应用？')) return;
+        await cc.applyOpeningPackageToDraft(plan);
+        applyDraftToFields();
+        renderWizard({ collect:false });
+        root.querySelector('[data-xy-package-modal]').hidden = true;
+        toast('success', '已把正文模板应用到当前聊天草稿');
       }
-      if (action === 'clear-avatar') {
-        saveDraft({ player_avatar: '' });
-        const input = root.querySelector('[data-xy-opening-field="player_avatar"]');
-        if (input) input.value = '';
-        root.querySelector('[data-xy-avatar-modal]').hidden = true;
-        render();
+      if (action === 'uninstall-selected-package') {
+        if (!state.selectedPackage) throw new Error('未选择工坊包');
+        if (!confirm('只卸载这个包的本地来源记录；当前聊天正文、其他包、身份与世界因子都会保留。确认？')) return;
+        await controlCenter().uninstallWorkshopPackage(state.selectedPackage);
+        root.querySelector('[data-xy-package-modal]').hidden = true;
+        renderWizard({ collect:false });
+        toast('success', '已卸载本地来源；当前正文已保留并脱离来源');
       }
-      if (action === 'use-avatar-url') {
-        const url = root.querySelector('[data-xy-avatar-url]')?.value?.trim();
-        if (!url) throw new Error('请先输入头像 URL');
-        saveDraft({ player_avatar: url });
-        const input = root.querySelector('[data-xy-opening-field="player_avatar"]');
-        if (input) input.value = url;
-        root.querySelector('[data-xy-avatar-modal]').hidden = true;
-        render();
+      if (action === 'open-avatar-modal' || action === 'open-identity-media') {
+        state.identityMediaSlot = button.dataset.slot === 'portrait' ? 'portrait' : 'avatar';
+        const modal = root.querySelector('[data-xy-identity-media-modal]');
+        if (modal) { modal.hidden = false; renderIdentityMediaPicker(); }
       }
-      if (action === 'use-avatar-key') {
-        const key = root.querySelector('[data-xy-avatar-key]')?.value?.trim();
-        if (!key) throw new Error('请先输入媒体库键');
-        saveDraft({ player_avatar: key });
-        const input = root.querySelector('[data-xy-opening-field="player_avatar"]');
-        if (input) input.value = key;
-        root.querySelector('[data-xy-avatar-modal]').hidden = true;
-        render();
+      if (action === 'close-avatar-modal' || action === 'close-identity-media') {
+        const modal = root.querySelector('[data-xy-identity-media-modal]');
+        if (modal) modal.hidden = true;
       }
-      if (action === 'import-avatar-local') {
-        const lib = mediaLibrary();
-        if (!lib?.requestLocalImport) throw new Error('媒体库导入 API 未就绪');
-        const item = await lib.requestLocalImport({ type: 'bond', slot: 'avatar', name: '{{user}}', variant: 'normal' });
-        if (item?.dataUrl || item?.url || item?.key) {
-          const value = item.key || item.url || item.dataUrl;
-          saveDraft({ player_avatar: value });
-          const input = root.querySelector('[data-xy-opening-field="player_avatar"]');
-          if (input) input.value = value;
-          root.querySelector('[data-xy-avatar-modal]').hidden = true;
-          render();
+      if (action === 'select-identity-media' || action === 'use-avatar-key') {
+        const key = button.dataset.key || root.querySelector('[data-xy-avatar-key]')?.value?.trim();
+        selectIdentityMediaReference(state.identityMediaSlot, key);
+        const modal = root.querySelector('[data-xy-identity-media-modal]');
+        if (modal) modal.hidden = true;
+      }
+      if (action === 'clear-avatar' || action === 'clear-identity-media') {
+        clearIdentityMediaReference(state.identityMediaSlot);
+        const modal = root.querySelector('[data-xy-identity-media-modal]');
+        if (modal) modal.hidden = true;
+      }
+      if (action === 'use-avatar-url' || action === 'use-identity-media-url') {
+        const url = root.querySelector('[data-xy-identity-media-url]')?.value?.trim();
+        await importIdentityMediaUrl(state.identityMediaSlot, url);
+        const modal = root.querySelector('[data-xy-identity-media-modal]');
+        if (modal) modal.hidden = true;
+      }
+      if (action === 'import-avatar-local' || action === 'import-identity-media-local') {
+        const localKey = await importIdentityMediaLocal(state.identityMediaSlot);
+        if (localKey) {
+          const modal = root.querySelector('[data-xy-identity-media-modal]');
+          if (modal) modal.hidden = true;
         }
       }
       if (action === 'remove-workshop-package') {
@@ -5186,10 +9116,50 @@
         render();
       }
       if (action === 'export-opening-draft') {
-        downloadJson('xingyue-opening-draft-v3.3.8.json', readDraft());
+        downloadJson('xingyue-opening-draft-v3.4.0.json', readDraft());
+      }
+      if (action === 'use-grade-compatible-story') {
+        if (!confirm('确认将当前正文替换为通用到访模板？这是显式操作，切换年级本身不会改动正文。')) return;
+        const draft = normalizeDraft(readDraft());
+        draft.openingDay = normalizeOpeningDayDraft({
+          ...draft.openingDay,
+          body:GENERIC_ARRIVAL_BODY,
+          gradeScope:['all'],
+          origin:'user',
+          localModifiedAt:new Date().toISOString(),
+        });
+        writeDraft(draft, { immediate:true });
+        applyDraftToFields();
+        renderWizard({ collect:false });
+        toast('success', '已套用通用到访模板');
+      }
+      if (action === 'restore-opening-source') {
+        const currentDraft = normalizeDraft(readDraft());
+        const source = currentDraft.openingDay?.sourcePackage;
+        if (source) {
+          const pkg = packages().find(item => String(item.id) === String(source.id) && item.cardScope === OPENING_PACKAGE_SCOPE);
+          if (!pkg) throw new Error('当前来源模板不在本聊天缓存中，请从工坊详情重新下载后再恢复');
+          const plan = await controlCenter().previewApplyOpeningPackage(pkg);
+          const diff = openingStoryDiffText(plan.nextBody, plan.currentBody);
+          if (!confirm('恢复已安装来源只会替换当前聊天草稿。\n\n' + diff + '\n\n确认恢复？')) return;
+          await controlCenter().applyOpeningPackageToDraft(plan);
+        } else {
+          if (!confirm('当前正文没有工坊来源。确认恢复 3.4.0 官方出厂版？')) return;
+          restoreOfficialOpeningDay();
+        }
+        applyDraftToFields();
+        renderWizard({ collect:false });
+        toast('success', '已恢复当前来源正文');
+      }
+      if (action === 'restore-opening-official') {
+        if (!confirm('确认恢复 3.4.0 出厂正文？当前聊天里的正文修改将被替换。')) return;
+        restoreOfficialOpeningDay();
+        applyDraftToFields();
+        renderWizard();
+        toast('success', '已恢复 3.4.0 出厂正文');
       }
       if (action === 'clear-opening-draft' && confirm('确认清空当前开局草稿？')) {
-        localStorage.removeItem(STORAGE_KEY);
+        openingDraftService.clearDraft();
         applyDraftToFields();
         render();
       }
@@ -5210,39 +9180,54 @@
         // 开始回忆(2.9.8 重做)：组装「入学日正文(1) + 身份设定(2)」(1前2后) → 填入 ST 聊天输入框 → 自动点发送，
         // 形成玩家真实开局发言(第二楼)；AI 据此写正文 + 初始化开局变量(第三楼)。
         // 不在开局页内执行、不写世界书、不直接 generate —— 走真实玩家输入链路。
-        const draft = collectFields();
-        // 组件1：入学日正文（从开局页 .xy-story-body 读，逐段取，保留 {{user}} 宏由 ST 发送时解析）
-        let storyText = '';
-        try {
-          const ps = root.querySelectorAll('.xy-story-body p');
-          if (ps.length) storyText = Array.from(ps).map(p => (p.textContent || '').trim()).filter(Boolean).join('\n');
-          else { const s = root.querySelector('.xy-story-body'); if (s) storyText = (s.textContent || '').trim(); }
-        } catch (_) {}
-        // 组件2：身份设定
-        const identity = identityContent(draft) || '';
-        if (!storyText && !identity) { toast('warn', '没有可发送的开局内容（入学日正文与身份设定均为空）'); return; }
-        const promptText = [storyText, identity].filter(Boolean).join('\n\n');
+        collectFields();
+        const draft = captureOpeningDayField({ immediate: true });
+        const compatibility = openingStoryCompatibility(draft);
+        if (!compatibility.compatible) throw new Error(compatibility.message);
+        validateOpeningStory(draft.openingDay?.body, { grade:compatibility.grade.value });
         if (!confirm('开始回忆：将把「入学日正文 + 身份设定」填入聊天输入框并自动发送，形成你的开局发言（AI 据此撰写正文并初始化开局变量）。确定？')) return;
+        const sendContext = openingChatContextSnapshot();
         // B19：先把身份/世界因子持久化到卡绑定世界书（[星月开局]{{user}}身份设定 常驻条目），再走玩家输入链路；
         // 否则身份仅作为一次性开局发言、后续楼层无常驻引用，开局设定会丢。写失败不阻断发送。
         try {
           const ccWb = controlCenter();
-          const wbResult = await ccWb?.writeOpeningWorldbookEntries?.(draft, { scope: 'identity' });
+          const wbResult = await ccWb?.writeOpeningWorldbookEntries?.(draft, { scope: 'identity', expectedContext: sendContext });
           if (wbResult?.applied) { const rn = root.querySelector('[data-xy-opening-result]'); if (rn) rn.textContent = '身份设定已写入世界书：' + (wbResult.worldbookName || '卡绑定世界书'); }
         } catch (wbErr) {
           // 任务4.7：世界书写入失败不阻断开局发言，但给出 toast 警告
           toast('warn', '身份世界书写入失败（开局仍继续）：' + ((wbErr && wbErr.message) || String(wbErr)));
         }
         try {
+          if (runtimeDestroyed || root.isConnected === false) throw new Error('开局页已卸载，请重新打开后再操作');
+          assertOpeningChatContext(sendContext);
+          // 世界书写入结束后、进入真实玩家输入框前最后一次读取当前聊天草稿与 Persona；预览和发送共用唯一组装器。
+          const promptText = composeOpeningMessage(readOpeningDraft());
           const hdoc = hostDocument();
           const ta = hdoc.querySelector('#send_textarea');
           const btn = hdoc.querySelector('#send_but');
           if (!ta || !btn) throw new Error('未找到 ST 聊天输入框(#send_textarea)或发送按钮(#send_but)');
           ta.value = promptText;
           ta.dispatchEvent(new Event('input', { bubbles: true }));
+          try {
+            openingAbort?.signal?.addEventListener('abort', () => {
+              try { if (ta.value === promptText) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } } catch (_) {}
+            }, { once: true });
+          } catch (_) {}
           const resultNode = root.querySelector('[data-xy-opening-result]');
           if (resultNode) resultNode.textContent = '已将「入学日正文 + 身份设定」填入输入框并发送，等待 AI 生成开局正文…';
-          scheduleOpeningTimer(() => { try { btn.click(); toast('success', '开局发言已发送，等待 AI 生成正文…'); } catch (e) { toast('error', '点击发送失败：' + (e && e.message || e) + '（可手动按一次发送）'); } }, 60);
+          scheduleOpeningTimer(() => {
+            try {
+              assertOpeningChatContext(sendContext);
+              if (root.isConnected === false || hostDocument().querySelector('#send_textarea') !== ta) throw new Error('聊天或输入框已切换');
+              if (ta.value !== promptText) throw new Error('聊天输入框内容已被修改');
+            } catch (contextError) {
+              try { if (ta.value === promptText) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } } catch (_) {}
+              toast('warn', (contextError?.message || String(contextError)) + '，未自动发送，请在当前聊天重新操作。');
+              return;
+            }
+            try { btn.click(); toast('success', '开局发言已发送，等待 AI 生成正文…'); }
+            catch (e) { toast('error', '点击发送失败：' + (e && e.message || e) + '（文本已保留，可手动按一次发送）'); }
+          }, 60);
         } catch (error) { toast('error', '开始回忆失败：' + (error.message || String(error))); }
       }
     } catch (error) {
@@ -5250,11 +9235,9 @@
     }
   }, openingListenerOptions);
 
-  applyDraftToFields();
   runDependencyChecks();
   scheduleDependencyAutoRefresh();
-  setStep(Number(readDraft().last_step || 1) || 1);
-  setView(state.view);
+  refreshOpeningContext();
   // P5：封面入库——opening-page.html 内联 <script> 的 applyPortrait 经 innerHTML 注入不执行（HTML5 规范），
   // --xy-opening-cover 永不设置、封面只剩底色不显入库图。搬到这里由真正执行的 JS 调用（媒体库 scene/portrait 'opening' 资产）。
   try {
@@ -5281,25 +9264,29 @@
   // first_mes 仅放 [data-xy-opening-remote] 短标记；控制中心 fetch 远程开局页 + 注入 + 绑定（display-only，绝不进 LLM）。
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
-  const OPENING_PAGE_REVISION = '20260710-338-opening-host-tight';
-  const OPENING_PAGE_SHA256 = 'e9fa36cf4e7e0ad0a72390740d9790d46964d1fe14e545a926c9eb89bc4d1f68';
+  const OPENING_PAGE_REVISION = '20260711-340-opening-p8-r1';
+  const OPENING_PAGE_SHA256 = '0252a589bf3ba1c2e40736782a09b4267223808a095e455291850c3dfd0f0a02';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
-    'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.3.8/opening-page.html?v=' + OPENING_PAGE_REVISION,
-    'https://raw.githubusercontent.com/LiarMTTT/rolecard-diy-workshop/main/runtime/xingyue/3.3.8/opening-page.html?v=' + OPENING_PAGE_REVISION,
+    'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.0/opening-page.html?v=' + OPENING_PAGE_REVISION,
+    'https://raw.githubusercontent.com/LiarMTTT/rolecard-diy-workshop/main/runtime/xingyue/3.4.0/opening-page.html?v=' + OPENING_PAGE_REVISION,
   ];
+  const OPENING_PAGE_SOURCE_TIMEOUT_MS = 6500;
+  const openingRemoteAttempts = new Map();
+  const openingRemoteRetryBindings = new Map();
   function markOpeningRemoteIdle(mount) {
     try {
-      mount.removeAttribute('data-xy-remote-state');
+      mount.setAttribute('data-xy-remote-state', 'idle');
       mount.removeAttribute('data-xy-remote-owner');
+      mount.removeAttribute('aria-busy');
     } catch (_) {}
   }
   function isOpeningRemoteOwnedByCurrentRuntime(mount) {
-    try { return mount.getAttribute('data-xy-remote-owner') === GIT_RUNTIME_REVISION; } catch (_) { return false; }
+    try { return mount.getAttribute('data-xy-remote-owner') === runtimeOwner.id; } catch (_) { return false; }
   }
   function prepareOpeningRemoteFallback(mount) {
     try {
-      mount.style.minHeight = 'min(520px, max(280px, calc(100dvh - 160px)))';
+      mount.style.minHeight = 'min(720px, max(420px, calc(100dvh - 150px)))';
       mount.style.display = 'grid';
       mount.style.placeItems = 'center';
       mount.style.boxSizing = 'border-box';
@@ -5308,12 +9295,93 @@
   }
   function releaseOpeningRemoteFallback(mount) {
     try {
-      mount.style.minHeight = '';
-      mount.style.display = '';
-      mount.style.placeItems = '';
-      mount.style.boxSizing = '';
-      mount.style.width = '';
+      mount.removeAttribute('style');
     } catch (_) {}
+  }
+  function ensureOpeningRemoteShell(mount) {
+    let shell = mount.querySelector?.('[data-xy-opening-shell]') || null;
+    if (shell) {
+      try { if (!mount.__xyOpeningShellTemplate) mount.__xyOpeningShellTemplate = mount.innerHTML; } catch (_) {}
+      return shell;
+    }
+    try {
+      if (mount.__xyOpeningShellTemplate) mount.innerHTML = mount.__xyOpeningShellTemplate;
+      shell = mount.querySelector?.('[data-xy-opening-shell]') || null;
+      if (shell) return shell;
+      const doc = mount.ownerDocument || document;
+      shell = doc.createElement('div');
+      shell.setAttribute('data-xy-opening-shell', '');
+      shell.style.cssText = 'width:min(620px,100%);display:grid;gap:16px;place-items:center;padding:28px 18px;box-sizing:border-box';
+      shell.innerHTML = '<div data-xy-opening-spinner aria-hidden="true" style="width:48px;height:48px;box-sizing:border-box;border-radius:50%;border:3px solid rgba(224,178,123,.25);border-top-color:#efc785"></div>' +
+        '<div data-xy-opening-title style="font-size:22px;color:#efc785;letter-spacing:2px;font-weight:700">星月私立高等学院</div>' +
+        '<div data-xy-opening-status data-xy-opening-loading role="status" aria-live="polite" style="font-size:13px;line-height:1.85;color:#e8d8c6"></div>' +
+        '<div data-xy-opening-progress aria-hidden="true" style="width:min(360px,88%);height:4px;border-radius:999px;background:rgba(224,178,123,.14)"></div>' +
+        '<button type="button" data-xy-opening-retry hidden style="min-width:148px;min-height:44px;padding:10px 22px">重新加载开局页</button>';
+      mount.replaceChildren(shell);
+      mount.__xyOpeningShellTemplate = mount.innerHTML;
+      return shell;
+    } catch (_) { return null; }
+  }
+  function renderOpeningRemotePhase(mount, phase, message) {
+    const shell = ensureOpeningRemoteShell(mount);
+    prepareOpeningRemoteFallback(mount);
+    try {
+      mount.setAttribute('data-xy-opening-phase', phase);
+      mount.setAttribute('aria-busy', phase === 'loading' ? 'true' : 'false');
+      const statusNode = shell?.querySelector?.('[data-xy-opening-status]');
+      const retry = shell?.querySelector?.('[data-xy-opening-retry]');
+      if (statusNode) statusNode.innerHTML = message;
+      if (retry) {
+        retry.hidden = phase !== 'error';
+        retry.disabled = phase === 'loading';
+      }
+    } catch (_) {}
+  }
+  function bindOpeningRemoteRetry(mount) {
+    const existing = mount.__xyOpeningRemoteRetryBinding;
+    if (existing?.owner === runtimeOwner.id) return;
+    try { if (existing?.handler) mount.removeEventListener('click', existing.handler); } catch (_) {}
+    const handler = event => {
+      const retry = event.target?.closest?.('[data-xy-opening-retry]');
+      if (!retry || !mount.contains(retry) || runtimeDestroyed) return;
+      event.preventDefault();
+      startOpeningRemoteLoad(mount, { force: true });
+    };
+    try {
+      mount.addEventListener('click', handler);
+      const binding = { owner: runtimeOwner.id, handler };
+      mount.__xyOpeningRemoteRetryBinding = binding;
+      openingRemoteRetryBindings.set(mount, binding);
+    } catch (_) {}
+  }
+  function clearOpeningAttemptTimeout(attempt) {
+    if (!attempt?.timeout) return;
+    try { clearTimeout(attempt.timeout); } catch (_) {}
+    openingTimers.delete(attempt.timeout);
+    attempt.timeout = null;
+  }
+  function cleanupOpeningAttemptSource(attempt, controller) {
+    clearOpeningAttemptTimeout(attempt);
+    if (controller) openingFetchControllers.delete(controller);
+    if (attempt?.controller === controller) attempt.controller = null;
+  }
+  function abortOpeningRemoteAttempt(mount, resetState = false) {
+    const attempt = openingRemoteAttempts.get(mount);
+    if (!attempt) return;
+    clearOpeningAttemptTimeout(attempt);
+    try { attempt.controller?.abort?.(); } catch (_) {}
+    if (attempt.controller) openingFetchControllers.delete(attempt.controller);
+    attempt.controller = null;
+    attempt.sourceToken = null;
+    if (openingRemoteAttempts.get(mount) === attempt) openingRemoteAttempts.delete(mount);
+    if (resetState && mount.getAttribute?.('data-xy-remote-owner') === attempt.owner) markOpeningRemoteIdle(mount);
+  }
+  function isOpeningAttemptCurrent(mount, attempt, sourceToken) {
+    if (!mount || !attempt || runtimeDestroyed || mount.isConnected === false) return false;
+    if (openingRemoteAttempts.get(mount) !== attempt) return false;
+    if (mount.getAttribute?.('data-xy-remote-owner') !== attempt.owner) return false;
+    if (mount.getAttribute?.('data-xy-remote-state') !== 'loading') return false;
+    return sourceToken === undefined || attempt.sourceToken === sourceToken;
   }
   function clearOpeningRemoteLoadingStates() {
     const docs = [];
@@ -5322,7 +9390,10 @@
     docs.forEach(doc => {
       try {
         doc.querySelectorAll?.('[data-xy-opening-remote][data-xy-remote-state="loading"]').forEach(mount => {
-          if (isOpeningRemoteOwnedByCurrentRuntime(mount)) markOpeningRemoteIdle(mount);
+          if (isOpeningRemoteOwnedByCurrentRuntime(mount)) {
+            markOpeningRemoteIdle(mount);
+            renderOpeningRemotePhase(mount, 'loading', '开局界面等待重新载入…<br>正在接管新的运行实例。');
+          }
         });
       } catch (_) {}
     });
@@ -5409,7 +9480,7 @@
     const Parser = doc?.defaultView?.DOMParser || window.DOMParser;
     if (!Parser) throw new Error('DOMParser 不可用');
     const parsed = new Parser().parseFromString(String(html || ''), 'text/html');
-    const root = parsed.querySelector('[data-xy-opening-page="3.3.8"]');
+    const root = parsed.querySelector('[data-xy-opening-page="3.4.0"]');
     if (!root
       || !root.querySelector('[data-xy-opening-action="enter-entry"]')
       || !root.querySelector('[data-xy-view="boot"]')
@@ -5441,50 +9512,109 @@
     });
     return root.outerHTML;
   }
-  function loadRemoteOpeningPages(doc) {
+  function failOpeningRemoteAttempt(mount, attempt, error) {
+    if (!isOpeningAttemptCurrent(mount, attempt)) return;
+    attempt.lastError = error?.message || String(error || 'unknown');
+    clearOpeningAttemptTimeout(attempt);
+    try { attempt.controller?.abort?.(); } catch (_) {}
+    if (attempt.controller) openingFetchControllers.delete(attempt.controller);
+    attempt.controller = null;
+    attempt.sourceToken = null;
+    openingRemoteAttempts.delete(mount);
+    markOpeningRemoteIdle(mount);
+    renderOpeningRemotePhase(mount, 'error', '开局界面加载失败。<br>三个安全来源均未能返回通过校验的页面。请检查网络，恢复后点击下方按钮重试。');
+  }
+  async function tryOpeningRemoteSource(doc, mount, attempt, sourceIndex) {
+    if (!isOpeningAttemptCurrent(mount, attempt)) return;
+    if (sourceIndex >= OPENING_PAGE_SOURCES.length) {
+      failOpeningRemoteAttempt(mount, attempt, attempt.lastError || new Error('所有开局页来源均不可达'));
+      return;
+    }
+    const sourceToken = {};
+    attempt.sourceToken = sourceToken;
+    attempt.sourceIndex = sourceIndex;
+    const AbortCtor = doc.defaultView?.AbortController || window.AbortController;
+    const controller = AbortCtor ? new AbortCtor() : null;
+    attempt.controller = controller;
+    if (controller) openingFetchControllers.add(controller);
+    const url = OPENING_PAGE_SOURCES[sourceIndex];
+    let sourceTimedOut = false;
+    let rejectTimeout = null;
+    const timeoutPromise = new Promise((_, reject) => { rejectTimeout = reject; });
+    attempt.timeout = setTimeout(() => {
+      openingTimers.delete(attempt.timeout);
+      attempt.timeout = null;
+      if (!isOpeningAttemptCurrent(mount, attempt, sourceToken)) return;
+      sourceTimedOut = true;
+      try { controller?.abort?.(); } catch (_) {}
+      rejectTimeout(new Error('开局页来源请求超时'));
+    }, OPENING_PAGE_SOURCE_TIMEOUT_MS);
+    openingTimers.add(attempt.timeout);
     try {
-      doc.querySelectorAll?.('[data-xy-opening-remote]').forEach(mount => {
-        const state = mount.getAttribute('data-xy-remote-state') || '';
-        if (state === 'loaded') return;
-        if (state === 'loading' && isOpeningRemoteOwnedByCurrentRuntime(mount)) return;
-        if (state === 'loading') markOpeningRemoteIdle(mount);
-        prepareOpeningRemoteFallback(mount);
-        mount.setAttribute('data-xy-remote-state', 'loading');
-        mount.setAttribute('data-xy-remote-owner', GIT_RUNTIME_REVISION);
-        const AbortCtor = doc.defaultView?.AbortController || window.AbortController;
-        const controller = AbortCtor ? new AbortCtor() : null;
-        if (controller) openingFetchControllers.add(controller);
-        // 顺序尝试多源，任一成功即停止
-        const trySource = (sources) => {
-          if (!mount.isConnected || controller?.signal?.aborted || runtimeDestroyed) return;
-          if (!sources.length) {
-            if (controller) openingFetchControllers.delete(controller);
-            markOpeningRemoteIdle(mount); // 允许下次定时/事件重试
-            try { const l = mount.querySelector('[data-xy-opening-loading]') || mount; l.textContent = '开局界面远程加载失败（所有源均不可达）。请检查网络后刷新本楼层重试。'; } catch (_) {}
-            return;
-          }
-          const [url, ...rest] = sources;
-          fetch(url, { cache: 'default', signal: controller?.signal })
-            .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-            .then(async html => {
-              if (!mount.isConnected || controller?.signal?.aborted || runtimeDestroyed) return;
-              await verifyOpeningPageHtml(html, doc);
-              if (!mount.isConnected || controller?.signal?.aborted || runtimeDestroyed) return;
-              mount.innerHTML = sanitizeOpeningPageHtml(html, doc);
-              releaseOpeningRemoteFallback(mount);
-              mount.setAttribute('data-xy-remote-state', 'loaded');
-              mount.setAttribute('data-xy-remote-owner', GIT_RUNTIME_REVISION);
-              if (controller) openingFetchControllers.delete(controller);
-              try { scanOpeningPages(); } catch (_) {}
-            })
-            .catch(error => {
-              if (error?.name === 'AbortError' || controller?.signal?.aborted) return;
-              trySource(rest);
-            });
-        };
-        trySource(OPENING_PAGE_SOURCES);
-      });
-    } catch (_) {}
+      const fetchHost = doc.defaultView || window;
+      const fetchFn = fetchHost?.fetch || window.fetch;
+      if (typeof fetchFn !== 'function') throw new Error('fetch 不可用');
+      const html = await Promise.race([
+        Promise.resolve(fetchFn.call(fetchHost, url, { cache: 'default', signal: controller?.signal })).then(response => {
+          if (!response?.ok) throw new Error('HTTP ' + String(response?.status || 0));
+          return response.text();
+        }),
+        timeoutPromise,
+      ]);
+      cleanupOpeningAttemptSource(attempt, controller);
+      if (!isOpeningAttemptCurrent(mount, attempt, sourceToken)) return;
+      await verifyOpeningPageHtml(html, doc);
+      if (!isOpeningAttemptCurrent(mount, attempt, sourceToken)) return;
+      const sanitized = sanitizeOpeningPageHtml(html, doc);
+      if (!isOpeningAttemptCurrent(mount, attempt, sourceToken)) return;
+      mount.innerHTML = sanitized;
+      releaseOpeningRemoteFallback(mount);
+      mount.setAttribute('data-xy-remote-state', 'loaded');
+      mount.setAttribute('data-xy-remote-owner', runtimeOwner.id);
+      mount.setAttribute('data-xy-remote-revision', OPENING_PAGE_REVISION);
+      mount.removeAttribute('data-xy-opening-phase');
+      mount.removeAttribute('aria-busy');
+      openingRemoteAttempts.delete(mount);
+      try { scanOpeningPages(); } catch (_) {}
+      return;
+    } catch (error) {
+      if (!isOpeningAttemptCurrent(mount, attempt, sourceToken)) return;
+      attempt.lastError = sourceTimedOut ? 'timeout: ' + url : (error?.message || String(error));
+      cleanupOpeningAttemptSource(attempt, controller);
+      await tryOpeningRemoteSource(doc, mount, attempt, sourceIndex + 1);
+    } finally {
+      cleanupOpeningAttemptSource(attempt, controller);
+    }
+  }
+  function startOpeningRemoteLoad(mount, options = {}) {
+    if (!mount || runtimeDestroyed || mount.isConnected === false) return false;
+    const doc = mount.ownerDocument || document;
+    bindOpeningRemoteRetry(mount);
+    const state = mount.getAttribute('data-xy-remote-state') || 'idle';
+    const phase = mount.getAttribute('data-xy-opening-phase') || '';
+    const loadedRevision = mount.getAttribute('data-xy-remote-revision') || '';
+    const loadedPage = mount.querySelector?.('[data-xy-opening-page="3.4.0"]');
+    const activeAttempt = openingRemoteAttempts.get(mount);
+    if (!options.force && state === 'loaded' && loadedRevision === OPENING_PAGE_REVISION && loadedPage) {
+      mount.setAttribute('data-xy-remote-owner', runtimeOwner.id);
+      releaseOpeningRemoteFallback(mount);
+      return false;
+    }
+    if (!options.force && state === 'idle' && phase === 'error') return false;
+    if (!options.force && state === 'loading' && activeAttempt && isOpeningAttemptCurrent(mount, activeAttempt)) return false;
+    if (activeAttempt) abortOpeningRemoteAttempt(mount, false);
+    ensureOpeningRemoteShell(mount);
+    renderOpeningRemotePhase(mount, 'loading', '开局界面加载中…<br>正在从云端载入完整开局页，请稍候。首次打开、切换存档或重新挂载时可能需要一点时间。');
+    mount.setAttribute('data-xy-remote-state', 'loading');
+    mount.setAttribute('data-xy-remote-owner', runtimeOwner.id);
+    mount.setAttribute('data-xy-remote-target-revision', OPENING_PAGE_REVISION);
+    const attempt = { owner: runtimeOwner.id, controller: null, timeout: null, sourceToken: null, sourceIndex: 0, lastError: '' };
+    openingRemoteAttempts.set(mount, attempt);
+    void tryOpeningRemoteSource(doc, mount, attempt, 0).catch(error => failOpeningRemoteAttempt(mount, attempt, error));
+    return true;
+  }
+  function loadRemoteOpeningPages(doc) {
+    try { doc.querySelectorAll?.('[data-xy-opening-remote]').forEach(mount => startOpeningRemoteLoad(mount)); } catch (_) {}
   }
   function scanOpeningPages() {
     const docs = [];
@@ -5503,11 +9633,41 @@
     return count;
   }
   function scheduleOpeningPageScan(delay = 80) {
-    if (openingScanTimer) clearTimeout(openingScanTimer);
+    if (openingScanTimer) { clearTimeout(openingScanTimer); openingTimers.delete(openingScanTimer); }
     openingScanTimer = scheduleOpeningTimer(() => {
       openingScanTimer = null;
       scanOpeningPages();
     }, delay);
+  }
+  function currentOwnedOpeningRoots() {
+    return Array.from(boundOpeningRoots).filter(root => {
+      if (!root || root.isConnected === false) {
+        try { root?.__xyOpeningAbort?.abort?.(); } catch (_) {}
+        boundOpeningRoots.delete(root);
+        return false;
+      }
+      return root.dataset?.xyOpeningBoundOwner === runtimeOwner.id;
+    });
+  }
+  async function handleOpeningContextChanged() {
+    const roots = currentOwnedOpeningRoots();
+    roots.forEach(root => { try { root.__xyOpeningFlushState?.(); } catch (_) {} });
+    await openingDraftService.switchChat();
+    if (runtimeDestroyed) return;
+    currentOwnedOpeningRoots().forEach(root => {
+      try { root.__xyOpeningRefreshContext?.(); } catch (_) {}
+      try { root.__xyOpeningRefreshPlayer?.(); } catch (_) {}
+    });
+    scheduleOpeningPageScan(0);
+  }
+  function handleOpeningPersonaChanged() {
+    if (runtimeDestroyed) return;
+    currentOwnedOpeningRoots().forEach(root => {
+      try { root.__xyOpeningRefreshPlayer?.(); } catch (_) {}
+    });
+    // 空聊天切换 Persona 可能重建首消息 DOM；分波次重新扫描并绑定新 root。
+    scheduleOpeningPageScan(0);
+    [120, 350].forEach(delay => scheduleOpeningTimer(scanOpeningPages, delay));
   }
   function ensureOpeningPageBinding() {
     scanOpeningPages();
@@ -5518,12 +9678,28 @@
     try {
       const eventOnHost = window.eventOn || hostWindow().eventOn;
       const events = window.tavern_events || hostWindow().tavern_events || {};
-      const eventNames = [events.CHAT_CHANGED, events.USER_MESSAGE_RENDERED, events.CHARACTER_MESSAGE_RENDERED, events.MESSAGE_UPDATED, events.MESSAGE_SWIPED].filter(Boolean);
+      const eventNames = [events.USER_MESSAGE_RENDERED, events.CHARACTER_MESSAGE_RENDERED, events.MESSAGE_UPDATED, events.MESSAGE_SWIPED].filter(Boolean);
+      const personaEventNames = Array.from(new Set([events.PERSONA_CHANGED, events.PERSONA_CREATED, events.PERSONA_UPDATED, events.PERSONA_RENAMED, events.PERSONA_DELETED, events.SETTINGS_UPDATED].filter(Boolean)));
       if (typeof eventOnHost === 'function') {
+        if (events.CHAT_CHANGED) {
+          try {
+            const disposer = eventOnHost(events.CHAT_CHANGED, () => { void handleOpeningContextChanged().catch(error => { lastError = error?.message || String(error); }); });
+            if (typeof disposer === 'function') disposers.push(disposer);
+            else if (disposer?.stop) disposers.push(() => disposer.stop());
+          } catch (_) {}
+        }
         eventNames.forEach(name => {
           try {
             const disposer = eventOnHost(name, () => scheduleOpeningPageScan(80));
-            if (disposer?.stop) disposers.push(() => disposer.stop());
+            if (typeof disposer === 'function') disposers.push(disposer);
+            else if (disposer?.stop) disposers.push(() => disposer.stop());
+          } catch (_) {}
+        });
+        personaEventNames.forEach(name => {
+          try {
+            const disposer = eventOnHost(name, handleOpeningPersonaChanged);
+            if (typeof disposer === 'function') disposers.push(disposer);
+            else if (disposer?.stop) disposers.push(() => disposer.stop());
           } catch (_) {}
         });
       }
@@ -5533,21 +9709,47 @@
   function destroy() {
     if (runtimeDestroyed) return;
     runtimeDestroyed = true;
+    currentOwnedOpeningRoots().forEach(root => { try { root.__xyOpeningFlushState?.(); } catch (_) {} });
+    try { openingDraftService.flushSync(); } catch (_) {}
+    try { openingDraftService.destroy(); } catch (_) {}
+    try { worldbookManagerUi?.destroy(); } catch (_) {}
+    worldbookManagerUi = null;
+    try { worldbookAiAssistant.cancelAll(); } catch (_) {}
+    try { worldbookEditor?.destroy?.(); } catch (_) {}
+    worldbookEditor = null;
+    worldbookEditorModulePromise = null;
     try { openingObserver?.disconnect?.(); } catch (_) {}
     openingObserver = null;
-    if (openingScanTimer) clearTimeout(openingScanTimer);
+    if (openingScanTimer) { clearTimeout(openingScanTimer); openingTimers.delete(openingScanTimer); }
     openingScanTimer = null;
+    Array.from(openingRemoteAttempts.keys()).forEach(mount => abortOpeningRemoteAttempt(mount, true));
     openingFetchControllers.forEach(controller => { try { controller.abort(); } catch (_) {} });
     openingFetchControllers.clear();
     clearOpeningRemoteLoadingStates();
+    openingRemoteRetryBindings.forEach((binding, mount) => {
+      if (binding?.owner !== runtimeOwner.id) return;
+      try { mount.removeEventListener('click', binding.handler); } catch (_) {}
+      try { if (mount.__xyOpeningRemoteRetryBinding === binding) delete mount.__xyOpeningRemoteRetryBinding; } catch (_) {}
+    });
+    openingRemoteRetryBindings.clear();
     openingTimers.forEach(timer => { try { clearTimeout(timer); } catch (_) {} });
     openingTimers.clear();
     boundOpeningRoots.forEach(root => {
+      if (root.dataset?.xyOpeningBoundOwner !== runtimeOwner.id) return;
       try { root.__xyOpeningAbort?.abort?.(); } catch (_) {}
       try { root.__xyPrefixObs?.disconnect?.(); } catch (_) {}
       try { root.__xyOpeningViewportCleanup?.(); } catch (_) {}
       try { delete root.dataset.xyOpeningBound; } catch (_) {}
-      try { delete root.__xyOpeningAbort; delete root.__xyPrefixObs; delete root.__xyOpeningViewportCleanup; } catch (_) {}
+      try { delete root.dataset.xyOpeningBoundOwner; } catch (_) {}
+      try {
+        delete root.__xyOpeningAbort;
+        delete root.__xyPrefixObs;
+        delete root.__xyOpeningViewportCleanup;
+        delete root.__xyOpeningFlushState;
+        delete root.__xyOpeningRefreshContext;
+        delete root.__xyOpeningRefreshWorkshop;
+        delete root.__xyOpeningRefreshPlayer;
+      } catch (_) {}
     });
     boundOpeningRoots.clear();
     while (disposers.length) {
@@ -5600,12 +9802,73 @@
     runtimeRevision: GIT_RUNTIME_REVISION,
     getSettings: () => ({ ...settings }),
     saveSettings,
+    refreshWorkshop: fetchWorkshopCatalog,
+    packageDetail,
+    publishPackage,
+    myPackages,
+    withdrawPackage,
+    votePackage,
+    checkWorkshopAuth,
+    workshopLoginUrl,
+    logout,
+    getWorkshopIdentity,
     importPackage,
     installPackageToWorldbook,
+    inspectWorkshopPackage,
+    installOrUpdateWorkshopPackage,
+    uninstallWorkshopPackage,
+    previewApplyOpeningPackage,
+    applyOpeningPackageToDraft,
+    worldbookManager,
+    applyTransaction: worldbookManager.applyTransaction,
+    getRevision: worldbookManager.getRevision,
+    diffWorldbookEntries: worldbookManager.diff,
+    previewActivation: worldbookManager.previewActivation,
+    sharedWorldbookManagerSourceSha256: SHARED_WORLDBOOK_MANAGER_SOURCE_SHA256,
+    sharedWorldbookManagerUiSourceSha256: SHARED_WORLDBOOK_MANAGER_UI_SOURCE_SHA256,
+    worldbookEditorSourceSha256: WORLDBOOK_EDITOR_SOURCE_SHA256,
+    getWorldbookAiSessionStatus:worldbookAiAssistant.status,
+    clearWorldbookAiSessionConfig,
+    openWorldbookEditor,
+    closeWorldbookEditor,
+    listWorldbookSnapshots: worldbookManager.listSnapshots,
+    previewWorldbookRestore,
+    commitWorldbookRestore,
+    openWorldbookManager,
+    closeWorldbookManager,
+    previewOpeningDayFactoryRestore,
+    restoreOpeningDayFactoryDraft,
+    undoOpeningDayFactoryRestore,
     validatePackage,
     importPackageToDraft,
     readOpeningDraft,
     writeOpeningDraft,
+    resolveCurrentPlayerName,
+    resolvePlayerText,
+    resolvePlayerAvatarSrc,
+    OFFICIAL_OPENING_DAY,
+    normalizeOpeningDayDraft,
+    normalizeGrade,
+    gradeBand,
+    resolveEffectiveGrade,
+    openingStoryCompatibility,
+    serializePersonaIdentityBlock,
+    parsePersonaIdentityBlock,
+    personaIdentityPayloadHash,
+    replacePersonaIdentityBlocks,
+    userIdentityPayloadDiff,
+    mergePersonaIdentityIntoDraft,
+    resolveActivePersonaSnapshot,
+    writeActivePersonaDescription,
+    personaIdentityAuthority,
+    openingWorldbookPayload,
+    validateOpeningStory,
+    resolveOpeningStory,
+    composeOpeningMessage,
+    getOpeningDraftStatus: () => openingDraftService.status(),
+    flushOpeningDraft: () => openingDraftService.flush(),
+    switchOpeningDraftChat: () => handleOpeningContextChanged(),
+    whenOpeningDraftReady: () => openingDraftReady,
     previewOpeningWrites,
     writeOpeningWorldbookEntries,
     worldFactorContent,
@@ -5658,13 +9921,17 @@
     }
   } catch (_) {}
   ensureOmniFlatStyle();
+  captureWorkshopLogin();
   notifyGitRuntimeRevision();
-  dispatchControlCenterReady();
   ensurePanel();
   ensureWandEntry();
   const wandRetryTimer = setTimeout(ensureWandEntry, 1000);
   disposers.push(() => { try { clearTimeout(wandRetryTimer); } catch (_) {} });
-  ensureOpeningPageBinding();
+  void openingDraftReady.then(result => {
+    if (runtimeDestroyed || !result || !openingDraftService.status().ready) return;
+    dispatchControlCenterReady();
+    ensureOpeningPageBinding();
+  });
   bindVariableTuneEntries();
   bindAnalysisEntries();
   loadSidebarState();

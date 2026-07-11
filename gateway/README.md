@@ -14,7 +14,8 @@ Packages published through this gateway are content packages for worldbook/loreb
 - Persistent publisher registry keyed by a salted Discord user hash.
 - Review gate and minimal audit log.
 - Admin review page at `/admin`.
-- Optimistic package update conflict checks with `revision` or `X-Package-Revision`.
+- Mandatory optimistic conflict checks for update, withdraw, and review decisions.
+- Shared package-contract validation for Gateway and Xingyue 3.4.0 clients.
 
 ## Privacy Contract
 
@@ -26,7 +27,7 @@ The gateway stores only:
 - `createdAt`
 - `lastLoginAt`
 
-It does not store Discord email, username, avatar, raw Discord ID, IP history, or behavior profiles.
+It does not store Discord email, username, avatar, raw Discord ID, IP history, or behavior profiles. Vote records use package-specific HMAC voter keys, so stored voter keys cannot be correlated across packages.
 
 `publisherId` is stable across logins because the gateway maps the salted Discord hash to one generated publisher record. This lets a player update or withdraw their own packages later without storing their raw Discord identity.
 
@@ -41,7 +42,7 @@ npm start
 
 Use a reverse proxy such as Nginx/Caddy to provide HTTPS and your public domain.
 
-For browser publishing with cookies, set `CORS_ORIGIN` to the exact SillyTavern/front-end origin and keep `COOKIE_SAME_SITE=None` behind HTTPS. Do not use `CORS_ORIGIN=*` for a public cookie-based deploy.
+Cross-origin card clients use `Authorization: Bearer`; Cookie fallback is accepted only for same-origin Gateway pages. `CORS_ORIGIN=*` never enables credentialed CORS.
 
 ## API
 
@@ -50,18 +51,19 @@ For browser publishing with cookies, set `CORS_ORIGIN` to the exact SillyTavern/
 - `GET /api/workshop/health`: Gateway health endpoint for API-prefix reverse proxies.
 - `GET /api/workshop/me`: current login state.
 - `GET /api/workshop/me/packages`: packages owned by the logged-in publisher.
-- `POST /api/workshop/packages`: publish a package.
-- `PUT /api/workshop/packages/:id`: update an owned package.
-- `DELETE /api/workshop/packages/:id`: withdraw an owned package.
+- `POST /api/workshop/packages`: create a new package; duplicate IDs return `409 package-exists`.
+- `PUT /api/workshop/packages/:id`: update an owned package; revision is mandatory.
+- `DELETE /api/workshop/packages/:id`: withdraw an owned package; revision is mandatory.
+- `POST /api/workshop/packages/:id/vote`: vote on an approved package.
 - `GET /api/admin/review/packages?status=pending`: admin review list.
 - `GET /api/admin/review/packages/:id`: admin review detail.
-- `POST /api/admin/review/packages/:id`: set `approved` or `rejected`.
+- `POST /api/admin/review/packages/:id`: set `approved` or `rejected`; the inspected revision is mandatory.
 - `GET /auth/discord/login`: start Discord OAuth.
 - `GET /auth/discord/callback`: Discord OAuth callback.
 
 ## Storage Notes
 
-The first version stores package JSON in `PACKAGE_STORE_DIR`, the public index in `INDEX_FILE`, publisher hashes in `PUBLISHER_FILE`, and audit events in `AUDIT_LOG_FILE`. Sessions are still in memory, so restarting the process logs publishers out, but it does not break ownership of already published package JSON files. Move sessions to SQLite/Redis before public scale-out.
+The gateway stores package JSON in `PACKAGE_STORE_DIR`, the public index in `INDEX_FILE`, publisher hashes in `PUBLISHER_FILE`, package-scoped HMAC vote keys in `VOTES_FILE`, and audit events in `AUDIT_LOG_FILE`. Login tokens are stateless HMAC tokens containing only publisher ID and expiry, so normal restarts do not invalidate them.
 
 If `REQUIRE_REVIEW=true`, newly published packages are saved as `pending` and do not appear in the public index until an admin approves them. Withdrawing a package marks it as `withdrawn` and removes it from the public index while preserving a minimal audit trail.
 
@@ -69,7 +71,7 @@ If `REQUIRE_REVIEW=true`, newly published packages are saved as `pending` and do
 
 ## Conflict Handling
 
-The gateway adds `revision` and `contentHash` to stored packages. Owners can pass the last known revision when updating:
+The gateway adds `revision` and `contentHash` to stored packages. Owners must pass the last known revision when updating or withdrawing; admin review decisions must carry the revision that was inspected:
 
 ```bash
 curl -X PUT \

@@ -210,7 +210,8 @@ $('[data-login]').addEventListener('click', () => {
 });
 window.addEventListener('message', (e) => {
   if (!e.data || typeof e.data !== 'object') return;
-  if (e.data.type === 'xingyue-workshop-token' && e.data.token) {
+  try { if (e.origin !== new URL(GATEWAY_BASE).origin) return; } catch { return; }
+  if (e.data.type === 'xy-workshop-token' && e.data.token) {
     try { localStorage.setItem(TOKEN_KEY, e.data.token); } catch {}
     refreshAuthPill();
     setStatus('登录成功', 'ok');

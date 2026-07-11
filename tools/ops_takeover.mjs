@@ -167,10 +167,14 @@ async function checkLocalBuild() {
 }
 
 async function checkPages() {
+  const localWorkshopIndex = JSON.parse(await fs.readFile(path.join(repoRoot, 'workshop-index.json'), 'utf8'));
   const urls = [
     '/workshop-index.json',
     '/cards/xingyue/index.json',
-    '/runtime/xingyue/2.9.0/manifest.json',
+    ...(localWorkshopIndex.cards || [])
+      .map(card => card.runtimeManifestUrl)
+      .filter(Boolean)
+      .map(relativePath => `/${String(relativePath).replace(/^\/+/, '')}`),
   ];
   for (const suffix of urls) {
     const url = `${config.pagesBaseUrl}${suffix}`;

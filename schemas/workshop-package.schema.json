@@ -5,7 +5,14 @@
   "description": "A content package imported as worldbook/lorebook entries. It must not directly patch MVU save variables.",
   "type": "object",
   "additionalProperties": true,
-  "required": ["packageVersion", "id", "type", "cardScope", "title", "payload"],
+  "required": [
+    "packageVersion",
+    "id",
+    "type",
+    "cardScope",
+    "title",
+    "payload"
+  ],
   "properties": {
     "packageVersion": {
       "type": "string",
@@ -20,13 +27,26 @@
     },
     "type": {
       "type": "string",
-      "enum": ["character", "user_identity", "world_factor", "shop_item", "blueprint", "recipe", "skill", "function"]
+      "enum": [
+        "character",
+        "user_identity",
+        "world_factor",
+        "shop_item",
+        "blueprint",
+        "recipe",
+        "skill",
+        "function"
+      ]
     },
     "cardScope": {
       "type": "string",
       "minLength": 1,
       "maxLength": 80,
-      "examples": ["xingyue", "terminal-city", "shared"]
+      "examples": [
+        "xingyue",
+        "xingyue-opening-v1",
+        "shared"
+      ]
     },
     "title": {
       "type": "string",
@@ -43,7 +63,11 @@
     },
     "rating": {
       "type": "string",
-      "enum": ["general", "mature", "restricted"],
+      "enum": [
+        "general",
+        "mature",
+        "restricted"
+      ],
       "default": "general"
     },
     "language": {
@@ -78,7 +102,12 @@
     },
     "reviewStatus": {
       "type": "string",
-      "enum": ["pending", "approved", "rejected", "withdrawn"],
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "withdrawn"
+      ],
       "description": "Gateway-managed review state. Only approved packages are public."
     },
     "rejectionReason": {
@@ -95,25 +124,206 @@
   },
   "allOf": [
     {
-      "if": { "required": ["type"], "properties": { "type": { "const": "character" } } },
+      "if": {
+        "required": [
+          "cardScope"
+        ],
+        "properties": {
+          "cardScope": {
+            "const": "xingyue-opening-v1"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "world_factor"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "target",
+              "schemaVersion",
+              "compatibility",
+              "gradeScope",
+              "worldFactors"
+            ],
+            "properties": {
+              "target": {
+                "const": "xingyue.opening_day_body"
+              },
+              "schemaVersion": {
+                "const": 1
+              },
+              "compatibility": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "minRuntimeVersion"
+                ],
+                "properties": {
+                  "minRuntimeVersion": {
+                    "type": "string",
+                    "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].*)?$"
+                  }
+                }
+              },
+              "gradeScope": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "allOf": [
+                  {
+                    "if": {
+                      "contains": {
+                        "const": "all"
+                      }
+                    },
+                    "then": {
+                      "maxItems": 1
+                    }
+                  }
+                ],
+                "items": {
+                  "enum": [
+                    "primary",
+                    "middle",
+                    "high",
+                    "university",
+                    "none",
+                    "custom",
+                    "all"
+                  ]
+                }
+              },
+              "worldFactors": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "title",
+                    "content"
+                  ],
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "content": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 16384
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "payload"
+        ],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": [
+              "target"
+            ],
+            "properties": {
+              "target": {
+                "const": "xingyue.opening_day_body"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "cardScope",
+          "type"
+        ],
+        "properties": {
+          "cardScope": {
+            "const": "xingyue-opening-v1"
+          },
+          "type": {
+            "const": "world_factor"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "character"
+          }
+        }
+      },
       "then": {
         "properties": {
           "payload": {
             "type": "object",
-            "required": ["name"],
+            "required": [
+              "name"
+            ],
             "additionalProperties": true,
             "properties": {
-              "name": { "type": "string", "minLength": 1, "maxLength": 80, "description": "角色名" },
-              "profile": { "type": "object", "description": "自由键值设定（身份/与user关系等）", "additionalProperties": { "type": "string" } },
-              "appearance": { "type": "object", "description": "结构化外貌（身高/三围/整体印象/体型等），蓝本=世界书苏锦瑶条目", "additionalProperties": { "type": "string" } },
-              "personality": { "type": "string", "maxLength": 2000 },
-              "dialogueStyle": { "type": "string", "maxLength": 1000 },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "description": "角色名"
+              },
+              "profile": {
+                "type": "object",
+                "description": "自由键值设定（身份/与user关系等）",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "appearance": {
+                "type": "object",
+                "description": "结构化外貌（身高/三围/整体印象/体型等），蓝本=世界书苏锦瑶条目",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "personality": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "dialogueStyle": {
+                "type": "string",
+                "maxLength": 1000
+              },
               "behavior": {
                 "type": "object",
                 "description": "行事风格与行为应对（角色编辑器对照编辑核心字段）",
                 "properties": {
-                  "行事风格": { "type": "string", "maxLength": 4000 },
-                  "行为应对": { "type": "string", "maxLength": 4000 }
+                  "行事风格": {
+                    "type": "string",
+                    "maxLength": 4000
+                  },
+                  "行为应对": {
+                    "type": "string",
+                    "maxLength": 4000
+                  }
                 }
               },
               "relationships": {
@@ -121,9 +331,15 @@
                 "items": {
                   "type": "object",
                   "properties": {
-                    "target": { "type": "string" },
-                    "type": { "type": "string" },
-                    "note": { "type": "string" }
+                    "target": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
                   }
                 }
               },
@@ -134,36 +350,19 @@
                   "portraits": {
                     "type": "object",
                     "properties": {
-                      "normal": { "type": "string", "description": "正常立绘媒体库 key" },
-                      "nude": { "type": "string", "description": "赤裸立绘媒体库 key" }
+                      "normal": {
+                        "type": "string",
+                        "description": "正常立绘媒体库 key"
+                      },
+                      "nude": {
+                        "type": "string",
+                        "description": "赤裸立绘媒体库 key"
+                      }
                     }
                   },
-                  "avatar": { "type": "string", "description": "头像媒体库 key；状态栏与对话气泡共用同一头像，气泡显示名=name" }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "if": { "required": ["type"], "properties": { "type": { "const": "world_factor" } } },
-      "then": {
-        "properties": {
-          "payload": {
-            "type": "object",
-            "required": ["worldFactors"],
-            "additionalProperties": true,
-            "properties": {
-              "worldFactors": {
-                "type": "array",
-                "minItems": 1,
-                "items": {
-                  "type": "object",
-                  "required": ["title", "content"],
-                  "properties": {
-                    "title": { "type": "string", "minLength": 1, "maxLength": 80 },
-                    "content": { "type": "string", "minLength": 1 }
+                  "avatar": {
+                    "type": "string",
+                    "description": "头像媒体库 key；状态栏与对话气泡共用同一头像，气泡显示名=name"
                   }
                 }
               }
@@ -173,20 +372,307 @@
       }
     },
     {
-      "if": { "required": ["type"], "properties": { "type": { "const": "user_identity" } } },
+      "if": {
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "world_factor"
+          }
+        }
+      },
       "then": {
         "properties": {
           "payload": {
             "type": "object",
-            "required": ["identity"],
+            "required": [
+              "worldFactors"
+            ],
             "additionalProperties": true,
             "properties": {
-              "identity": { "type": "string", "minLength": 1, "maxLength": 80 },
-              "callname": { "type": "string", "maxLength": 80 },
-              "background": { "type": "string" },
-              "avatar": { "type": "string", "description": "头像媒体引用（统一卡内 identityDraftAsPackage）" },
-              "core_attributes": { "type": "object", "description": "核心属性（统一卡内）", "additionalProperties": true }
+              "worldFactors": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "title",
+                    "content"
+                  ],
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "content": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "user_identity"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "identity": {
+                "type": "string",
+                "maxLength": 80,
+                "pattern": "^(?![\\s\\S]*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[\\s\\S]*$"
+              },
+              "grade": {
+                "type": "string",
+                "maxLength": 80,
+                "pattern": "^(?![\\s\\S]*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[\\s\\S]*$"
+              },
+              "callname": {
+                "type": "string",
+                "maxLength": 80,
+                "pattern": "^(?![\\s\\S]*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[\\s\\S]*$"
+              },
+              "background": {
+                "type": "string",
+                "maxLength": 12000,
+                "pattern": "^(?![\\s\\S]*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[\\s\\S]*$"
+              },
+              "appearance": {
+                "type": "string",
+                "maxLength": 12000,
+                "pattern": "^(?![\\s\\S]*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[\\s\\S]*$"
+              },
+              "skills": {
+                "type": "string",
+                "maxLength": 12000,
+                "pattern": "^(?![\\s\\S]*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[\\s\\S]*$"
+              },
+              "avatar": {
+                "type": "string",
+                "maxLength": 2048,
+                "pattern": "^(?!(?:[dD][aA][tT][aA]|[bB][lL][oO][bB]|[fF][iI][lL][eE]|[jJ][aA][vV][aA][sS][cC][rR][iI][pP][tT]):)(?!.*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[^\u0000-\u001F\u007F]*$",
+                "description": "Legacy avatar reference; new packages use media.avatar."
+              },
+              "portrait": {
+                "type": "string",
+                "maxLength": 2048,
+                "pattern": "^(?!(?:[dD][aA][tT][aA]|[bB][lL][oO][bB]|[fF][iI][lL][eE]|[jJ][aA][vV][aA][sS][cC][rR][iI][pP][tT]):)(?!.*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[^\u0000-\u001F\u007F]*$",
+                "description": "Legacy portrait reference; new packages use media.portrait."
+              },
+              "media": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "avatar": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "pattern": "^(?!(?:[dD][aA][tT][aA]|[bB][lL][oO][bB]|[fF][iI][lL][eE]|[jJ][aA][vV][aA][sS][cC][rR][iI][pP][tT]):)(?!.*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[^\u0000-\u001F\u007F]*$",
+                    "description": "Portable media-library key or http(s) URL; never image binary."
+                  },
+                  "portrait": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "pattern": "^(?!(?:[dD][aA][tT][aA]|[bB][lL][oO][bB]|[fF][iI][lL][eE]|[jJ][aA][vV][aA][sS][cC][rR][iI][pP][tT]):)(?!.*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[^\u0000-\u001F\u007F]*$",
+                    "description": "Portable media-library key or http(s) URL; never image binary."
+                  }
+                }
+              },
+              "core_attributes": {
+                "type": "object",
+                "description": "Six Xingyue opening identity attributes.",
+                "additionalProperties": false,
+                "properties": {
+                  "格斗": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 30
+                  },
+                  "平衡": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 30
+                  },
+                  "反应": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 30
+                  },
+                  "感知": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 30
+                  },
+                  "技巧": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 30
+                  },
+                  "精神": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 30
+                  }
+                }
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "grade"
+                ],
+                "properties": {
+                  "grade": {
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "identity"
+                ],
+                "properties": {
+                  "identity": {
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "callname"
+                ],
+                "properties": {
+                  "callname": {
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "background"
+                ],
+                "properties": {
+                  "background": {
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "appearance"
+                ],
+                "properties": {
+                  "appearance": {
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "skills"
+                ],
+                "properties": {
+                  "skills": {
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "avatar"
+                ],
+                "properties": {
+                  "avatar": {
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "portrait"
+                ],
+                "properties": {
+                  "portrait": {
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "media"
+                ],
+                "properties": {
+                  "media": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "avatar"
+                        ],
+                        "properties": {
+                          "avatar": {
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          }
+                        }
+                      },
+                      {
+                        "required": [
+                          "portrait"
+                        ],
+                        "properties": {
+                          "portrait": {
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "required": [
+                  "core_attributes"
+                ],
+                "properties": {
+                  "core_attributes": {
+                    "anyOf": [
+                      { "required": ["格斗"], "properties": { "格斗": { "exclusiveMinimum": 0 } } },
+                      { "required": ["平衡"], "properties": { "平衡": { "exclusiveMinimum": 0 } } },
+                      { "required": ["反应"], "properties": { "反应": { "exclusiveMinimum": 0 } } },
+                      { "required": ["感知"], "properties": { "感知": { "exclusiveMinimum": 0 } } },
+                      { "required": ["技巧"], "properties": { "技巧": { "exclusiveMinimum": 0 } } },
+                      { "required": ["精神"], "properties": { "精神": { "exclusiveMinimum": 0 } } }
+                    ]
+                  }
+                }
+              }
+            ]
           }
         }
       }

@@ -51,9 +51,9 @@
       } else {
         // 回传 token 给打开本窗口的开局页（卡片在自身 origin 校验来源后才采信，故用 '*'）
         var hasOpener = false;
-        try { if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: 'xy-workshop-token', token: token, name: name, avatar: avatar }, '*'); hasOpener = true; } } catch (e) {}
+        try { if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: 'xy-workshop-token', token: token, name: name, avatar: avatar }, safeReturn || '*'); hasOpener = true; } } catch (e) {}
         // 同源 Web 工作台兜底（卡片跨域不依赖此条）
-        try { localStorage.setItem('xy-workshop-token', token); } catch (e) {}
+        try { localStorage.setItem('xingyue-workshop-token', token); } catch (e) {}
         $('msg').textContent = hasOpener ? '登录状态已送回开局页。' : (safeReturn ? '登录成功，即将返回星月开局页。' : '登录成功，请关闭本窗口返回开局页。');
       }
 
