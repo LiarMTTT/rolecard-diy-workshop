@@ -13,6 +13,7 @@ const oldRuntime = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '
 const currentRuntime = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.0', 'control-center.js'), 'utf8');
 const loader = await fs.readFile(path.join(workspaceRoot, '星月', '星月 3.4.0', 'components', 'control_center.js'), 'utf8');
 const preview = await fs.readFile(path.join(workspaceRoot, '星月', '星月 3.4.0', 'components', '_preview.html'), 'utf8');
+const openingPage = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.0', 'opening-page.html'), 'utf8');
 const schema = JSON.parse(await fs.readFile(path.join(repoRoot, 'schemas', 'workshop-package.schema.json'), 'utf8'));
 
 let passed = 0;
@@ -99,7 +100,16 @@ console.log('[ok] 3.4 loader parses as executable script');
 ok(currentRuntime.includes('refreshWorkshop: fetchWorkshopCatalog'), 'network catalog API is not shadowed by panel refresh');
 ok(currentRuntime.includes('if (!sharedContract?.normalizePackage) throw new Error'), 'missing shared contract disables workshop mutations');
 ok(loader.includes('shared/workshop-package-contract.js'), '3.4 loader loads shared browser contract');
-ok(loader.includes('MIN_RUNTIME_REVISION = 26'), '3.4 loader requires runtime r26');
+ok(loader.includes('MIN_RUNTIME_REVISION = 27'), '3.4 loader requires runtime r27');
+ok(currentRuntime.includes("GIT_RUNTIME_REVISION = '3.4.0-stability-r27-20260711'"), '3.4 runtime exposes r27 revision');
+ok(currentRuntime.includes('/api/workshop/login-handoff') && currentRuntime.includes('beginWorkshopLogin'), 'runtime has one-time OAuth handoff fallback');
+ok(currentRuntime.includes('/api/workshop/login-handoff/start') && currentRuntime.includes('workshopHandoffChallenge') && currentRuntime.includes('JSON.stringify({ handoffId, secret })'), 'runtime handoff uses private secret challenge');
+ok(currentRuntime.includes("data.type !== 'xy-workshop-handoff-ready'") && !currentRuntime.includes("data.type !== 'xy-workshop-token'"), 'postMessage only wakes the matching secret claim');
+ok(currentRuntime.includes('renderCharacterPackageMedia') && openingPage.includes('data-xy-package-media'), 'character package detail exposes avatar and portrait media preview');
+ok(currentRuntime.includes('state.workshopAuth.loggedIn && cc.myPackages'), 'login refresh always reloads owned package catalog');
+ok(currentRuntime.includes('Promise.allSettled(refreshes.map(refresh => refresh()))'), 'login refresh updates every mounted opening page');
+ok(currentRuntime.includes('角色包包含仅本机可见的媒体库 key'), 'character publish blocks non-portable local media keys');
+ok(currentRuntime.includes('dataset.xyDiscordAvatar'), 'Discord avatar is rendered from memory-only identity');
 const openingSchema = schema.allOf.find(rule => rule?.if?.properties?.cardScope?.const === 'xingyue-opening-v1')?.then?.properties?.payload;
 ok(openingSchema?.additionalProperties === false, 'schema rejects unknown opening payload fields');
 ok(openingSchema?.properties?.compatibility?.additionalProperties === false, 'schema rejects unknown compatibility fields');

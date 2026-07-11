@@ -33,15 +33,15 @@
     (function () {
       var $ = function (id) { return document.getElementById(id); };
       var hash = String(location.hash || '').replace(/^#/, '');
-      var token = '', ret = '', name = '', avatar = '';
-      try { var p = new URLSearchParams(hash); token = p.get('token') || ''; ret = p.get('return') || ''; name = p.get('name') || ''; avatar = p.get('avatar') || ''; } catch (e) {}
-      // 立即抹掉地址栏里的 token/return，避免泄漏到历史记录
+      var token = '', ret = '', name = '', avatar = '', handoff = '';
+      try { var p = new URLSearchParams(hash); token = p.get('token') || ''; ret = p.get('return') || ''; name = p.get('name') || ''; avatar = p.get('avatar') || ''; handoff = p.get('handoff') || ''; } catch (e) {}
+      // 立即抹掉地址栏里的 token/return/handoff，避免泄漏到历史记录
       try { history.replaceState(null, '', location.pathname); } catch (e) {}
       // 只接受本地 ST 的返回地址（防开放重定向）
       var safeReturn = '';
       try { if (ret && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(ret)) safeReturn = ret; } catch (e) {}
 
-      if (!token) {
+      if (!token && !handoff) {
         $('icon').textContent = '!';
         $('title').textContent = '登录状态异常';
         $('msg').textContent = '未拿到登录凭证，请回到开局页重新登录。';
@@ -49,17 +49,25 @@
         $('stay').style.display = 'none';
         if (!safeReturn) $('back').style.display = 'none';
       } else {
-        // 回传 token 给打开本窗口的开局页（卡片在自身 origin 校验来源后才采信，故用 '*'）
+        // 只向精确本地 return origin 回传；新版只发完成信号，Bearer 由持私密 secret 的卡片领取。
         var hasOpener = false;
-        try { if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: 'xy-workshop-token', token: token, name: name, avatar: avatar }, safeReturn || '*'); hasOpener = true; } } catch (e) {}
-        // 同源 Web 工作台兜底（卡片跨域不依赖此条）
-        try { localStorage.setItem('xingyue-workshop-token', token); } catch (e) {}
+        try {
+          if (safeReturn && window.opener && !window.opener.closed) {
+            var message = handoff
+              ? { type: 'xy-workshop-handoff-ready', handoffId: handoff }
+              : { type: 'xy-workshop-token', token: token, name: name, avatar: avatar };
+            window.opener.postMessage(message, safeReturn);
+            hasOpener = true;
+          }
+        } catch (e) {}
+        // 仅旧版同源 Web 工作台保留 token 兜底；新版 handoff 不把 token 放在页面。
+        try { if (token) localStorage.setItem('xingyue-workshop-token', token); } catch (e) {}
         $('msg').textContent = hasOpener ? '登录状态已送回开局页。' : (safeReturn ? '登录成功，即将返回星月开局页。' : '登录成功，请关闭本窗口返回开局页。');
       }
 
       function doReturn() {
         // #5b：弹窗一律优先自关。OAuth 跨域链常因 COOP 切断 window.opener，但脚本打开的弹窗多数浏览器仍允许 window.close()。
-        // 卡片已通过 cookie 取得登录态，弹窗本质只需关掉自己——绝不在弹窗里 location.replace 另开一个 ST（旧 bug 根源）。
+        // 卡片通过一次性交接领取登录态，弹窗本质只需关掉自己——绝不在弹窗里 location.replace 另开一个 ST。
         try { if (window.opener && !window.opener.closed) { try { window.opener.focus(); } catch (e) {} } } catch (e) {}
         try { window.close(); } catch (e) {}
         // 关不掉才处理：真·独立页(非弹窗，如同源 Web 工作台)回跳本地 ST；普通弹窗提示手动关闭。
@@ -69,7 +77,7 @@
         }, 350);
       }
 
-      var canAuto = token && (window.opener || safeReturn);
+      var canAuto = (token || handoff) && (window.opener || safeReturn);
       var left = 3;
       var timer = null;
       function tick() {

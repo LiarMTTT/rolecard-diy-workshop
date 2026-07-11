@@ -31,6 +31,11 @@ const REVIEW_STATES = new Set(['pending', 'approved', 'rejected', 'withdrawn']);
 const ADMIN_PAGE_FILE = path.join(GATEWAY_ROOT, 'public', 'admin.html');
 const LOGIN_SUCCESS_PAGE_FILE = path.join(GATEWAY_ROOT, 'public', 'login-success.html');
 const SESSION_TTL_MS = Number(env.SESSION_TTL_MS) || 30 * 24 * 60 * 60 * 1000; // 会话 token 有效期，默认 30 天
+const LOGIN_HANDOFF_TTL_MS = Math.max(60_000, Math.min(Number(env.LOGIN_HANDOFF_TTL_MS) || 3 * 60 * 1000, 10 * 60 * 1000));
+const LOGIN_HANDOFF_ID_RE = /^xyh_[A-Za-z0-9_-]{24,120}$/;
+const LOGIN_HANDOFF_CHALLENGE_RE = /^[a-f0-9]{64}$/;
+const LOGIN_HANDOFF_MAX = Math.max(128, Math.min(Number(env.LOGIN_HANDOFF_MAX) || 4096, 16_384));
+const loginHandoffs = new Map(); // OAuth 一次性交接，仅驻留进程内存；领取或超时即删除
 
 function corsHeaders(req, headers = {}) {
   const requestOrigin = String(req?.headers?.origin || '');
@@ -134,6 +139,97 @@ function verifyToken(value) {
   return { publisherId: payload.pid };
 }
 
+function normalizeLoginHandoffId(value) {
+  const id = String(value || '').trim();
+  return LOGIN_HANDOFF_ID_RE.test(id) ? id : '';
+}
+
+function cleanupLoginHandoffs(now = Date.now()) {
+  for (const [id, item] of loginHandoffs) {
+    if (!item || now > item.expiresAt) loginHandoffs.delete(id);
+  }
+}
+
+function registerLoginHandoff(value, challengeValue) {
+  cleanupLoginHandoffs();
+  const id = normalizeLoginHandoffId(value);
+  const challenge = String(challengeValue || '').trim().toLowerCase();
+  if (!id || !LOGIN_HANDOFF_CHALLENGE_RE.test(challenge) || loginHandoffs.has(id)) return '';
+  while (loginHandoffs.size >= LOGIN_HANDOFF_MAX) {
+    const oldest = loginHandoffs.keys().next().value;
+    if (!oldest) break;
+    loginHandoffs.delete(oldest);
+  }
+  loginHandoffs.set(id, { status:'pending', challenge, expiresAt:Date.now() + LOGIN_HANDOFF_TTL_MS });
+  return id;
+}
+
+function launchLoginHandoff(value) {
+  cleanupLoginHandoffs();
+  const id = normalizeLoginHandoffId(value);
+  const item = id ? loginHandoffs.get(id) : null;
+  if (!item || item.status !== 'pending') return '';
+  item.status = 'launched';
+  return id;
+}
+
+function loginHandoffSecretMatches(item, secretValue) {
+  if (!item?.challenge) return false;
+  const actual = crypto.createHash('sha256').update(String(secretValue || ''), 'utf8').digest('hex');
+  return Buffer.byteLength(actual) === Buffer.byteLength(item.challenge)
+    && crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(item.challenge));
+}
+
+function normalizeWorkshopReturn(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    return local && (url.protocol === 'http:' || url.protocol === 'https:') && raw === url.origin ? url.origin : '';
+  } catch (_) { return ''; }
+}
+
+function completeLoginHandoff(value, sessionToken, identity) {
+  cleanupLoginHandoffs();
+  const id = normalizeLoginHandoffId(value);
+  const pending = id ? loginHandoffs.get(id) : null;
+  if (!pending || pending.status !== 'launched') return false;
+  loginHandoffs.set(id, {
+    status: 'ready',
+    challenge: pending.challenge,
+    token: String(sessionToken || ''),
+    name: String(identity?.name || '').slice(0, 64),
+    avatar: String(identity?.avatar || '').slice(0, 600),
+    expiresAt: Date.now() + LOGIN_HANDOFF_TTL_MS,
+  });
+  return true;
+}
+
+function issueDiscordState(returnUrl, handoffId) {
+  const payload = { r: normalizeWorkshopReturn(returnUrl), h: normalizeLoginHandoffId(handoffId), exp: Date.now() + LOGIN_HANDOFF_TTL_MS };
+  const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update('oauth-state:' + body).digest('base64url');
+  return body + '.' + sig;
+}
+
+function parseDiscordState(value) {
+  const raw = String(value || '');
+  const [body, sig] = raw.split('.');
+  if (body && sig) {
+    const expected = crypto.createHmac('sha256', SESSION_SECRET).update('oauth-state:' + body).digest('base64url');
+    if (Buffer.byteLength(sig) === Buffer.byteLength(expected) && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+      try {
+        const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+        if (payload && typeof payload.exp === 'number' && Date.now() <= payload.exp) {
+          return { returnUrl: String(payload.r || ''), handoffId: normalizeLoginHandoffId(payload.h) };
+        }
+      } catch (_) {}
+    }
+  }
+  return null;
+}
+
 function sessionFromRequest(req) {
   // 优先 Authorization: Bearer（卡片 / Web 工作台跨域用），回退 Cookie（admin 同源页兼容）
   const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ''));
@@ -147,14 +243,16 @@ function sessionFromRequest(req) {
 }
 
 // 登录成功：种 token cookie（admin 同源兼容）+ 跳转登录成功交接页；token 放 URL 片段（不上送服务器/不进日志），交接页用 postMessage 回传卡片
-function finishLogin(res, sessionToken, publicBaseUrl, returnUrl, identity) {
+function finishLogin(res, sessionToken, publicBaseUrl, returnUrl, identity, handoffId) {
+  const handoffReady = completeLoginHandoff(handoffId, sessionToken, identity);
   const secureAttr = COOKIE_SECURE ? ' Secure;' : '';
   const dest = new URL(LOGIN_SUCCESS_REDIRECT, publicBaseUrl || PUBLIC_BASE_URL);
-  let frag = 'token=' + encodeURIComponent(sessionToken);
-  if (returnUrl) frag += '&return=' + encodeURIComponent(returnUrl); // 交接页据此提供「跳回 ST」（仅本地地址生效）
-  // B4：身份随片段透传，仅供卡片内存展示；不落 cookie、不入库、不进日志
-  if (identity && identity.name) frag += '&name=' + encodeURIComponent(identity.name);
-  if (identity && identity.avatar) frag += '&avatar=' + encodeURIComponent(identity.avatar);
+  let frag = handoffReady ? ('handoff=' + encodeURIComponent(handoffId)) : ('token=' + encodeURIComponent(sessionToken));
+  const safeReturn = normalizeWorkshopReturn(returnUrl);
+  if (safeReturn) frag += '&return=' + encodeURIComponent(safeReturn);
+  // 新版 handoff 的 token/身份只通过私密 claim 领取；旧客户端仅向精确本地 origin 兼容回传。
+  if (!handoffReady && identity && identity.name) frag += '&name=' + encodeURIComponent(identity.name);
+  if (!handoffReady && identity && identity.avatar) frag += '&avatar=' + encodeURIComponent(identity.avatar);
   dest.hash = frag;
   res.writeHead(302, {
     'set-cookie': `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionToken)}; HttpOnly;${secureAttr} SameSite=${COOKIE_SAME_SITE}; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
@@ -708,7 +806,7 @@ function discordAuthUrl(state) {
   url.searchParams.set('redirect_uri', env.DISCORD_REDIRECT_URI || `${PUBLIC_BASE_URL}/auth/discord/callback`);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', 'identify guilds.members.read');
-  if (state) url.searchParams.set('state', state); // 透传卡片传来的 return（ST origin），回调原样取回
+  if (state) url.searchParams.set('state', state); // 服务端签名的 return + 一次性交接码，防止 OAuth state 被篡改
   return url.toString();
 }
 
@@ -773,6 +871,25 @@ async function route(req, res) {
     if (!isPublicPackage(pkg) && (!session || session.publisherId !== pkg.ownerPublisherId)) return json(req, res, 404, { error: 'not-found' });
     const votes = await readVotes();
     return json(req, res, 200, { ...publicPackageDetail(pkg, publicBaseUrl), votes: voteTally(votes, id), myVote: myVoteOf(votes, id, session?.publisherId) });
+  }
+  if (url.pathname === '/api/workshop/login-handoff/start' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req, 4 * 1024) || '{}');
+    const requestedId = normalizeLoginHandoffId(body.handoffId);
+    if (requestedId && loginHandoffs.has(requestedId)) return json(req, res, 409, { error:'login-handoff-exists' }, { 'cache-control':'no-store' });
+    const id = registerLoginHandoff(requestedId, body.challenge);
+    if (!id) return json(req, res, 400, { error:'invalid-login-handoff' }, { 'cache-control':'no-store' });
+    return json(req, res, 201, { status:'pending' }, { 'cache-control':'no-store' });
+  }
+  if (url.pathname === '/api/workshop/login-handoff' && req.method === 'POST') {
+    const body = JSON.parse(await readBody(req, 4 * 1024) || '{}');
+    cleanupLoginHandoffs();
+    const id = normalizeLoginHandoffId(body.handoffId);
+    if (!id) return json(req, res, 400, { error:'invalid-login-handoff' }, { 'cache-control':'no-store' });
+    const item = loginHandoffs.get(id);
+    if (!item || !loginHandoffSecretMatches(item, body.secret)) return json(req, res, 404, { error:'login-handoff-not-found' }, { 'cache-control':'no-store' });
+    if (item.status !== 'ready') return json(req, res, 202, { status:'pending' }, { 'cache-control':'no-store' });
+    loginHandoffs.delete(id);
+    return json(req, res, 200, { status:'ready', token:item.token, name:item.name, avatar:item.avatar }, { 'cache-control':'no-store' });
   }
   if (url.pathname === '/api/workshop/me') {
     const session = sessionFromRequest(req);
@@ -841,27 +958,41 @@ async function route(req, res) {
     return json(req, res, 200, result);
   }
   if (url.pathname === '/auth/discord/login') {
-    res.writeHead(302, { location: discordAuthUrl(url.searchParams.get('return') || '') });
+    const requestedReturn = url.searchParams.get('return') || '';
+    const returnUrl = normalizeWorkshopReturn(requestedReturn);
+    if (requestedReturn && !returnUrl) return json(req, res, 400, { error:'invalid-login-return' });
+    const requestedHandoff = normalizeLoginHandoffId(url.searchParams.get('handoff'));
+    const handoffId = requestedHandoff ? launchLoginHandoff(requestedHandoff) : '';
+    if (requestedHandoff && !handoffId) return json(req, res, 409, { error:'login-handoff-already-launched' });
+    const state = issueDiscordState(returnUrl, handoffId);
+    res.writeHead(302, { location: discordAuthUrl(state) });
     return res.end();
   }
   if (url.pathname === '/auth/dev/login') {
     if (!DEV_LOGIN_ENABLED) return json(req, res, 404, { error: 'not-found' });
+    const requestedHandoff = normalizeLoginHandoffId(url.searchParams.get('handoff'));
+    const handoffId = requestedHandoff ? launchLoginHandoff(requestedHandoff) : '';
+    if (requestedHandoff && !handoffId) return json(req, res, 409, { error:'login-handoff-already-launched' });
     const { token: sessionToken } = await createSessionForDiscordUser(`dev:${url.searchParams.get('id') || 'local'}`);
-    return finishLogin(res, sessionToken, publicBaseUrl, url.searchParams.get('return') || '');
+    const identity = { name: String(url.searchParams.get('name') || '').slice(0, 64), avatar: String(url.searchParams.get('avatar') || '').slice(0, 600) };
+    return finishLogin(res, sessionToken, publicBaseUrl, url.searchParams.get('return') || '', identity, handoffId);
   }
   if (url.pathname === '/auth/discord/callback') {
     const code = url.searchParams.get('code');
     if (!code) return text(res, 400, 'missing code');
+    const loginState = parseDiscordState(url.searchParams.get('state') || '');
+    if (!loginState) return text(res, 400, 'invalid state');
     const discordTok = await discordToken(code);
     await assertGuildMember(discordTok.access_token);
     const me = await discordMe(discordTok.access_token);
     const { token: sessionToken } = await createSessionForDiscordUser(me.id);
     // B4：身份(昵称/头像)只透传给交接页(URL 片段)→postMessage 回卡片在内存展示；Gateway 不持久化、不种 cookie、不进日志（隐私铁律）
+    const defaultAvatarIndex = me.discriminator && me.discriminator !== '0' ? Number(me.discriminator) % 5 : Number((BigInt(me.id) >> 22n) % 6n);
     const identity = {
       name: String(me.global_name || me.username || '').slice(0, 64),
-      avatar: me.avatar ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=64` : '',
+      avatar: me.avatar ? `https://cdn.discordapp.com/avatars/${me.id}/${me.avatar}.png?size=64` : `https://cdn.discordapp.com/embed/avatars/${defaultAvatarIndex}.png`,
     };
-    return finishLogin(res, sessionToken, publicBaseUrl, url.searchParams.get('state') || '', identity);
+    return finishLogin(res, sessionToken, publicBaseUrl, loginState.returnUrl, identity, loginState.handoffId);
   }
   return json(req, res, 404, { error: 'not-found' });
 }

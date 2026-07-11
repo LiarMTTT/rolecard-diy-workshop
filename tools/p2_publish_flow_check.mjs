@@ -109,6 +109,7 @@ async function waitForHealth() {
 }
 
 async function runFlow() {
+  await assertLoginHandoffFlow();
   const blocked = await request('/api/workshop/packages', {
     method: 'POST',
     cookie: await devLoginCookie('blocked-type-probe'),
@@ -281,6 +282,52 @@ async function runFlow() {
   assert((mine.body.packages || []).some(pkg => pkg.id === packageId && pkg.reviewStatus === 'withdrawn'), 'my packages shows withdrawn state', packageId);
 
   await assertPrivacyFiles();
+}
+
+async function assertLoginHandoffFlow() {
+  const makeHandoff = async () => {
+    const handoffId = 'xyh_' + crypto.randomBytes(24).toString('hex');
+    const secret = crypto.randomBytes(32).toString('hex');
+    const challenge = crypto.createHash('sha256').update(secret, 'utf8').digest('hex');
+    const started = await request('/api/workshop/login-handoff/start', { method:'POST', body:{ handoffId, challenge }, expected:201 });
+    assert(started.body.status === 'pending', 'OAuth handoff challenge registered', handoffId);
+    return { handoffId, secret, challenge };
+  };
+
+  await request('/auth/discord/login?return=' + encodeURIComponent('https://evil.example'), { expected:400 });
+  record('ok', 'OAuth login rejects non-local return', 'evil opener cannot receive login result');
+  await request('/auth/discord/callback?code=fake&state=unsigned', { expected:400 });
+  record('ok', 'OAuth callback rejects unsigned state before token exchange', 'HTTP 400');
+
+  const pendingCreds = await makeHandoff();
+  await request('/auth/discord/login?handoff=' + encodeURIComponent(pendingCreds.handoffId) + '&return=' + encodeURIComponent('http://127.0.0.1:8000'), { expected:302 });
+  await request('/api/workshop/login-handoff/start', { method:'POST', body:{ handoffId:pendingCreds.handoffId, challenge:pendingCreds.challenge }, expected:409 });
+  record('ok', 'OAuth handoff start is create-only', 'existing handle cannot be reset');
+  await request('/auth/discord/login?handoff=' + encodeURIComponent(pendingCreds.handoffId) + '&return=' + encodeURIComponent('http://127.0.0.1:8000'), { expected:409 });
+  record('ok', 'OAuth handoff launch is single-use', 'duplicate OAuth flow rejected');
+  await request('/api/workshop/login-handoff', { method:'POST', body:{ handoffId:pendingCreds.handoffId, secret:'wrong-secret' }, expected:404 });
+  record('ok', 'OAuth handoff rejects wrong secret', 'public handoff id cannot claim token');
+  const pending = await request('/api/workshop/login-handoff', { method:'POST', body:pendingCreds, expected:202 });
+  assert(pending.body.status === 'pending', 'OAuth handoff pending state', 'HTTP 202 pending');
+
+  const creds = await makeHandoff();
+  const avatar = 'https://cdn.discordapp.com/avatars/1234567890/test-avatar.png?size=64';
+  const login = await request('/auth/dev/login?id=handoff-owner&handoff=' + encodeURIComponent(creds.handoffId) + '&name=' + encodeURIComponent('Handoff Tester') + '&avatar=' + encodeURIComponent(avatar), { expected:302 });
+  const location = String(login.headers.get('location') || '');
+  assert(location.includes('#handoff=') && !location.includes('token='), 'new handoff page fragment omits Bearer token', 'handoff signal only');
+  const ready = await request('/api/workshop/login-handoff', { method:'POST', body:creds, expected:200 });
+  assert(ready.body.status === 'ready' && ready.body.token, 'OAuth handoff returns Bearer token', 'ready token received');
+  assert(ready.body.name === 'Handoff Tester' && ready.body.avatar === avatar, 'OAuth handoff returns memory-only identity', 'name and avatar received');
+  const me = await request('/api/workshop/me', { headers:{ authorization:'Bearer ' + ready.body.token }, expected:200 });
+  assert(me.body.loggedIn === true && me.body.publisherId, 'handoff token refreshes login state', me.body.publisherId);
+  await request('/api/workshop/login-handoff', { method:'POST', body:creds, expected:404 });
+  record('ok', 'OAuth handoff one-time consume', 'second claim rejected');
+
+  const loginSuccess = await fs.readFile(path.join(gatewayRoot, 'public', 'login-success.html'), 'utf8');
+  const loginSuccessScript = loginSuccess.match(/<script>([\s\S]*?)<\/script>/i)?.[1] || '';
+  new Function(loginSuccessScript);
+  record('ok', 'login success inline script parses', 'handoff signal page syntax valid');
+  assert(!loginSuccess.includes("safeReturn || '*'") && loginSuccess.includes('xy-workshop-handoff-ready'), 'login success never wildcard-posts Bearer', 'exact local target only');
 }
 
 async function devLoginCookie(id) {

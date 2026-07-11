@@ -166,6 +166,17 @@
 .xy-modal-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}
 .xy-modal-head h3{margin:0;color:#fff;line-height:1.25}
 .xy-modal-close{margin-left:auto}
+[data-xy-workshop-login-pill],[data-xy-workshop-identity-pill]{display:inline-flex;align-items:center;gap:3px}
+[data-xy-discord-avatar]{width:18px;height:18px;border-radius:50%;object-fit:cover;flex:0 0 auto}
+.xy-package-media{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(180px,1.3fr);gap:10px;margin:0 0 10px}
+.xy-package-media[hidden]{display:none!important}
+[data-xy-package-media-card]{margin:0;min-width:0;display:grid;gap:6px;padding:8px;border:1px solid rgba(224,178,123,.24);background:rgba(255,255,255,.025)}
+[data-xy-package-media-image]{display:block;width:100%;height:300px;object-fit:contain;background:rgba(7,11,15,.66)}
+[data-xy-package-media-image="avatar"]{height:150px;aspect-ratio:1;object-fit:cover}
+[data-xy-package-media-card] figcaption{color:#f7dfb0;font-size:12px;text-align:center}
+[data-xy-package-media-fallback]{min-height:90px;display:grid;place-items:center;padding:10px;color:var(--xy-muted);font-size:11px;text-align:center;overflow-wrap:anywhere;border:1px dashed rgba(224,178,123,.22)}
+[data-xy-package-media-fallback][hidden]{display:none!important}
+@container (max-width:620px){.xy-package-media{grid-template-columns:1fr}[data-xy-package-media-image]{height:260px}[data-xy-package-media-image="avatar"]{width:min(160px,100%);height:auto;justify-self:center}}
 .xy-persona-sync-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;margin:0 0 12px;padding:12px;border:1px solid rgba(224,178,123,.28);background:rgba(14,10,7,.62)}
 .xy-persona-sync-card[data-state="ok"]{border-color:rgba(109,211,158,.48)}
 .xy-persona-sync-card[data-state="error"]{border-color:rgba(224,112,112,.55)}
@@ -993,6 +1004,7 @@
       <div><h3 data-xy-package-title>工坊包详情</h3><p data-xy-package-subtitle></p></div>
       <button type="button" class="xy-modal-close" data-xy-opening-action="close-package-detail">关闭</button>
     </div>
+    <div class="xy-package-media" data-xy-package-media hidden></div>
     <div class="xy-preview" data-xy-package-detail>正在读取详情。</div>
     <div class="xy-actions">
       <button type="button" data-xy-opening-action="import-selected-package">下载到当前草稿</button>

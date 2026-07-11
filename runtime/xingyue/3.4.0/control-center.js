@@ -63,7 +63,8 @@
   let lastNpcPerspective = null;
   let lastVariableFix = null; // B17：当前楼变量重算/定点修正的最近一次结果（预览→写回）
   let workshopAuth = { checked: false, loggedIn: false, publisherId: '', error: '' };
-  let workshopIdentity = null; // B4：Discord 昵称/头像，仅内存、随登录交接页 postMessage 传入；不持久化
+  let workshopIdentity = null; // Discord 昵称/头像仅驻留当前 runtime 内存；不写 localStorage、不入库
+  let workshopLoginPoll = null;
   const npcPerspectiveCache = {};
   const disposers = [];
   const runtimeOwner = {};
@@ -94,7 +95,7 @@
   function toast(kind, message) {
     try { if (window.toastr && typeof window.toastr[kind] === 'function') window.toastr[kind](message); } catch (_) {}
   }
-  const GIT_RUNTIME_REVISION = '3.4.0-stability-r26-20260711';
+  const GIT_RUNTIME_REVISION = '3.4.0-stability-r27-20260711';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -814,10 +815,122 @@
     } catch (error) { workshopAuth = { checked:true, loggedIn:false, publisherId:'', error:error.message || String(error) }; }
     return { ...workshopAuth };
   }
-  function workshopLoginUrl() {
+  function workshopCrypto() {
+    const targets = [window];
+    try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
+    for (const target of targets) {
+      try { if (target?.crypto?.getRandomValues && target.crypto.subtle?.digest) return target.crypto; } catch (_) {}
+    }
+    throw new Error('浏览器安全随机数 API 不可用，无法启动 Discord 登录');
+  }
+  function randomWorkshopHex(byteLength) {
+    const bytes = new Uint8Array(byteLength);
+    workshopCrypto().getRandomValues(bytes);
+    return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  }
+  function createWorkshopHandoffCredentials() {
+    return { handoffId:'xyh_' + randomWorkshopHex(24), secret:randomWorkshopHex(32) };
+  }
+  async function workshopHandoffChallenge(secret) {
+    const digest = await workshopCrypto().subtle.digest('SHA-256', new TextEncoder().encode(String(secret || '')));
+    return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+  }
+  function workshopLoginUrl(handoffId = '') {
     let ret = '';
     try { ret = hostWindow().location.origin || ''; } catch (_) {}
-    return gatewayBaseUrl() + '/auth/discord/login' + (ret ? ('?return=' + encodeURIComponent(ret)) : '');
+    const params = new URLSearchParams();
+    if (ret) params.set('return', ret);
+    if (handoffId) params.set('handoff', String(handoffId));
+    const query = params.toString();
+    return gatewayBaseUrl() + '/auth/discord/login' + (query ? ('?' + query) : '');
+  }
+  function cancelWorkshopLoginPoll() {
+    if (workshopLoginPoll?.timer) { try { clearTimeout(workshopLoginPoll.timer); } catch (_) {} }
+    workshopLoginPoll = null;
+  }
+  async function acceptWorkshopLogin(data) {
+    if (!data?.token) throw new Error('登录交接缺少 token');
+    cancelWorkshopLoginPoll();
+    setWorkshopToken(String(data.token));
+    workshopIdentity = data.name || data.avatar ? { name:String(data.name || ''), avatar:String(data.avatar || '') } : null;
+    let auth = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      auth = await checkWorkshopAuth();
+      if (auth.loggedIn || !auth.error) break;
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+    if (!auth?.loggedIn) {
+      if (!auth?.error) { setWorkshopToken(''); workshopIdentity = null; }
+      throw new Error(auth?.error ? ('登录态确认失败：' + auth.error) : '登录 token 无效，请重新登录');
+    }
+    const openingRoots = currentOwnedOpeningRoots();
+    const refreshes = openingRoots.map(root => root?.__xyOpeningRefreshWorkshop).filter(fn => typeof fn === 'function');
+    if (refreshes.length) await Promise.allSettled(refreshes.map(refresh => refresh()));
+    else await fetchWorkshopCatalog();
+    toast('success', workshopIdentity?.name ? ('Discord 登录成功：' + workshopIdentity.name) : 'Discord 登录成功');
+    return { ...workshopAuth };
+  }
+  function beginWorkshopLogin() {
+    cancelWorkshopLoginPoll();
+    const base = gatewayBaseUrl();
+    if (!base) throw new Error('创意工坊登录地址未就绪');
+    const popup = hostWindow().open('about:blank', 'xy-workshop-login', 'width=520,height=720');
+    if (!popup) throw new Error('浏览器阻止了登录窗口，请允许弹窗后重试');
+    const { handoffId, secret } = createWorkshopHandoffCredentials();
+    const poll = { handoffId, secret, attempts:0, timer:null, inFlight:false, run:null };
+    workshopLoginPoll = poll;
+    const pollOnce = async () => {
+      if (workshopLoginPoll !== poll || runtimeDestroyed || poll.inFlight) return;
+      poll.inFlight = true;
+      poll.attempts += 1;
+      try {
+        const res = await fetch(base + '/api/workshop/login-handoff', {
+          method:'POST', credentials:'omit', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ handoffId, secret }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (workshopLoginPoll !== poll || runtimeDestroyed) return;
+        if (res.ok && body.status === 'ready' && body.token) {
+          try { await acceptWorkshopLogin(body); }
+          catch (error) { toast('error', error.message || String(error)); }
+          return;
+        }
+        if (res.status !== 202 && res.status !== 404) throw new Error(String(body.error || ('HTTP ' + res.status)));
+      } catch (error) {
+        if (poll.attempts >= 150) {
+          cancelWorkshopLoginPoll();
+          toast('error', 'Discord 登录状态交接失败：' + (error.message || String(error)));
+          return;
+        }
+      } finally {
+        poll.inFlight = false;
+      }
+      if (workshopLoginPoll !== poll || runtimeDestroyed) return;
+      if (poll.attempts >= 150) {
+        cancelWorkshopLoginPoll();
+        toast('warn', 'Discord 登录等待已超时，请重试');
+        return;
+      }
+      poll.timer = setTimeout(pollOnce, 800);
+    };
+    poll.run = pollOnce;
+    void (async () => {
+      try {
+        const challenge = await workshopHandoffChallenge(secret);
+        const start = await fetch(base + '/api/workshop/login-handoff/start', {
+          method:'POST', credentials:'omit', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ handoffId, challenge }),
+        });
+        const body = await start.json().catch(() => ({}));
+        if (!start.ok) throw new Error(String(body.error || ('HTTP ' + start.status)));
+        if (workshopLoginPoll !== poll || runtimeDestroyed) return;
+        popup.location.replace(workshopLoginUrl(handoffId));
+        poll.timer = setTimeout(pollOnce, 500);
+      } catch (error) {
+        cancelWorkshopLoginPoll();
+        try { popup.close(); } catch (_) {}
+        toast('error', 'Discord 登录启动失败：' + (error.message || String(error)));
+      }
+    })();
+    return handoffId;
   }
   function captureWorkshopLogin() {
     let hw;
@@ -830,20 +943,16 @@
         const gw = gatewayBaseUrl();
         if (!gw || new URL(gw).origin !== event.origin) return;
         const data = event.data;
-        if (!data || data.type !== 'xy-workshop-token' || !data.token) return;
-        setWorkshopToken(String(data.token));
-        workshopIdentity = data.name || data.avatar ? { name:String(data.name || ''), avatar:String(data.avatar || '') } : null;
-        void checkWorkshopAuth().then(async () => {
-          const openingRoot = currentOwnedOpeningRoots()[0];
-          if (openingRoot?.__xyOpeningRefreshWorkshop) await openingRoot.__xyOpeningRefreshWorkshop();
-          else await fetchWorkshopCatalog();
-        }).catch(() => {});
+        const poll = workshopLoginPoll;
+        if (!data || data.type !== 'xy-workshop-handoff-ready' || !poll || data.handoffId !== poll.handoffId) return;
+        if (typeof poll.run === 'function') void poll.run();
       } catch (_) {}
     };
     hw.addEventListener('message', handler);
     const binding = { owner:runtimeOwner, handler };
     hw.__xyWorkshopLoginBinding = binding;
     disposers.push(() => {
+      cancelWorkshopLoginPoll();
       try { hw.removeEventListener('message', handler); } catch (_) {}
       try { if (hw.__xyWorkshopLoginBinding === binding) delete hw.__xyWorkshopLoginBinding; } catch (_) {}
     });
@@ -7804,6 +7913,30 @@
     root.querySelectorAll('[data-xy-requires-agreement]').forEach(button => { button.disabled = !agreed; });
     return agreed;
   }
+  function safeDiscordAvatarUrl(value) {
+    try {
+      const url = new URL(String(value || ''));
+      const discordAvatarPath = url.pathname.startsWith('/avatars/') || url.pathname.startsWith('/embed/avatars/');
+      return url.protocol === 'https:' && url.hostname === 'cdn.discordapp.com' && discordAvatarPath ? url.toString() : '';
+    } catch (_) { return ''; }
+  }
+  function renderWorkshopIdentityPill(node, auth, fallbackText) {
+    if (!node) return;
+    node.replaceChildren();
+    const identity = controlCenter()?.getWorkshopIdentity?.();
+    const avatar = auth.loggedIn ? safeDiscordAvatarUrl(identity?.avatar) : '';
+    if (avatar) {
+      const img = node.ownerDocument.createElement('img');
+      img.dataset.xyDiscordAvatar = '';
+      img.src = avatar;
+      img.alt = '';
+      img.referrerPolicy = 'no-referrer';
+      node.appendChild(img);
+    }
+    const label = node.ownerDocument.createElement('span');
+    label.textContent = auth.loggedIn ? ('Discord 已确认' + (identity?.name ? (' · ' + identity.name) : '')) : fallbackText;
+    node.appendChild(label);
+  }
   function updateWorkshopStatusPills() {
     const auth = state.workshopAuth || {};
     const connection = root.querySelector('[data-xy-workshop-connection]');
@@ -7815,9 +7948,7 @@
     }
     if (login) {
       login.className = auth.loggedIn ? 'xy-pill ok' : 'xy-pill warn';
-      const identity = controlCenter()?.getWorkshopIdentity?.();
-      const who = (auth.loggedIn && identity && identity.name) ? (' · ' + identity.name) : '';
-      login.textContent = (auth.loggedIn ? 'Discord 已确认' : 'Discord 未登录') + who;
+      renderWorkshopIdentityPill(login, auth, 'Discord 未登录');
     }
     root.querySelectorAll('[data-xy-login-button]').forEach(button => {
       button.textContent = auth.loggedIn ? '退出登录' : 'Discord 登录';
@@ -7836,10 +7967,10 @@
   }
   function loginDiscord() {
     const cc = controlCenter();
+    if (cc?.beginWorkshopLogin) return cc.beginWorkshopLogin();
     const url = cc?.workshopLoginUrl ? cc.workshopLoginUrl() : '';
     if (!url) throw new Error('创意工坊登录地址未就绪');
-    // 具名窗口、保留 opener：登录成功交接页要 postMessage(token) 回 opener（不能 noopener，否则 opener 为 null）
-    hostWindow().open(url, 'xy-workshop-login', 'width=520,height=720');
+    return hostWindow().open(url, 'xy-workshop-login', 'width=520,height=720');
   }
 
   let depAutoTimer = null, depAutoLeft = 0;
@@ -8093,7 +8224,6 @@
   root.__xyOpeningFlushState = flushOpeningRootState;
   root.__xyOpeningRefreshContext = refreshOpeningContext;
   root.__xyOpeningRefreshWorkshop = async () => {
-    await refreshWorkshopAuth();
     await refreshWorkshop();
   };
   root.__xyOpeningRefreshPlayer = () => {
@@ -8475,11 +8605,12 @@
     const items = source.filter(pkg => packageMatchesTab(pkg)).filter(packageMatchesFilters);
     status.innerHTML = [
       '<span class="xy-pill">' + escapeHtml(activeTab().label) + '</span>',
-      '<span class="xy-pill ' + (auth.loggedIn ? 'ok' : 'warn') + '">' + (auth.loggedIn ? 'Discord 已确认' : '未登录') + '</span>',
+      '<span class="xy-pill ' + (auth.loggedIn ? 'ok' : 'warn') + '" data-xy-workshop-identity-pill></span>',
       '<span class="xy-pill ' + (state.lastWorkshopError ? 'warn' : 'ok') + '">' + (state.lastWorkshopError ? '连接失败' : (auth.loggedIn ? '工坊已连接' : '公开浏览')) + '</span>',
       '<span class="xy-pill">当前 ' + items.length + ' / 缓存 ' + source.length + '</span>',
       !source.length ? '<span class="xy-pill warn">可用本地示例</span>' : '',
     ].join('');
+    renderWorkshopIdentityPill(status.querySelector('[data-xy-workshop-identity-pill]'), auth, '未登录');
     grid.classList.toggle('single', state.workshopLoading || !items.length);
     if (state.workshopLoading) {
       grid.innerHTML = '<div class="xy-empty-state"><h4>正在读取创意工坊</h4><p>若连接暂时失败，可继续使用本地 JSON 或本地示例。</p></div>';
@@ -8504,11 +8635,61 @@
     renderPlayerFacingText();
   }
 
+  function resolveCharacterPackageMedia(reference, slot, pkg) {
+    const key = String(reference || '').trim();
+    if (!key) return { key:'', src:'' };
+    if (/^https?:\/\//i.test(key)) return { key, src:key };
+    try {
+      const lib = mediaLibrary();
+      const exact = lib?.listManagedAssets?.().find(item => String(item?.key || '') === key);
+      const src = String(exact?.dataUrl || exact?.url || exact?.src || '');
+      if (/^(https?:\/\/|blob:|data:image\/(?:png|jpeg|webp|gif);base64,)/i.test(src)) return { key, src };
+    } catch (_) {}
+    return { key, src:'' };
+  }
+  function renderCharacterPackageMedia(pkg) {
+    const host = root.querySelector('[data-xy-package-media]');
+    if (!host) return;
+    host.replaceChildren();
+    const payload = pkg?.type === 'character' && pkg?.payload && typeof pkg.payload === 'object' ? pkg.payload : null;
+    if (!payload) { host.hidden = true; return; }
+    const specs = [
+      { kind:'avatar', label:'角色头像', reference:payload.media?.avatar || payload.avatar || payload.mediaRefs?.avatar || '' },
+      { kind:'portrait', label:'角色立绘', reference:payload.media?.portraits?.normal || payload.portrait || payload.mediaRefs?.normal || '' },
+    ].filter(item => String(item.reference || '').trim());
+    if (!specs.length) { host.hidden = true; return; }
+    specs.forEach(spec => {
+      const item = resolveCharacterPackageMedia(spec.reference, spec.kind, pkg);
+      const card = host.ownerDocument.createElement('figure');
+      card.dataset.xyPackageMediaCard = spec.kind;
+      const label = host.ownerDocument.createElement('figcaption');
+      label.textContent = spec.label;
+      const fallback = host.ownerDocument.createElement('div');
+      fallback.dataset.xyPackageMediaFallback = '';
+      fallback.textContent = item.src ? '图片加载失败' : ('媒体引用暂不可预览：' + item.key);
+      fallback.hidden = Boolean(item.src);
+      if (item.src) {
+        const img = host.ownerDocument.createElement('img');
+        img.dataset.xyPackageMediaImage = spec.kind;
+        img.src = item.src;
+        img.alt = (payload.name || pkg.title || '角色') + ' · ' + spec.label;
+        img.loading = 'lazy';
+        img.referrerPolicy = 'no-referrer';
+        img.addEventListener('error', () => { img.hidden = true; fallback.hidden = false; }, { once:true });
+        card.appendChild(img);
+      }
+      card.appendChild(fallback);
+      card.appendChild(label);
+      host.appendChild(card);
+    });
+    host.hidden = false;
+  }
   function renderPackageDetail(pkg, detailText) {
     const modal = root.querySelector('[data-xy-package-modal]');
     if (!modal) return;
     root.querySelector('[data-xy-package-title]').textContent = resolvePlayerText(pkg?.title || '工坊包详情');
     root.querySelector('[data-xy-package-subtitle]').textContent = resolvePlayerText('[' + packageTypeLabel(pkg?.type) + '] ' + (pkg?.summary || ''));
+    renderCharacterPackageMedia(pkg);
     root.querySelector('[data-xy-package-detail]').textContent = detailText;
     const openingPackage = pkg?.cardScope === 'xingyue-opening-v1' && pkg?.payload?.target === 'xingyue.opening_day_body';
     root.querySelectorAll('[data-xy-opening-package-action]').forEach(button => { button.hidden = !openingPackage; });
@@ -8562,13 +8743,16 @@
     state.lastWorkshopError = '';
     renderWorkshop();
     try {
+      await refreshWorkshopAuth();
       const items = await cc.refreshWorkshop();
       state.workshopCatalog = Array.isArray(items) ? items : [];
-      if (state.workshopTab === 'mine' && cc.myPackages) {
+      if (state.workshopAuth.loggedIn && cc.myPackages) {
         try {
           const mine = await cc.myPackages();
           state.myPackages = Array.isArray(mine) ? mine : (Array.isArray(mine?.packages) ? mine.packages : []);
-        } catch (error) { state.lastWorkshopError = error.message || String(error); }
+        } catch (error) { state.myPackages = []; state.lastWorkshopError = error.message || String(error); }
+      } else {
+        state.myPackages = [];
       }
     } catch (error) {
       state.lastWorkshopError = error.message || String(error);
@@ -8802,7 +8986,7 @@
           Promise.resolve(controlCenter()?.logout?.()).finally(() => refreshWorkshopAuth().catch(() => updateWorkshopStatusPills()));
         } else {
           loginDiscord();
-          // 任务4.14：删除冗余 setTimeout 轮询（登录成功由 postMessage → captureWorkshopLogin 回调刷新，无需此轮询）
+          // OAuth 成功优先走 postMessage；若 opener 被 Discord 跨源隔离切断，则由一次性交接轮询刷新。
         }
       }
       if (action === 'return-from-workshop') setView(state.returnView || 'boot');
@@ -8920,6 +9104,9 @@
         if (!cc?.publishPackage) throw new Error('控制中心发布 API 未就绪');
         const pkg = buildCharacterPackage();
         if (!pkg) throw new Error('请先填写角色名称');
+        const mediaValues = [pkg.payload?.media?.avatar, pkg.payload?.media?.portraits?.normal, pkg.payload?.media?.portraits?.nude].filter(Boolean);
+        const localMedia = mediaValues.filter(value => !/^https?:\/\//i.test(String(value)));
+        if (localMedia.length) throw new Error('角色包包含仅本机可见的媒体库 key；发布前请把头像与立绘替换为 http(s) URL。本地 JSON 导出不受影响。');
         await cc.publishPackage(pkg);
         toast('success', '角色范本已提交发布');
         const modal = root.querySelector('[data-xy-character-editor-modal]');
@@ -9264,8 +9451,8 @@
   // first_mes 仅放 [data-xy-opening-remote] 短标记；控制中心 fetch 远程开局页 + 注入 + 绑定（display-only，绝不进 LLM）。
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
-  const OPENING_PAGE_REVISION = '20260711-340-opening-p8-r1';
-  const OPENING_PAGE_SHA256 = '0252a589bf3ba1c2e40736782a09b4267223808a095e455291850c3dfd0f0a02';
+  const OPENING_PAGE_REVISION = '20260711-340-opening-r27';
+  const OPENING_PAGE_SHA256 = '044798794e925fc0a647d7b6d4a432eecb227d0bc7d3dc7ed9454a2a9f282e9a';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.0/opening-page.html?v=' + OPENING_PAGE_REVISION,
@@ -9810,6 +9997,7 @@
     votePackage,
     checkWorkshopAuth,
     workshopLoginUrl,
+    beginWorkshopLogin,
     logout,
     getWorkshopIdentity,
     importPackage,
