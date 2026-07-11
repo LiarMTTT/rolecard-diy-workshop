@@ -8,11 +8,17 @@ import contract from '../shared/workshop-package-contract.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const workspaceRoot = path.resolve(repoRoot, '..');
+async function readOptional(filePath) {
+  try { return await fs.readFile(filePath, 'utf8'); } catch (error) {
+    if (error?.code === 'ENOENT') return '';
+    throw error;
+  }
+}
 const example = JSON.parse(await fs.readFile(path.join(repoRoot, 'examples', 'xingyue-opening-v1.example.json'), 'utf8'));
 const oldRuntime = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.3.8', 'control-center.js'), 'utf8');
 const currentRuntime = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.0', 'control-center.js'), 'utf8');
-const loader = await fs.readFile(path.join(workspaceRoot, '星月', '星月 3.4.0', 'components', 'control_center.js'), 'utf8');
-const preview = await fs.readFile(path.join(workspaceRoot, '星月', '星月 3.4.0', 'components', '_preview.html'), 'utf8');
+const loader = await readOptional(path.join(workspaceRoot, '星月', '星月 3.4.0', 'components', 'control_center.js'));
+const preview = await readOptional(path.join(workspaceRoot, '星月', '星月 3.4.0', 'components', '_preview.html'));
 const openingPage = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.0', 'opening-page.html'), 'utf8');
 const schema = JSON.parse(await fs.readFile(path.join(repoRoot, 'schemas', 'workshop-package.schema.json'), 'utf8'));
 
@@ -94,14 +100,18 @@ ok(currentRuntime.includes('openingByScope !== openingByTarget'), '3.4 runtime h
 assert.doesNotThrow(() => new Function(currentRuntime));
 passed += 1;
 console.log('[ok] 3.4 runtime parses as executable script');
-assert.doesNotThrow(() => new Function(loader));
-passed += 1;
-console.log('[ok] 3.4 loader parses as executable script');
 ok(currentRuntime.includes('refreshWorkshop: fetchWorkshopCatalog'), 'network catalog API is not shadowed by panel refresh');
 ok(currentRuntime.includes('if (!sharedContract?.normalizePackage) throw new Error'), 'missing shared contract disables workshop mutations');
-ok(loader.includes('shared/workshop-package-contract.js'), '3.4 loader loads shared browser contract');
-ok(loader.includes('MIN_RUNTIME_REVISION = 27'), '3.4 loader requires runtime r27');
-ok(loader.includes('@90facdc030ffb59902506f1f8737685487f52496/runtime/xingyue/3.4.0/control-center.js'), '3.4 loader pins verified r27 release commit');
+if (loader) {
+  assert.doesNotThrow(() => new Function(loader));
+  passed += 1;
+  console.log('[ok] 3.4 loader parses as executable script');
+  ok(loader.includes('shared/workshop-package-contract.js'), '3.4 loader loads shared browser contract');
+  ok(loader.includes('MIN_RUNTIME_REVISION = 27'), '3.4 loader requires runtime r27');
+  ok(loader.includes('@90facdc030ffb59902506f1f8737685487f52496/runtime/xingyue/3.4.0/control-center.js'), '3.4 loader pins verified r27 release commit');
+} else {
+  console.log('[skip] external Xingyue card loader is outside standalone workshop checkout');
+}
 ok(currentRuntime.includes("GIT_RUNTIME_REVISION = '3.4.0-stability-r27-20260711'"), '3.4 runtime exposes r27 revision');
 ok(currentRuntime.includes('/api/workshop/login-handoff') && currentRuntime.includes('beginWorkshopLogin'), 'runtime has one-time OAuth handoff fallback');
 ok(currentRuntime.includes('/api/workshop/login-handoff/start') && currentRuntime.includes('workshopHandoffChallenge') && currentRuntime.includes('JSON.stringify({ handoffId, secret })'), 'runtime handoff uses private secret challenge');
@@ -117,7 +127,11 @@ ok(openingSchema?.properties?.compatibility?.additionalProperties === false, 'sc
 ok(openingSchema?.properties?.worldFactors?.items?.additionalProperties === false, 'schema rejects unknown opening factor fields');
 ok(schema.allOf.some(rule => rule?.if?.properties?.payload?.properties?.target?.const === 'xingyue.opening_day_body'), 'schema has reverse opening target-to-scope gate');
 ok(openingSchema?.properties?.gradeScope?.allOf?.[0]?.then?.maxItems === 1, 'schema requires all grade scope to stand alone');
-ok(preview.includes('role="dialog"') && preview.includes('aria-modal="true"'), 'preview modal exposes dialog semantics');
-ok(preview.includes("document.activeElement===dialog||!dialog.contains(document.activeElement)"), 'preview traps focus from dialog container');
+if (preview) {
+  ok(preview.includes('role="dialog"') && preview.includes('aria-modal="true"'), 'preview modal exposes dialog semantics');
+  ok(preview.includes("document.activeElement===dialog||!dialog.contains(document.activeElement)"), 'preview traps focus from dialog container');
+} else {
+  console.log('[skip] external Xingyue card preview is outside standalone workshop checkout');
+}
 
 console.log(JSON.stringify({ ok: true, passed }, null, 2));
