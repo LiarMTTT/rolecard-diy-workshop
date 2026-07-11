@@ -1,25 +1,30 @@
 #!/usr/bin/env node
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const args = parseArgs(process.argv.slice(2));
-const sshTarget = args.ssh || process.env.WORKSHOP_SSH || 'rolecard-workshop-vps';
-const gatewayDir = args.gatewayDir || '/opt/rolecard-diy-workshop/gateway';
+const secretFile = args.secretFile || process.env.WORKSHOP_SECRET_FILE || '';
+const secretConfig = secretFile ? loadSecretConfig(secretFile) : null;
+const sshTarget = args.ssh || process.env.WORKSHOP_SSH || secretSshTarget(secretConfig) || 'rolecard-workshop-vps';
+const gatewayDir = args.gatewayDir || secretConfig?.vps?.gatewayDir || '/opt/rolecard-diy-workshop/gateway';
 const localGatewayDir = args.localGateway || fileURLToPath(new URL('../dist-gateway/', import.meta.url));
 const buildReleaseScript = fileURLToPath(new URL('../gateway/tools/build_release.mjs', import.meta.url));
 const shouldBuildRelease = !args.localGateway;
 const inspectOnly = args.inspect === 'true';
+const remoteCheckOnly = args.remoteCheck === 'true';
 const skipScp = args['no-scp'] === 'true' || process.env.WORKSHOP_NO_SCP === '1';
-const container = args.container || 'rolecard-workshop-gateway';
+const container = args.container || secretConfig?.vps?.gatewayContainer || 'rolecard-workshop-gateway';
 const image = args.image || 'node:20-alpine';
 const port = args.port || '8787';
 const dataDir = args.dataDir || '/var/lib/rolecard-diy-workshop';
-const publicDir = args.publicDir || '/usr/local/lighthouse/softwares/cloudreve/workshop-public/xingyue';
-const healthUrl = args.healthUrl || 'https://43-132-171-157.sslip.io/api/workshop/health';
+const publicDir = args.publicDir || secretConfig?.storage?.publicPackageDir || '/usr/local/lighthouse/softwares/cloudreve/workshop-public/xingyue';
+const healthUrl = args.healthUrl || (secretConfig?.gateway?.publicBaseUrl ? `${String(secretConfig.gateway.publicBaseUrl).replace(/\/+$/, '')}/api/workshop/health` : '') || 'https://43-132-171-157.sslip.io/api/workshop/health';
 const corsOrigins = collectOrigins(args);
+let temporaryIdentityDir = '';
 
 function parseArgs(items) {
   const out = { _: [] };
@@ -44,6 +49,7 @@ function collectOrigins(parsed) {
   const values = [];
   if (parsed.corsOrigin) values.push(...String(parsed.corsOrigin).split(','));
   if (process.env.WORKSHOP_CORS_ORIGINS) values.push(...String(process.env.WORKSHOP_CORS_ORIGINS).split(','));
+  if (secretConfig?.gateway?.corsOrigin) values.push(...String(secretConfig.gateway.corsOrigin).split(','));
   values.push(
     'http://127.0.0.1:8000',
     'http://localhost:8000',
@@ -51,6 +57,51 @@ function collectOrigins(parsed) {
     'http://localhost:8766',
   );
   return [...new Set(values.map(item => item.trim()).filter(Boolean))];
+}
+
+function loadSecretConfig(filename) {
+  try {
+    return JSON.parse(readFileSync(path.resolve(filename), 'utf8').replace(/^\uFEFF/, ''));
+  } catch {
+    throw new Error('无法读取或解析 workshop secret file');
+  }
+}
+
+function secretSshTarget(secret) {
+  const host = String(secret?.vps?.host || '').trim();
+  const user = String(secret?.vps?.user || '').trim();
+  return host ? (user ? `${user}@${host}` : host) : '';
+}
+
+function resolveIdentityFile() {
+  if (!secretConfig) return '';
+  const configured = String(secretConfig?.key?.privateKeyPath || '').trim();
+  const expanded = configured.startsWith('~/') || configured.startsWith('~\\')
+    ? path.join(os.homedir(), configured.slice(2))
+    : configured;
+  const candidate = expanded && (path.isAbsolute(expanded) ? expanded : path.resolve(path.dirname(path.resolve(secretFile)), expanded));
+  if (candidate && existsSync(candidate)) return candidate;
+  const embedded = String(secretConfig?.key?.privateKeyOpenSSH || '');
+  if (!embedded) throw new Error('workshop secret file 未提供可用 SSH private key');
+  temporaryIdentityDir ||= mkdtempSync(path.join(os.tmpdir(), 'rolecard-workshop-key-'));
+  const identity = path.join(temporaryIdentityDir, 'id_workshop');
+  if (!existsSync(identity)) {
+    writeFileSync(identity, embedded.endsWith('\n') ? embedded : `${embedded}\n`, { mode: 0o600 });
+    if (process.platform === 'win32') {
+      const acl = spawnSync('icacls.exe', [identity, '/inheritance:r', '/grant:r', `${process.env.USERNAME}:(R)`], { windowsHide: true, stdio: 'ignore' });
+      if (acl.status) throw new Error('无法收紧临时 SSH private key 权限');
+    }
+  }
+  return identity;
+}
+
+function sshOptions() {
+  const identity = resolveIdentityFile();
+  return identity ? ['-i', identity, '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=accept-new'] : [];
+}
+
+function cleanupTemporaryIdentity() {
+  if (temporaryIdentityDir) rmSync(temporaryIdentityDir, { recursive: true, force: true });
 }
 
 function shQuote(value) {
@@ -133,6 +184,13 @@ printf 'health=ok\\n'
 }
 
 async function main() {
+  if (remoteCheckOnly) {
+    const result = await runSshScript(`set -eu\ndocker exec ${shQuote(container)} sh -lc 'cd /app && npm run self-check'\n`);
+    if (result.stderr.trim()) console.error(result.stderr.trim());
+    console.log(result.stdout.trim());
+    if (result.code) process.exitCode = result.code;
+    return;
+  }
   if (inspectOnly) {
     if (shouldBuildRelease) await runCommand(process.execPath, [buildReleaseScript], 'gateway release build');
     const releaseFiles = collectReleaseFiles(localGatewayDir);
@@ -153,7 +211,7 @@ async function main() {
   const result = await runSshScript(script);
   if (result.stderr.trim()) console.error(result.stderr.trim());
   console.log(result.stdout.trim());
-  if (result.code) process.exit(result.code);
+  if (result.code) process.exitCode = result.code;
 }
 
 function collectReleaseFiles(root, relativeDir = '') {
@@ -205,7 +263,7 @@ function runCommand(command, commandArgs, label) {
 
 function runScp(scpArgs, remoteDest) {
   return new Promise((resolve, reject) => {
-    const child = spawn('scp', [...scpArgs, sshTarget + ':' + remoteDest], { windowsHide: true });
+    const child = spawn('scp', [...sshOptions(), ...scpArgs, sshTarget + ':' + remoteDest], { windowsHide: true });
     let stderr = '';
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.on('error', reject);
@@ -218,12 +276,12 @@ function runScp(scpArgs, remoteDest) {
 
 main().catch(error => {
   console.error(error.stderr || error.message || String(error));
-  process.exit(1);
-});
+  process.exitCode = 1;
+}).finally(cleanupTemporaryIdentity);
 
 function runSshScript(script) {
   return new Promise((resolve, reject) => {
-    const child = spawn('ssh', [sshTarget, 'sh -s'], { windowsHide: true });
+    const child = spawn('ssh', [...sshOptions(), sshTarget, 'sh -s'], { windowsHide: true });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {

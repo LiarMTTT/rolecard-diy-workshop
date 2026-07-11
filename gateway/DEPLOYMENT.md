@@ -14,6 +14,18 @@ npm --prefix gateway run build:release
 
 `dist-pages/` is for GitHub Pages. `dist-gateway/` is the minimal VPS Gateway artifact.
 
+For the maintained production VPS, keep the ignored `rolecard-workshop-secrets.secret.json`
+at the repository root and let the deploy tool consume it without printing secret values:
+
+```bash
+node tools/deploy_gateway_docker.mjs --secretFile rolecard-workshop-secrets.secret.json
+node tools/deploy_gateway_docker.mjs --remoteCheck --secretFile rolecard-workshop-secrets.secret.json
+```
+
+If the configured private-key path is unavailable, the tool creates a restricted temporary
+key from the sealed backup and deletes it when the process exits. Uploaded releases remain
+inactive until the new container passes health checks.
+
 In the GitHub repository settings, set Pages source to GitHub Actions. The bundled workflow publishes the static workshop contracts and runtime files; it does not publish the Gateway server process.
 
 ## 1. DNS And HTTPS
