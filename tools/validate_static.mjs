@@ -12,6 +12,7 @@ const requiredJson = [
   'examples/character.example.json',
   'examples/user_identity.example.json',
   'examples/world_factor.example.json',
+  'examples/xingyue-opening-v1.example.json',
 ];
 
 function readJson(relativePath) {
@@ -49,7 +50,7 @@ const packageSchema = await readJson('schemas/workshop-package.schema.json');
 const allowedTypes = new Set(packageSchema.properties?.type?.enum || []);
 assert(allowedTypes.size > 0, 'schema type enum is empty');
 
-for (const example of ['examples/character.example.json', 'examples/user_identity.example.json', 'examples/world_factor.example.json']) {
+for (const example of ['examples/character.example.json', 'examples/user_identity.example.json', 'examples/world_factor.example.json', 'examples/xingyue-opening-v1.example.json']) {
   const pkg = await readJson(example);
   assert(allowedTypes.has(pkg.type), `${example} has unsupported type ${pkg.type}`);
   for (const key of packageSchema.required || []) {
@@ -64,7 +65,10 @@ for (const { relativePath, manifest } of runtimeManifests) {
     const filename = decodeURIComponent(new URL(String(mod.url), 'https://workshop.invalid/').pathname.split('/').pop() || '');
     assert(filename && filename !== '.' && filename !== '..', `${mod.id} has invalid module url`);
     const filePath = path.join(root, runtimeDir, filename);
-    const actual = sha256(await fs.readFile(filePath));
+    const content = await fs.readFile(filePath);
+    assert(Number.isInteger(mod.bytes) && mod.bytes >= 0, `${mod.id} bytes must be a non-negative integer`);
+    assert(content.byteLength === mod.bytes, `${mod.id} bytes mismatch: ${content.byteLength} !== ${mod.bytes}`);
+    const actual = sha256(content);
     assert(actual === mod.sha256, `${mod.id} sha256 mismatch: ${actual} !== ${mod.sha256}`);
     console.log(`[sha256] ${mod.id}`);
   }

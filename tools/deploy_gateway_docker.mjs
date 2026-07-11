@@ -2,13 +2,16 @@
 
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 const args = parseArgs(process.argv.slice(2));
 const sshTarget = args.ssh || process.env.WORKSHOP_SSH || 'rolecard-workshop-vps';
 const gatewayDir = args.gatewayDir || '/opt/rolecard-diy-workshop/gateway';
-const localGatewayDir = args.localGateway || fileURLToPath(new URL('../gateway/', import.meta.url));
+const localGatewayDir = args.localGateway || fileURLToPath(new URL('../dist-gateway/', import.meta.url));
+const buildReleaseScript = fileURLToPath(new URL('../gateway/tools/build_release.mjs', import.meta.url));
+const shouldBuildRelease = !args.localGateway;
+const inspectOnly = args.inspect === 'true';
 const skipScp = args['no-scp'] === 'true' || process.env.WORKSHOP_NO_SCP === '1';
 const container = args.container || 'rolecard-workshop-gateway';
 const image = args.image || 'node:20-alpine';
@@ -54,10 +57,23 @@ function shQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-function remoteScript() {
+function remoteScript(appDir, useActiveRelease = false) {
   return `
 set -eu
 cd ${shQuote(gatewayDir)}
+APP_DIR=${shQuote(appDir)}
+RELEASES_DIR=${shQuote(path.posix.join(gatewayDir, '.releases'))}
+ACTIVE_FILE="$RELEASES_DIR/.active"
+if [ ${useActiveRelease ? '1' : '0'} -eq 1 ] && [ -f "$ACTIVE_FILE" ]; then
+  ACTIVE_DIR=$(cat "$ACTIVE_FILE")
+  case "$ACTIVE_DIR" in
+    "$RELEASES_DIR"/release-*) APP_DIR="$ACTIVE_DIR" ;;
+    ${shQuote(gatewayDir)}) APP_DIR="$ACTIVE_DIR" ;;
+    *) printf 'invalid active release: %s\n' "$ACTIVE_DIR" >&2; exit 3 ;;
+  esac
+fi
+test -f "$APP_DIR/server.js"
+test -f "$APP_DIR/shared/workshop-package-contract.js"
 STAMP=$(date +%Y%m%d%H%M%S)
 cp .env ".env.bak.$STAMP"
 CORS=$(grep '^CORS_ORIGIN=' .env | cut -d= -f2- | tr -d '\\r' || true)
@@ -78,7 +94,8 @@ if docker ps -a --format '{{.Names}}' | grep -qx "$OLD_NAME"; then
   docker stop "$OLD_NAME" >/dev/null
   docker rename "$OLD_NAME" "$BAK_NAME"
 fi
-if ! docker run -d --name "$OLD_NAME" --restart unless-stopped --env-file ${shQuote(gatewayDir)}/.env -p ${port}:8787 -v ${shQuote(gatewayDir)}:/app:ro -v ${shQuote(dataDir)}:/data -v ${shQuote(publicDir)}:/public-packages -w /app ${shQuote(image)} node server.js >/tmp/rolecard-workshop-new-container.txt; then
+if ! docker run -d --name "$OLD_NAME" --restart unless-stopped --env-file ${shQuote(gatewayDir)}/.env -p ${port}:8787 -v "$APP_DIR:/app:ro" -v ${shQuote(dataDir)}:/data -v ${shQuote(publicDir)}:/public-packages -w /app ${shQuote(image)} node server.js >/tmp/rolecard-workshop-new-container.txt; then
+  docker rm -f "$OLD_NAME" >/dev/null 2>&1 || true
   if docker ps -a --format '{{.Names}}' | grep -qx "$BAK_NAME"; then
     docker rename "$BAK_NAME" "$OLD_NAME"
     docker start "$OLD_NAME" >/dev/null
@@ -95,6 +112,16 @@ if ! curl -fsS ${shQuote(healthUrl)} >/dev/null; then
   fi
   exit 2
 fi
+ACTIVE_TMP="$RELEASES_DIR/.active.tmp.$$"
+if ! (mkdir -p "$RELEASES_DIR" && printf '%s\n' "$APP_DIR" > "$ACTIVE_TMP" && mv "$ACTIVE_TMP" "$ACTIVE_FILE"); then
+  rm -f "$ACTIVE_TMP"
+  docker rm -f "$OLD_NAME" >/dev/null || true
+  if docker ps -a --format '{{.Names}}' | grep -qx "$BAK_NAME"; then
+    docker rename "$BAK_NAME" "$OLD_NAME"
+    docker start "$OLD_NAME" >/dev/null
+  fi
+  exit 3
+fi
 if docker ps -a --format '{{.Names}}' | grep -qx "$BAK_NAME"; then
   docker rm "$BAK_NAME" >/dev/null
 fi
@@ -106,29 +133,74 @@ printf 'health=ok\\n'
 }
 
 async function main() {
+  if (inspectOnly) {
+    if (shouldBuildRelease) await runCommand(process.execPath, [buildReleaseScript], 'gateway release build');
+    const releaseFiles = collectReleaseFiles(localGatewayDir);
+    assertReleasePayload(releaseFiles, localGatewayDir);
+    console.log(JSON.stringify({ localGatewayDir, files: releaseFiles }, null, 2));
+    return;
+  }
+  let appDir = gatewayDir;
   if (skipScp) {
     console.log('[scp] 跳过代码同步（--no-scp），仅更新 .env 并重建容器');
   } else {
-    await syncCode();
+    if (shouldBuildRelease) await runCommand(process.execPath, [buildReleaseScript], 'gateway release build');
+    const releaseFiles = collectReleaseFiles(localGatewayDir);
+    assertReleasePayload(releaseFiles, localGatewayDir);
+    appDir = await syncCode(releaseFiles);
   }
-  const script = remoteScript();
+  const script = remoteScript(appDir, skipScp);
   const result = await runSshScript(script);
   if (result.stderr.trim()) console.error(result.stderr.trim());
   console.log(result.stdout.trim());
   if (result.code) process.exit(result.code);
 }
 
-async function syncCode() {
-  const serverJs = path.join(localGatewayDir, 'server.js');
-  const publicDir = path.join(localGatewayDir, 'public');
-  console.log('[scp] 同步 server.js + public/* → ' + sshTarget + ':' + gatewayDir);
-  // 单文件精确路径，避免 scp -r 在远程已有 public 目录时嵌套成 public/public
-  await runScp([serverJs], gatewayDir + '/server.js');
-  const publicFiles = readdirSync(publicDir, { withFileTypes: true }).filter(entry => entry.isFile()).map(entry => entry.name);
-  for (const name of publicFiles) {
-    await runScp([path.join(publicDir, name)], gatewayDir + '/public/' + name);
+function collectReleaseFiles(root, relativeDir = '') {
+  const absoluteDir = path.join(root, relativeDir);
+  const files = [];
+  for (const entry of readdirSync(absoluteDir, { withFileTypes: true })) {
+    const relativePath = path.join(relativeDir, entry.name);
+    if (entry.isDirectory()) files.push(...collectReleaseFiles(root, relativePath));
+    else if (entry.isFile()) files.push(relativePath.split(path.sep).join('/'));
   }
-  console.log('[scp] 代码同步完成（public: ' + (publicFiles.join(', ') || '无') + '）');
+  return files.sort();
+}
+
+function assertReleasePayload(files, root) {
+  for (const required of ['server.js', 'package.json', 'shared/workshop-package-contract.js']) {
+    if (!files.includes(required)) throw new Error('gateway release 缺少必需文件: ' + required);
+  }
+  const packageJson = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+  if (packageJson.type !== 'module') throw new Error('gateway release package.json 必须声明 type=module');
+  const contract = readFileSync(path.join(root, 'shared', 'workshop-package-contract.js'), 'utf8');
+  if (/from\s+['"]\.\.\/\.\.\/shared\//.test(contract)) {
+    throw new Error('gateway release shared contract 不是自包含文件');
+  }
+}
+
+async function syncCode(releaseFiles) {
+  const releaseId = `release-${Date.now()}-${process.pid}`;
+  const remoteReleaseDir = path.posix.join(gatewayDir, '.releases', releaseId);
+  console.log('[scp] 同步完整 dist-gateway → ' + sshTarget + ':' + remoteReleaseDir);
+  const remoteDirs = [...new Set(releaseFiles.map(name => path.posix.dirname(name)).filter(name => name !== '.'))];
+  const prepare = await runSshScript(`set -eu\nmkdir -p ${[remoteReleaseDir, ...remoteDirs.map(name => path.posix.join(remoteReleaseDir, name))].map(shQuote).join(' ')}\n`);
+  if (prepare.code) throw new Error('远程目录准备失败(code ' + prepare.code + '): ' + prepare.stderr.trim());
+  for (const name of releaseFiles) {
+    await runScp([path.join(localGatewayDir, ...name.split('/'))], path.posix.join(remoteReleaseDir, name));
+  }
+  const ready = await runSshScript(`set -eu\ntest -f ${shQuote(path.posix.join(remoteReleaseDir, 'server.js'))}\ntest -f ${shQuote(path.posix.join(remoteReleaseDir, 'shared/workshop-package-contract.js'))}\n: > ${shQuote(path.posix.join(remoteReleaseDir, '.ready'))}\n`);
+  if (ready.code) throw new Error('远程 release 校验失败(code ' + ready.code + '): ' + ready.stderr.trim());
+  console.log('[scp] 代码同步完成（files: ' + releaseFiles.length + '）');
+  return remoteReleaseDir;
+}
+
+function runCommand(command, commandArgs, label) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, commandArgs, { windowsHide: true, stdio: 'inherit' });
+    child.on('error', reject);
+    child.on('close', code => code ? reject(new Error(label + ' 失败(code ' + code + ')')) : resolve());
+  });
 }
 
 function runScp(scpArgs, remoteDest) {

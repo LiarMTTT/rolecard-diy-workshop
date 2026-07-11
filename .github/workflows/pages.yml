@@ -27,8 +27,8 @@ jobs:
         with:
           node-version: 20
 
-      - name: Validate static contract
-        run: npm run validate:static
+      - name: Validate workshop contracts
+        run: npm run check
 
       - name: Build Pages artifact
         run: npm run build:pages
