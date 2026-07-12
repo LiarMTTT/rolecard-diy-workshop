@@ -177,11 +177,16 @@
     }
     .notice.error { color: var(--danger); }
     .notice.ok { color: var(--ok); }
+    .review-media { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+    .review-media figure { margin: 0; display: grid; gap: 6px; min-width: 0; }
+    .review-media img { display: block; width: 100%; height: 260px; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #101828; }
+    .review-media figcaption { color: var(--muted); font-size: 12px; text-align: center; }
     @media (max-width: 850px) {
       .toolbar,
       .layout {
         grid-template-columns: 1fr;
       }
+      .review-media { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -231,6 +236,7 @@
     const state = {
       packages: [],
       selected: null,
+      mediaObjectUrls: [],
     };
     const $ = id => document.getElementById(id);
     const savedToken = localStorage.getItem('xyWorkshopAdminToken') || '';
@@ -311,6 +317,7 @@
           <button id="reject" class="danger" type="button" ${disabled}>Reject</button>
           <button id="copyId" type="button">Copy ID</button>
         </div>
+        <div id="reviewMedia" class="review-media" hidden></div>
         <textarea id="reason" placeholder="Reject reason"></textarea>
         <pre>${esc(JSON.stringify(pkg, null, 2))}</pre>
       `;
@@ -320,6 +327,29 @@
         await navigator.clipboard.writeText(pkg.id);
         setNotice('Package ID copied.', 'ok');
       });
+      void renderReviewMedia(pkg);
+    }
+
+    async function renderReviewMedia(pkg) {
+      state.mediaObjectUrls.forEach(url => URL.revokeObjectURL(url));
+      state.mediaObjectUrls = [];
+      const host = $('reviewMedia');
+      const entries = Object.entries(pkg.reviewAssets || {});
+      if (!host || !entries.length) return;
+      const labels = { avatar:'Avatar', portraitNormal:'Normal portrait', portraitNude:'Nude portrait' };
+      const cards = await Promise.all(entries.map(async ([slot, url]) => {
+        try {
+          const res = await fetch(url, { headers:tokenHeaders(), cache:'no-store' });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const objectUrl = URL.createObjectURL(await res.blob());
+          state.mediaObjectUrls.push(objectUrl);
+          return `<figure><img src="${esc(objectUrl)}" alt="${esc(labels[slot] || slot)}"><figcaption>${esc(labels[slot] || slot)}</figcaption></figure>`;
+        } catch (error) {
+          return `<figure><div class="empty">Preview unavailable</div><figcaption>${esc(labels[slot] || slot)} · ${esc(error.message)}</figcaption></figure>`;
+        }
+      }));
+      host.innerHTML = cards.join('');
+      host.hidden = false;
     }
 
     async function selectPackage(id) {

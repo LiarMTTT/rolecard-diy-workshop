@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>星月 3.4.1 · D2 HUD 定位预览</title>
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:#080b11;color:#e7f5ff;font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+    body{min-height:150vh;background:radial-gradient(circle at 10% 18%,rgba(49,149,191,.18),transparent 30%),linear-gradient(180deg,#0d1520,#080b11 70%)}
+    #top-settings-holder{position:fixed;z-index:100;inset:0 0 auto;height:52px;display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid rgba(126,212,255,.3);background:#151a22}
+    #top-settings-holder strong{margin-right:auto;color:#fff;letter-spacing:1px}
+    #top-settings-holder button,.preview-controls button{min-height:40px;padding:7px 11px;border:1px solid rgba(126,212,255,.4);border-radius:8px;background:#162536;color:#dff6ff;cursor:pointer}
+    #top-settings-holder button[aria-pressed="true"],.preview-controls button[aria-pressed="true"]{border-color:#71dcff;background:#183c52;color:#fff}
+    main{width:min(760px,100%);margin:auto;padding:112px 16px 190px}
+    .preview-controls{position:relative;z-index:2;display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;padding:12px;border:1px solid rgba(126,212,255,.24);border-radius:12px;background:rgba(12,23,34,.92)}
+    .preview-controls p{flex:1 0 100%;margin:0;color:#a9c6d5}
+    .message{margin:0 0 14px;padding:16px;border:1px solid rgba(126,212,255,.16);border-radius:12px;background:rgba(17,26,38,.78);box-shadow:0 12px 34px rgba(0,0,0,.22)}
+    .message h2{margin:0 0 8px;font-size:17px;color:#fff}
+    .message p{margin:0;color:#acc6d4}
+    .geometry{position:fixed;z-index:120;right:8px;top:108px;width:min(290px,calc(100vw - 16px));padding:8px 10px;border:1px solid rgba(126,212,255,.3);border-radius:8px;background:rgba(5,12,20,.9);color:#aee9ff;font:11px/1.45 Consolas,monospace;pointer-events:none}
+    #form_sheld{position:fixed;z-index:100;inset:auto 0 0;min-height:86px;padding:10px;border-top:1px solid rgba(126,212,255,.3);background:#151a22;transition:min-height .18s ease}
+    #form_sheld[data-expanded="1"]{min-height:154px}
+    #send_form{height:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}
+    #send_form button,#send_textarea{min-height:44px;border:1px solid rgba(126,212,255,.28);border-radius:9px;background:#0e1722;color:#e8f8ff}
+    #send_form button{padding:0 14px}
+    #send_textarea{width:100%;padding:10px 12px}
+    #xingyue-status-hud-drawer{--xy-hud-drawer-y:0px;--xy-hud-drawer-max:100dvh;position:fixed;z-index:110;left:0;right:0;top:var(--xy-hud-drawer-y);bottom:auto;pointer-events:none;color:#d9f4ff;font:12px/1.45 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+    #xingyue-status-hud-drawer[data-placement="bottom"]{top:var(--xy-hud-drawer-y);bottom:auto}
+    .xy-hud-drawer-handle{position:absolute;top:0;left:50%;transform:translateX(-50%);pointer-events:auto;min-width:132px;height:44px;padding:0 18px;border:1px solid rgba(107,199,242,.65);border-top:0;border-radius:0 0 12px 12px;background:linear-gradient(180deg,rgba(8,18,30,.98),rgba(4,9,16,.98));color:#d8f5ff;box-shadow:0 8px 22px rgba(0,0,0,.48),0 0 14px rgba(75,228,255,.18);cursor:pointer;letter-spacing:1px}
+    [data-placement="bottom"] .xy-hud-drawer-handle{top:auto;bottom:0;border-top:1px solid rgba(107,199,242,.65);border-bottom:0;border-radius:12px 12px 0 0;background:linear-gradient(0deg,rgba(8,18,30,.98),rgba(4,9,16,.98));box-shadow:0 -8px 22px rgba(0,0,0,.48),0 0 14px rgba(75,228,255,.18)}
+    .xy-hud-drawer-panel{position:absolute;top:0;left:0;right:0;height:min(72dvh,620px,var(--xy-hud-drawer-max));max-height:var(--xy-hud-drawer-max);min-height:min(320px,var(--xy-hud-drawer-max));padding:62px 18px 18px;background:rgba(6,10,16,.9);border:1px solid rgba(107,199,242,.36);box-shadow:0 16px 46px rgba(0,0,0,.55);opacity:0;transform:translateY(-14px);transition:opacity .18s ease,transform .2s ease;pointer-events:none}
+    [data-placement="bottom"] .xy-hud-drawer-panel{top:auto;bottom:0;padding:18px 18px 62px;transform:translateY(14px);box-shadow:0 -16px 46px rgba(0,0,0,.55)}
+    [data-open="1"] .xy-hud-drawer-panel{opacity:1;transform:translateY(0);pointer-events:auto}
+    .hud-preview-card{height:100%;display:grid;place-items:center;border:1px solid rgba(107,199,242,.28);border-radius:12px;background:linear-gradient(180deg,rgba(21,50,70,.62),rgba(8,17,27,.72));text-align:center}
+    .hud-preview-card strong{display:block;font-size:20px;color:#fff}.hud-preview-card span{color:#9fc5d7}
+    @media(max-width:560px){main{padding-inline:10px}.geometry{top:248px}.preview-controls button{flex:1 1 130px}}
+    @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+  </style>
+</head>
+<body>
+  <header id="top-settings-holder">
+    <strong>ST 顶栏</strong>
+    <button type="button" data-placement-button="top" aria-pressed="true">顶部入口</button>
+    <button type="button" data-placement-button="bottom" aria-pressed="false">输入框上方</button>
+  </header>
+  <main>
+    <section class="preview-controls">
+      <p>这是 D2 定位合同的交互预览。切换入口位置或改变输入区高度，状态栏入口应始终留在可见视口内，且不与顶栏、输入框相交。</p>
+      <button type="button" id="toggle-input">增加输入区扩展行</button>
+      <button type="button" id="toggle-drawer">展开／收起抽屉</button>
+    </section>
+    <article class="message"><h2>开局页内容区域</h2><p>顶部入口固定在 ST 图标栏下方；输入框上方入口固定在实际输入区顶部之上。</p></article>
+    <article class="message"><h2>动态布局验证</h2><p>输入区高度发生变化时，ResizeObserver 会触发重新定位，不需要刷新页面。</p></article>
+    <article class="message"><h2>长页面验证</h2><p>滚动页面后仍使用可见视口坐标，不再依赖 CSS bottom，因此不会落到长页面末尾。</p></article>
+  </main>
+  <div class="geometry" id="geometry" aria-live="polite"></div>
+  <div id="xingyue-status-hud-drawer" data-placement="top" data-open="0">
+    <button type="button" class="xy-hud-drawer-handle" aria-expanded="false">状态栏</button>
+    <section class="xy-hud-drawer-panel" aria-hidden="true"><div class="hud-preview-card"><div><strong>OMNI-NEXUS</strong><span>状态栏抽屉预览</span></div></div></section>
+  </div>
+  <footer id="form_sheld" data-expanded="0">
+    <div id="send_form"><button type="button">菜单</button><input id="send_textarea" aria-label="消息输入框" placeholder="输入想发送的消息"><button type="button">发送</button></div>
+  </footer>
+  <script>
+    const drawer = document.getElementById('xingyue-status-hud-drawer');
+    const geometry = document.getElementById('geometry');
+    const inputShell = document.getElementById('form_sheld');
+    function visibleViewportRect(){
+      const layoutHeight = Math.max(1, innerHeight || document.documentElement.clientHeight || 800);
+      const vv = visualViewport;
+      const top = vv && Number.isFinite(vv.offsetTop) ? Math.max(0, vv.offsetTop) : 0;
+      const height = vv && Number.isFinite(vv.height) ? Math.max(1, vv.height) : layoutHeight;
+      const bottom = Math.max(top + 1, Math.min(layoutHeight, top + height));
+      return { top:Math.round(top), bottom:Math.round(bottom) };
+    }
+    function measureTopChromeBottom(){
+      const viewport = visibleViewportRect();
+      const rect = document.getElementById('top-settings-holder').getBoundingClientRect();
+      return Math.max(viewport.top, Math.min(viewport.bottom - 44, Math.round(rect.bottom + 4)));
+    }
+    function measureBottomInputTop(){
+      const viewport = visibleViewportRect();
+      const rect = inputShell.getBoundingClientRect();
+      return Math.max(viewport.top + 44, Math.min(viewport.bottom - 4, Math.round(rect.top - 6)));
+    }
+    function syncDrawer(){
+      const viewport = visibleViewportRect();
+      const placement = drawer.dataset.placement;
+      const anchor = placement === 'bottom' ? measureBottomInputTop() : measureTopChromeBottom();
+      const available = placement === 'bottom' ? anchor - viewport.top - 4 : viewport.bottom - anchor - 4;
+      drawer.style.setProperty('--xy-hud-drawer-y', anchor + 'px');
+      drawer.style.setProperty('--xy-hud-drawer-max', Math.max(44, Math.round(available)) + 'px');
+      const topRect = document.getElementById('top-settings-holder').getBoundingClientRect();
+      const inputRect = inputShell.getBoundingClientRect();
+      const handleRect = drawer.querySelector('.xy-hud-drawer-handle').getBoundingClientRect();
+      geometry.textContent = `placement=${placement}  viewport=${viewport.top}..${viewport.bottom}\nhandle=${Math.round(handleRect.top)}..${Math.round(handleRect.bottom)}  topBar.bottom=${Math.round(topRect.bottom)}  input.top=${Math.round(inputRect.top)}`;
+    }
+    document.querySelectorAll('[data-placement-button]').forEach(button => button.addEventListener('click', () => {
+      drawer.dataset.placement = button.dataset.placementButton;
+      document.querySelectorAll('[data-placement-button]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+      syncDrawer();
+    }));
+    document.getElementById('toggle-input').addEventListener('click', event => {
+      const expanded = inputShell.dataset.expanded !== '1';
+      inputShell.dataset.expanded = expanded ? '1' : '0';
+      event.currentTarget.textContent = expanded ? '移除输入区扩展行' : '增加输入区扩展行';
+    });
+    document.getElementById('toggle-drawer').addEventListener('click', () => {
+      const open = drawer.dataset.open !== '1';
+      drawer.dataset.open = open ? '1' : '0';
+      drawer.querySelector('.xy-hud-drawer-handle').setAttribute('aria-expanded', String(open));
+      drawer.querySelector('.xy-hud-drawer-panel').setAttribute('aria-hidden', String(!open));
+    });
+    const observer = new ResizeObserver(syncDrawer);
+    observer.observe(document.getElementById('top-settings-holder'));
+    observer.observe(inputShell);
+    addEventListener('resize', syncDrawer);
+    visualViewport?.addEventListener('resize', syncDrawer);
+    visualViewport?.addEventListener('scroll', syncDrawer);
+    syncDrawer();
+  </script>
+</body>
+</html>

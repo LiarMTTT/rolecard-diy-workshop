@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check tools/review.mjs && node --check tools/sync_public_packages.mjs && node --check tools/self_check.mjs && node --check tools/server_takeover.mjs && node --check tools/build_release.mjs",
+    "check": "node --check server.js && node --check tools/review.mjs && node --check tools/sync_public_packages.mjs && node --check tools/self_check.mjs && node --check tools/server_takeover.mjs && node --check tools/build_release.mjs && node --check tools/purge_known_samples.mjs",
     "review": "node tools/review.mjs",
     "sync:public": "node tools/sync_public_packages.mjs",
     "self-check": "node tools/self_check.mjs",
     "takeover": "node tools/server_takeover.mjs",
-    "build:release": "node tools/build_release.mjs"
+    "build:release": "node tools/build_release.mjs",
+    "purge:known-samples": "node tools/purge_known_samples.mjs"
   },
   "engines": {
     "node": ">=20"

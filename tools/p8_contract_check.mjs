@@ -17,9 +17,12 @@ async function readOptional(filePath) {
 const example = JSON.parse(await fs.readFile(path.join(repoRoot, 'examples', 'xingyue-opening-v1.example.json'), 'utf8'));
 const oldRuntime = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.3.8', 'control-center.js'), 'utf8');
 const currentRuntime = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.0', 'control-center.js'), 'utf8');
+const runtime341 = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.1', 'control-center.js'), 'utf8');
 const loader = await readOptional(path.join(workspaceRoot, '星月', '星月 3.4.0', 'components', 'control_center.js'));
 const preview = await readOptional(path.join(workspaceRoot, '星月', '星月 3.4.0', 'components', '_preview.html'));
 const openingPage = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.0', 'opening-page.html'), 'utf8');
+const openingPage341 = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.1', 'opening-page.html'), 'utf8');
+const gatewayServer = await fs.readFile(path.join(repoRoot, 'gateway', 'server.js'), 'utf8');
 const schema = JSON.parse(await fs.readFile(path.join(repoRoot, 'schemas', 'workshop-package.schema.json'), 'utf8'));
 
 let passed = 0;
@@ -88,6 +91,55 @@ assert.throws(() => contract.normalizePackage({ ...identity, payload:{ avatar:'j
 passed += 1;
 console.log('[ok] unsafe identity media scheme rejected by shared contract');
 
+const character = {
+  packageVersion:'1.0.0', id:'character-contract-check', type:'character', cardScope:'xingyue', title:'Character',
+  payload:{
+    name:'Character', profile:{ 身份:'student' }, appearance:{ 描述:'appearance' }, personality:'steady', dialogueStyle:'brief',
+    behavior:{ 行事风格:'observe first', 行为应对:'keep distance' },
+    relationships:[{ target:'{{user}}', type:'classmate', note:'new acquaintance' }],
+    media:{ avatar:'https://example.invalid/avatar.png', portraits:{ normal:'https://example.invalid/normal.png' } },
+  },
+};
+ok(contract.normalizePackage(character, { portableMediaOnly:true }).payload.media.portraits.normal.startsWith('https://'), 'canonical portable character contract accepted');
+const legacyCharacter = { ...character, payload:{ name:'Legacy', role:'senior', relationship:'guide', mediaRefs:{ normal:'media://legacy/normal' } } };
+const migratedCharacter = contract.normalizePackage(legacyCharacter);
+ok(migratedCharacter.payload.profile['身份'] === 'senior' && migratedCharacter.payload.media.portraits.normal === 'media://legacy/normal', 'legacy character aliases migrate on client read');
+assert.throws(() => contract.normalizePackage(legacyCharacter, { allowLegacyCharacterAliases:false }), error => error?.code === 'unknown-character-field');
+passed += 1;
+console.log('[ok] Gateway character shape rejects legacy aliases');
+assert.throws(() => contract.normalizePackage({ ...character, payload:{ ...character.payload, media:{ avatar:'media://local/avatar' } } }, { portableMediaOnly:true }), error => error?.code === 'invalid-character-avatar');
+passed += 1;
+console.log('[ok] Gateway character shape rejects non-portable media keys');
+assert.throws(() => contract.normalizePackage({ ...character, payload:{ ...character.payload, script:'sidecar' } }), error => error?.code === 'unknown-character-field');
+passed += 1;
+console.log('[ok] character payload rejects unknown sidecars');
+
+const ordinaryWorldFactor = {
+  packageVersion:'1.0.0', id:'ordinary-factor-check', type:'world_factor', cardScope:'shared', title:'Factor',
+  payload:{ worldFactors:[{ title:'Factor', content:'Safe content.' }] },
+};
+ok(contract.normalizePackage(ordinaryWorldFactor).payload.worldFactors.length === 1, 'ordinary world factor canonical shape accepted');
+assert.throws(() => contract.normalizePackage({ ...ordinaryWorldFactor, payload:{ worldFactors:[{ title:'Factor', content:'Safe', script:'sidecar' }] } }), error => error?.code === 'unknown-world-factor-field');
+passed += 1;
+console.log('[ok] ordinary world factor rejects item sidecars');
+assert.throws(() => contract.normalizePackage({ ...ordinaryWorldFactor, payload:{ ...ordinaryWorldFactor.payload, rogue:'sidecar' } }), error => error?.code === 'unknown-world-factor-payload-field');
+passed += 1;
+console.log('[ok] ordinary world factor rejects payload root sidecars');
+assert.throws(() => contract.normalizePackage({ ...ordinaryWorldFactor, payload:{ ...ordinaryWorldFactor.payload, factors:ordinaryWorldFactor.payload.worldFactors } }, { allowLegacyFactors:false }), error => error?.code === 'legacy-world-factors-not-publishable');
+passed += 1;
+console.log('[ok] Gateway ordinary world factor rejects dual canonical and legacy roots');
+
+const extension = {
+  packageVersion:'1.0.0', id:'extension-contract-check', type:'skill', cardScope:'xingyue', title:'Extension',
+  payload:{ schemaVersion:1, worldbook:{ title:'Extension', content:'Narrative worldbook setting.' } },
+};
+ok(contract.normalizePackage(extension, { allowLegacyExtensions:false }).payload.schemaVersion === 1, 'canonical generic extension contract accepted');
+const migratedExtension = contract.normalizePackage({ ...extension, payload:{ level:1, effect:'legacy' } });
+ok(migratedExtension.payload.schemaVersion === 1 && migratedExtension.payload.worldbook.content.includes('legacy'), 'legacy extension migrates on client read');
+assert.throws(() => contract.normalizePackage({ ...extension, payload:{ level:1 } }, { allowLegacyExtensions:false }), error => error?.code === 'extension-worldbook-contract-required');
+passed += 1;
+console.log('[ok] Gateway extension shape requires generic worldbook contract');
+
 const legacyUserMacro = structuredClone(example);
 legacyUserMacro.payload.worldFactors[0].content = 'Hello {{user}}';
 const userMigrated = contract.normalizePackage(legacyUserMacro, { runtimeVersion: '3.4.0' });
@@ -121,6 +173,60 @@ ok(currentRuntime.includes('state.workshopAuth.loggedIn && cc.myPackages'), 'log
 ok(currentRuntime.includes('Promise.allSettled(refreshes.map(refresh => refresh()))'), 'login refresh updates every mounted opening page');
 ok(currentRuntime.includes('角色包包含仅本机可见的媒体库 key'), 'character publish blocks non-portable local media keys');
 ok(currentRuntime.includes('dataset.xyDiscordAvatar'), 'Discord avatar is rendered from memory-only identity');
+ok(runtime341.includes('deadlineAt') && runtime341.includes('expiresInMs') && runtime341.includes('cancelWorkshopLogin'), '3.4.1 OAuth consumes server deadline and exposes cancel');
+ok(runtime341.includes('publishSelection') && runtime341.includes('state.publishSelection = clone(pkg)'), '3.4.1 publish object is explicit for owner updates and opening drafts');
+ok(runtime341.includes('refreshPackageInspections') && openingPage341.includes('data-xy-package-inspection'), '3.4.1 exposes installed revision and dirty inspection status');
+ok(openingPage341.includes('data-xy-login-cancel') && openingPage341.includes('data-xy-workshop-error'), '3.4.1 workshop has cancel and persistent error feedback');
+ok(!runtime341.includes('WORKSHOP_SAMPLE_PACKAGES') && !runtime341.includes('show-sample-package') && !runtime341.includes('本地示例'), '3.4.1 workshop no longer injects local sample packages');
+ok(!openingPage341.includes('本地示例'), '3.4.1 opening page no longer advertises removed local samples');
+ok(runtime341.includes('data-xy-opening-action="login-discord" data-xy-login-button')
+  && runtime341.includes('grid.innerHTML = renderEmptyWorkshopState(source.length);\n      updateWorkshopStatusPills();')
+  && openingPage341.includes('data-xy-opening-action="login-discord" data-xy-login-button'), '3.4.1 workshop login controls share and immediately refresh the unified three-state selector');
+const hudTopAnchorBlock341 = runtime341.slice(runtime341.indexOf('function measureTopChromeBottom()'), runtime341.indexOf('function ensureStatusDrawerStyle'));
+ok(hudTopAnchorBlock341.includes("['#top-settings-holder', '#top-settings', '#navbar', '#sheld_header']")
+  && !hudTopAnchorBlock341.includes("'#top-bar'")
+  && !hudTopAnchorBlock341.includes('doc.body?.children'), '3.4.1 HUD top drawer anchors only to explicit top chrome');
+ok(runtime341.includes('--xy-hud-drawer-y:0px;--xy-hud-drawer-max:100dvh')
+  && runtime341.includes("drawer.style.setProperty('--xy-hud-drawer-y', anchor + 'px')")
+  && !runtime341.includes('--xy-hud-drawer-bottom'), '3.4.1 HUD top and bottom placements share visual-viewport top coordinates');
+ok(runtime341.includes("const selectors = ['#form_sheld', '#send_form', '#send_textarea', '.send_form']")
+  && runtime341.includes('const observer = new RO(onChange)')
+  && runtime341.includes("observer.observe(node)"), '3.4.1 HUD follows canonical input anchors with ResizeObserver');
+ok(openingPage341.includes('data-xy-opening-action="toggle-focus-mode"')
+  && runtime341.includes("dialog.setAttribute('data-xy-opening-focus-dialog', '')")
+  && runtime341.includes('dialog.showModal()')
+  && runtime341.includes('exitOpeningFocusMode({ restoreFocus:false })'), '3.4.1 opening page focus mode uses a reversible top-layer portal');
+ok(openingPage341.includes('.xy-opening-page[data-xy-focus-mode="1"] .xy-view[data-xy-view="wizard"] .xy-pane')
+  && openingPage341.includes('overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain')
+  && openingPage341.includes('.xy-opening-page[data-xy-focus-mode="1"][data-xy-opening-view="workshop"]{overflow:hidden!important}')
+  && openingPage341.includes('.xy-opening-page[data-xy-focus-mode="1"]{')
+  && openingPage341.includes('data-xy-opening-story-editor'), '3.4.1 focus mode keeps the collapsed story editor reachable under one root scroll owner');
+ok(runtime341.includes('parent.__xyOpeningPortalRoot = root')
+  && runtime341.includes('portaledPage?.isConnected')
+  && runtime341.includes('delete mount.__xyOpeningPortalRoot'), '3.4.1 remote scanner recognizes a focus-portaled opening page and cannot inject a duplicate');
+ok(openingPage341.includes('.xy-opening-page .xy-view[data-xy-view="workshop"]{position:absolute!important')
+  && !openingPage341.includes('.xy-opening-page .xy-view[data-xy-view="workshop"]{position:fixed!important')
+  && runtime341.includes("if (nextView === 'workshop' && !openingFocusActive()) state.workshopFocusOwned = enterOpeningFocusMode()")
+  && runtime341.includes('if (leavingOwnedWorkshop) { state.workshopFocusOwned = false; exitOpeningFocusMode(); }'), '3.4.1 workshop overlay uses the stable focus portal and restores its original message position');
+ok(runtime341.includes("'/api/workshop/uploads/character'")
+  && runtime341.includes('async function uploadCharacterPackage(input)')
+  && runtime341.includes('resolveCharacterUploadMedia')
+  && !runtime341.includes('角色包包含仅本机可见的媒体库 key；发布前请把头像与立绘替换为 http(s) URL'), '3.4.1 character publish uploads local media instead of rejecting it');
+ok(runtime341.includes("{ kind:'portrait-nude', label:'赤裸立绘'")
+  && runtime341.includes('pkg.previewMedia?.avatar')
+  && openingPage341.includes('xy-package-preview-avatar'), '3.4.1 workshop exposes character avatar and both portrait previews');
+ok(gatewayServer.includes('createCharacterUpload(input, publisherId)')
+  && gatewayServer.includes('character-upload-owner-mismatch')
+  && gatewayServer.includes('invalid-character-image-magic')
+  && gatewayServer.includes('syncApprovedCharacterAssets()'), 'Gateway owns staged character uploads, validation, promotion and public cleanup');
+ok(gatewayServer.includes("storage: { provider: PACKAGE_PUBLIC_BASE_URL ? 'cloudreve-public-url' : 'gateway', url: packagePublicUrl(pkg.id) }")
+  && !gatewayServer.includes("provider: String(pkg.storage.provider"), 'Gateway generates package storage metadata instead of trusting client storage');
+const strippedPackage = structuredClone(example);
+strippedPackage.storage = { provider:'client', url:'https://evil.invalid/package.json' };
+strippedPackage.rogue = true;
+const strippedNormalized = contract.normalizePackage(strippedPackage, { runtimeVersion:'3.4.0' });
+ok(!Object.hasOwn(strippedNormalized, 'storage') && !Object.hasOwn(strippedNormalized, 'rogue'), 'shared contract strips unknown top-level sidecars');
+ok(schema.additionalProperties === false, 'schema rejects unknown top-level package fields');
 const openingSchema = schema.allOf.find(rule => rule?.if?.properties?.cardScope?.const === 'xingyue-opening-v1')?.then?.properties?.payload;
 ok(openingSchema?.additionalProperties === false, 'schema rejects unknown opening payload fields');
 ok(openingSchema?.properties?.compatibility?.additionalProperties === false, 'schema rejects unknown compatibility fields');

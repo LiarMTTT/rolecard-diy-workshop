@@ -45,6 +45,18 @@ for (const card of workshopIndex.cards) {
     manifest: await readJson(card.runtimeManifestUrl),
   });
 }
+const discoveredRuntimeRoot = path.join(root, 'runtime', 'xingyue');
+const knownManifestPaths = new Set(runtimeManifests.map(item => item.relativePath.replace(/\\/g, '/')));
+for (const entry of await fs.readdir(discoveredRuntimeRoot, { withFileTypes:true })) {
+  if (!entry.isDirectory()) continue;
+  const relativePath = path.posix.join('runtime', 'xingyue', entry.name, 'manifest.json');
+  try {
+    const manifest = await readJson(relativePath);
+    if (!knownManifestPaths.has(relativePath)) runtimeManifests.push({ relativePath, manifest });
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+}
 
 const packageSchema = await readJson('schemas/workshop-package.schema.json');
 const allowedTypes = new Set(packageSchema.properties?.type?.enum || []);

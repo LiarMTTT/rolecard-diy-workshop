@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node tools/validate_static.mjs && node tools/p8_contract_check.mjs && node --check tools/ops_takeover.mjs && node --check tools/p1_external_check.mjs && node --check tools/p2_publish_flow_check.mjs && node --check tools/deploy_gateway_docker.mjs && npm --prefix gateway run check",
+    "check": "node tools/validate_static.mjs && node tools/p8_contract_check.mjs && node tools/p2_publish_flow_check.mjs && node --check tools/ops_takeover.mjs && node --check tools/p1_external_check.mjs && node --check tools/deploy_gateway_docker.mjs && npm --prefix gateway run check",
     "build:pages": "node tools/build_pages.mjs",
     "validate:static": "node tools/validate_static.mjs",
     "ops:takeover": "node tools/ops_takeover.mjs",
     "ops:p1": "node tools/p1_external_check.mjs",
     "ops:p2": "node tools/p2_publish_flow_check.mjs",
+    "check:p2-flow": "node tools/p2_publish_flow_check.mjs",
     "check:p8-contract": "node tools/p8_contract_check.mjs",
     "deploy:gateway-docker": "node tools/deploy_gateway_docker.mjs"
   },

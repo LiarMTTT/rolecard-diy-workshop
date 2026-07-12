@@ -8,6 +8,7 @@ import workshopPackageContract from './shared/workshop-package-contract.js';
 const env = process.env;
 const GATEWAY_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(env.PORT || 8787);
+const HOST = String(env.HOST || '0.0.0.0').trim() || '0.0.0.0';
 const PUBLIC_BASE_URL = env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 const COOKIE_SECURE = PUBLIC_BASE_URL.startsWith('https://');
 const COOKIE_SAME_SITE = env.COOKIE_SAME_SITE || (COOKIE_SECURE ? 'None' : 'Lax');
@@ -26,6 +27,24 @@ const REQUIRE_REVIEW = env.REQUIRE_REVIEW !== 'false';
 const PACKAGE_PUBLIC_BASE_URL = String(env.PACKAGE_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 const PUBLIC_PACKAGE_DIR = env.PUBLIC_PACKAGE_DIR || '';
 const PUBLIC_SYNC_REPORT_FILE = env.PUBLIC_SYNC_REPORT_FILE || './data/public-sync-report.json';
+const CHARACTER_UPLOAD_DIR = path.resolve(env.CHARACTER_UPLOAD_DIR || path.join(path.dirname(PACKAGE_STORE_DIR), 'character-uploads'));
+const CHARACTER_ASSET_STORE_DIR = path.resolve(env.CHARACTER_ASSET_STORE_DIR || path.join(path.dirname(PACKAGE_STORE_DIR), 'character-assets'));
+const PUBLIC_ASSET_DIR = path.resolve(env.PUBLIC_ASSET_DIR || (PUBLIC_PACKAGE_DIR ? path.join(PUBLIC_PACKAGE_DIR, 'assets') : './data/public/assets'));
+const ASSET_PUBLIC_BASE_URL = String(env.ASSET_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+const CHARACTER_UPLOAD_TTL_MS = Math.max(5 * 60 * 1000, Math.min(Number(env.CHARACTER_UPLOAD_TTL_MS) || 30 * 60 * 1000, 24 * 60 * 60 * 1000));
+const CHARACTER_UPLOAD_RATE_PER_MINUTE = Math.max(2, Math.min(Number(env.CHARACTER_UPLOAD_RATE_PER_MINUTE) || 12, 60));
+const CHARACTER_UPLOAD_MAX_STAGED_PER_OWNER = Math.max(1, Math.min(Number(env.CHARACTER_UPLOAD_MAX_STAGED_PER_OWNER) || 3, 12));
+const CHARACTER_UPLOAD_MAX_STAGED_GLOBAL = Math.max(16, Math.min(Number(env.CHARACTER_UPLOAD_MAX_STAGED_GLOBAL) || 128, 2048));
+const CHARACTER_UPLOAD_MAX_STAGED_BYTES_PER_OWNER = Math.max(16 * 1024 * 1024, Math.min(Number(env.CHARACTER_UPLOAD_MAX_STAGED_BYTES_PER_OWNER) || 48 * 1024 * 1024, 256 * 1024 * 1024));
+const CHARACTER_UPLOAD_MAX_STAGED_BYTES_GLOBAL = Math.max(128 * 1024 * 1024, Math.min(Number(env.CHARACTER_UPLOAD_MAX_STAGED_BYTES_GLOBAL) || 512 * 1024 * 1024, 4 * 1024 * 1024 * 1024));
+const CHARACTER_UPLOAD_ID_RE = /^xyu_[A-Za-z0-9_-]{24,120}$/;
+const CHARACTER_ASSET_SPECS = Object.freeze({
+  avatar: { stem:'avatar', maxBytes:2 * 1024 * 1024, maxDimension:2048, maxPixels:4 * 1024 * 1024 },
+  portraitNormal: { stem:'portrait-normal', maxBytes:8 * 1024 * 1024, maxDimension:4096, maxPixels:16 * 1024 * 1024 },
+  portraitNude: { stem:'portrait-nude', maxBytes:8 * 1024 * 1024, maxDimension:4096, maxPixels:16 * 1024 * 1024 },
+});
+const characterUploadRateWindows = new Map();
+const activeCharacterUploadOwners = new Set();
 const CORS_ORIGIN = env.CORS_ORIGIN || '*';
 const REVIEW_STATES = new Set(['pending', 'approved', 'rejected', 'withdrawn']);
 const ADMIN_PAGE_FILE = path.join(GATEWAY_ROOT, 'public', 'admin.html');
@@ -35,7 +54,27 @@ const LOGIN_HANDOFF_TTL_MS = Math.max(60_000, Math.min(Number(env.LOGIN_HANDOFF_
 const LOGIN_HANDOFF_ID_RE = /^xyh_[A-Za-z0-9_-]{24,120}$/;
 const LOGIN_HANDOFF_CHALLENGE_RE = /^[a-f0-9]{64}$/;
 const LOGIN_HANDOFF_MAX = Math.max(128, Math.min(Number(env.LOGIN_HANDOFF_MAX) || 4096, 16_384));
+const LOGIN_HANDOFF_RATE_PER_SEC = Math.max(0.1, Math.min(Number(env.LOGIN_HANDOFF_RATE_PER_SEC) || LOGIN_HANDOFF_MAX / (LOGIN_HANDOFF_TTL_MS / 1000) / 2, 100));
+const LOGIN_HANDOFF_RATE_BURST = Math.max(4, Math.min(Number(env.LOGIN_HANDOFF_RATE_BURST) || LOGIN_HANDOFF_RATE_PER_SEC * 2, 200));
 const loginHandoffs = new Map(); // OAuth 一次性交接，仅驻留进程内存；领取或超时即删除
+
+let loginHandoffAdmissionTokens = LOGIN_HANDOFF_RATE_BURST;
+let loginHandoffAdmissionUpdatedAt = Date.now();
+
+function admitLoginHandoff() {
+  const now = Date.now();
+  const elapsed = Math.max(0, now - loginHandoffAdmissionUpdatedAt) / 1000;
+  loginHandoffAdmissionUpdatedAt = now;
+  loginHandoffAdmissionTokens = Math.min(LOGIN_HANDOFF_RATE_BURST, loginHandoffAdmissionTokens + elapsed * LOGIN_HANDOFF_RATE_PER_SEC);
+  if (loginHandoffAdmissionTokens < 1) return false;
+  loginHandoffAdmissionTokens -= 1;
+  return true;
+}
+
+function loginHandoffRetryAfterSeconds() {
+  const deficit = Math.max(0, 1 - loginHandoffAdmissionTokens);
+  return Math.max(1, Math.ceil(deficit / LOGIN_HANDOFF_RATE_PER_SEC));
+}
 
 function corsHeaders(req, headers = {}) {
   const requestOrigin = String(req?.headers?.origin || '');
@@ -74,6 +113,12 @@ async function file(res, status, filePath, contentType) {
   res.end(body);
 }
 
+async function binary(req, res, filePath, contentType, headers = {}) {
+  const body = await fs.readFile(filePath);
+  res.writeHead(200, { 'content-type':contentType, 'content-length':body.length, ...corsHeaders(req, headers) });
+  res.end(body);
+}
+
 function statusForError(message) {
   if (message === 'request-too-large') return 413;
   if (message === 'package-conflict') return 409;
@@ -83,7 +128,12 @@ function statusForError(message) {
   if (message === 'package-not-public') return 400;
   if (message === 'admin-required') return 403;
   if (message === 'admin-token-not-configured') return 503;
+  if (message === 'login-handoff-capacity') return 503;
   if (message === 'not-package-owner') return 403;
+  if (message === 'character-upload-not-found') return 404;
+  if (message === 'character-upload-expired') return 410;
+  if (message === 'character-upload-owner-mismatch') return 403;
+  if (message === 'character-upload-rate-limited' || message === 'character-upload-busy' || message === 'character-upload-quota') return 429;
   if (message === 'discord guild membership required') return 403;
   if (message.includes('invalid revision')) return 400;
   if (message.includes('invalid') || message.includes('unsupported') || message.includes('blocked') || message.includes('required') || message.includes('mismatch') || message.includes('must-have') || message.includes('unknown-') || message.includes('embedded-')) return 400;
@@ -154,14 +204,11 @@ function registerLoginHandoff(value, challengeValue) {
   cleanupLoginHandoffs();
   const id = normalizeLoginHandoffId(value);
   const challenge = String(challengeValue || '').trim().toLowerCase();
-  if (!id || !LOGIN_HANDOFF_CHALLENGE_RE.test(challenge) || loginHandoffs.has(id)) return '';
-  while (loginHandoffs.size >= LOGIN_HANDOFF_MAX) {
-    const oldest = loginHandoffs.keys().next().value;
-    if (!oldest) break;
-    loginHandoffs.delete(oldest);
-  }
-  loginHandoffs.set(id, { status:'pending', challenge, expiresAt:Date.now() + LOGIN_HANDOFF_TTL_MS });
-  return id;
+  if (!id || !LOGIN_HANDOFF_CHALLENGE_RE.test(challenge) || loginHandoffs.has(id)) return null;
+  if (loginHandoffs.size >= LOGIN_HANDOFF_MAX) throw new Error('login-handoff-capacity');
+  const expiresAt = Date.now() + LOGIN_HANDOFF_TTL_MS;
+  loginHandoffs.set(id, { status:'pending', challenge, expiresAt });
+  return { id, expiresAt };
 }
 
 function launchLoginHandoff(value) {
@@ -280,7 +327,12 @@ async function readBody(req, maxBytes = 512 * 1024) {
 }
 
 function validatePackage(input) {
-  const pkg = workshopPackageContract.normalizePackage(input, { allowLegacyFactors: false });
+  const pkg = workshopPackageContract.normalizePackage(input, {
+    allowLegacyFactors: false,
+    allowLegacyExtensions: false,
+    allowLegacyCharacterAliases: false,
+    portableMediaOnly: true,
+  });
   return {
     packageVersion: pkg.packageVersion,
     id: pkg.id,
@@ -297,12 +349,7 @@ function validatePackage(input) {
     reviewStatus: REQUIRE_REVIEW ? 'pending' : 'approved',
     rejectionReason: '',
     withdrawnAt: '',
-    storage: pkg.storage && typeof pkg.storage === 'object'
-      ? {
-          provider: String(pkg.storage.provider || 'local').slice(0, 40),
-          url: String(pkg.storage.url || '').slice(0, 600),
-        }
-      : { provider: PACKAGE_PUBLIC_BASE_URL ? 'cloudreve-public-url' : 'local', url: '' },
+    storage: { provider: PACKAGE_PUBLIC_BASE_URL ? 'cloudreve-public-url' : 'gateway', url: packagePublicUrl(pkg.id) },
     payload: pkg.payload && typeof pkg.payload === 'object' ? pkg.payload : {},
   };
 }
@@ -383,8 +430,376 @@ function packagePublicUrl(id) {
   return `${PACKAGE_PUBLIC_BASE_URL}/${encodeURIComponent(assertPackageId(id))}.json`;
 }
 
+function assertUploadId(value) {
+  const id = String(value || '').trim();
+  if (!CHARACTER_UPLOAD_ID_RE.test(id)) throw new Error('invalid-character-upload-id');
+  return id;
+}
+
+function safeChildPath(baseDir, child) {
+  const base = path.resolve(baseDir);
+  const target = path.resolve(base, String(child || ''));
+  if (target === base || !target.startsWith(`${base}${path.sep}`)) throw new Error('invalid-storage-path');
+  return target;
+}
+
+function characterUploadDir(uploadId) {
+  return safeChildPath(CHARACTER_UPLOAD_DIR, assertUploadId(uploadId));
+}
+
+function characterBundleDir(packageId, uploadId) {
+  return safeChildPath(safeChildPath(CHARACTER_ASSET_STORE_DIR, assertPackageId(packageId)), assertUploadId(uploadId));
+}
+
+function publicAssetPackageDir(packageId) {
+  return safeChildPath(PUBLIC_ASSET_DIR, assertPackageId(packageId));
+}
+
+function publicAssetUrl(packageId, filename, baseUrl = PUBLIC_BASE_URL) {
+  const base = ASSET_PUBLIC_BASE_URL || `${String(baseUrl || PUBLIC_BASE_URL).replace(/\/+$/, '')}/api/workshop/assets`;
+  return `${base}/${encodeURIComponent(assertPackageId(packageId))}/${encodeURIComponent(filename)}`;
+}
+
+function sniffImage(buffer) {
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))) {
+    return { mime:'image/png', extension:'png' };
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return { mime:'image/jpeg', extension:'jpg' };
+  }
+  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+    return { mime:'image/webp', extension:'webp' };
+  }
+  throw new Error('invalid-character-image-magic');
+}
+
+function assertCharacterImageDimensions(width, height, spec) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
+    || width > spec.maxDimension || height > spec.maxDimension || width * height > spec.maxPixels) {
+    throw new Error('invalid-character-image-dimensions');
+  }
+}
+
+function sanitizePng(buffer, spec) {
+  const signature = buffer.subarray(0, 8);
+  const kept = [signature];
+  const metadataChunks = new Set(['eXIf', 'iTXt', 'tEXt', 'zTXt', 'iCCP']);
+  let offset = 8, width = 0, height = 0, sawHeader = false, sawData = false, sawEnd = false;
+  while (offset + 12 <= buffer.length) {
+    const size = buffer.readUInt32BE(offset);
+    const end = offset + 12 + size;
+    if (size > spec.maxBytes || end > buffer.length) throw new Error('invalid-character-image-structure');
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    if (!sawHeader && type !== 'IHDR') throw new Error('invalid-character-image-structure');
+    if (type === 'IHDR') {
+      if (sawHeader || size !== 13) throw new Error('invalid-character-image-structure');
+      width = buffer.readUInt32BE(offset + 8);
+      height = buffer.readUInt32BE(offset + 12);
+      sawHeader = true;
+    }
+    if (type === 'acTL') throw new Error('invalid-character-image-animation');
+    if (type === 'IDAT') sawData = true;
+    if (!metadataChunks.has(type)) kept.push(buffer.subarray(offset, end));
+    offset = end;
+    if (type === 'IEND') { sawEnd = true; break; }
+  }
+  if (!sawHeader || !sawData || !sawEnd || offset !== buffer.length) throw new Error('invalid-character-image-structure');
+  assertCharacterImageDimensions(width, height, spec);
+  return Buffer.concat(kept);
+}
+
+function sanitizeJpeg(buffer, spec) {
+  const kept = [buffer.subarray(0, 2)];
+  const sofMarkers = new Set([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf]);
+  let offset = 2, width = 0, height = 0, sawScan = false;
+  while (offset + 4 <= buffer.length) {
+    if (buffer[offset] !== 0xff) throw new Error('invalid-character-image-structure');
+    while (buffer[offset] === 0xff) offset += 1;
+    const marker = buffer[offset++];
+    if (marker === 0xd9) break;
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > buffer.length) throw new Error('invalid-character-image-structure');
+    const size = buffer.readUInt16BE(offset);
+    const start = offset - 2;
+    const end = offset + size;
+    if (size < 2 || end > buffer.length) throw new Error('invalid-character-image-structure');
+    if (sofMarkers.has(marker)) {
+      if (size < 8) throw new Error('invalid-character-image-structure');
+      height = buffer.readUInt16BE(offset + 3);
+      width = buffer.readUInt16BE(offset + 5);
+    }
+    if (marker === 0xda) {
+      const eoi = buffer.lastIndexOf(Buffer.from([0xff, 0xd9]));
+      if (eoi < end) throw new Error('invalid-character-image-structure');
+      kept.push(buffer.subarray(start, eoi + 2));
+      sawScan = true;
+      offset = buffer.length;
+      break;
+    }
+    const isMetadata = (marker >= 0xe1 && marker <= 0xef) || marker === 0xfe;
+    if (!isMetadata) kept.push(buffer.subarray(start, end));
+    offset = end;
+  }
+  if (!sawScan || !width || !height) throw new Error('invalid-character-image-structure');
+  assertCharacterImageDimensions(width, height, spec);
+  return Buffer.concat(kept);
+}
+
+function sanitizeWebp(buffer, spec) {
+  if (buffer.readUInt32LE(4) + 8 !== buffer.length) throw new Error('invalid-character-image-structure');
+  const kept = [];
+  const metadataChunks = new Set(['EXIF', 'XMP ', 'ICCP']);
+  let offset = 12, width = 0, height = 0, sawImage = false;
+  while (offset + 8 <= buffer.length) {
+    const type = buffer.toString('ascii', offset, offset + 4);
+    const size = buffer.readUInt32LE(offset + 4);
+    const padded = size + (size % 2);
+    const end = offset + 8 + padded;
+    if (end > buffer.length) throw new Error('invalid-character-image-structure');
+    const data = offset + 8;
+    if (type === 'ANIM' || type === 'ANMF') throw new Error('invalid-character-image-animation');
+    if (type === 'VP8X') {
+      if (size < 10 || (buffer[data] & 0x02)) throw new Error('invalid-character-image-animation');
+      width = 1 + buffer.readUIntLE(data + 4, 3);
+      height = 1 + buffer.readUIntLE(data + 7, 3);
+    } else if (type === 'VP8 ') {
+      if (size < 10 || buffer[data + 3] !== 0x9d || buffer[data + 4] !== 0x01 || buffer[data + 5] !== 0x2a) throw new Error('invalid-character-image-structure');
+      width = buffer.readUInt16LE(data + 6) & 0x3fff;
+      height = buffer.readUInt16LE(data + 8) & 0x3fff;
+      sawImage = true;
+    } else if (type === 'VP8L') {
+      if (size < 5 || buffer[data] !== 0x2f) throw new Error('invalid-character-image-structure');
+      width = 1 + buffer[data + 1] + ((buffer[data + 2] & 0x3f) << 8);
+      height = 1 + (buffer[data + 2] >> 6) + (buffer[data + 3] << 2) + ((buffer[data + 4] & 0x0f) << 10);
+      sawImage = true;
+    }
+    if (!metadataChunks.has(type)) kept.push(buffer.subarray(offset, end));
+    offset = end;
+  }
+  if (offset !== buffer.length || !sawImage) throw new Error('invalid-character-image-structure');
+  assertCharacterImageDimensions(width, height, spec);
+  const body = Buffer.concat(kept);
+  const header = Buffer.alloc(12);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(body.length + 4, 4);
+  header.write('WEBP', 8, 'ascii');
+  return Buffer.concat([header, body]);
+}
+
+function decodeCharacterImage(dataUrl, spec) {
+  const match = String(dataUrl || '').match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=\r\n]+)$/i);
+  if (!match) throw new Error('invalid-character-image-data');
+  const buffer = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
+  if (!buffer.length || buffer.length > spec.maxBytes) throw new Error('invalid-character-image-size');
+  const detected = sniffImage(buffer);
+  if (detected.mime !== match[1].toLowerCase()) throw new Error('invalid-character-image-mime');
+  const sanitized = detected.mime === 'image/png' ? sanitizePng(buffer, spec)
+    : detected.mime === 'image/jpeg' ? sanitizeJpeg(buffer, spec)
+      : sanitizeWebp(buffer, spec);
+  if (sanitized.length > spec.maxBytes) throw new Error('invalid-character-image-size');
+  return { buffer:sanitized, ...detected, sha256:crypto.createHash('sha256').update(sanitized).digest('hex') };
+}
+
+function previewMediaFromPackage(pkg) {
+  if (pkg?.type !== 'character') return undefined;
+  const media = pkg.payload?.media || {};
+  const preview = {
+    avatar:String(media.avatar || ''),
+    portraitNormal:String(media.portraits?.normal || ''),
+    portraitNude:String(media.portraits?.nude || ''),
+  };
+  return Object.values(preview).some(Boolean) ? preview : undefined;
+}
+
+async function cleanupExpiredCharacterUploads(now = Date.now()) {
+  await fs.mkdir(CHARACTER_UPLOAD_DIR, { recursive:true });
+  for (const name of await fs.readdir(CHARACTER_UPLOAD_DIR).catch(() => [])) {
+    if (!CHARACTER_UPLOAD_ID_RE.test(name)) continue;
+    const dir = characterUploadDir(name);
+    try {
+      const record = JSON.parse(await fs.readFile(path.join(dir, 'upload.json'), 'utf8'));
+      if (!Number.isFinite(Number(record.expiresAt)) || now > Number(record.expiresAt)) await fs.rm(dir, { recursive:true, force:true });
+    } catch (_) {
+      await fs.rm(dir, { recursive:true, force:true });
+    }
+  }
+}
+
+function beginCharacterUploadAdmission(publisherId, now = Date.now()) {
+  if (activeCharacterUploadOwners.has(publisherId)) throw new Error('character-upload-busy');
+  const windowStart = now - 60_000;
+  const recent = (characterUploadRateWindows.get(publisherId) || []).filter(value => value > windowStart);
+  if (recent.length >= CHARACTER_UPLOAD_RATE_PER_MINUTE) throw new Error('character-upload-rate-limited');
+  recent.push(now);
+  characterUploadRateWindows.set(publisherId, recent);
+  activeCharacterUploadOwners.add(publisherId);
+  return () => activeCharacterUploadOwners.delete(publisherId);
+}
+
+async function assertCharacterUploadQuota(publisherId) {
+  let globalCount = 0, globalBytes = 0, ownerCount = 0, ownerBytes = 0;
+  for (const name of await fs.readdir(CHARACTER_UPLOAD_DIR).catch(() => [])) {
+    if (!CHARACTER_UPLOAD_ID_RE.test(name)) continue;
+    try {
+      const record = JSON.parse(await fs.readFile(path.join(characterUploadDir(name), 'upload.json'), 'utf8'));
+      const bytes = Object.values(record.files || {}).reduce((sum, item) => sum + Math.max(0, Number(item?.bytes) || 0), 0);
+      globalCount += 1;
+      globalBytes += bytes;
+      if (record.ownerPublisherId === publisherId) { ownerCount += 1; ownerBytes += bytes; }
+    } catch (_) {}
+  }
+  if (ownerCount >= CHARACTER_UPLOAD_MAX_STAGED_PER_OWNER
+    || ownerBytes >= CHARACTER_UPLOAD_MAX_STAGED_BYTES_PER_OWNER
+    || globalCount >= CHARACTER_UPLOAD_MAX_STAGED_GLOBAL
+    || globalBytes >= CHARACTER_UPLOAD_MAX_STAGED_BYTES_GLOBAL) {
+    throw new Error('character-upload-quota');
+  }
+}
+
+async function createCharacterUpload(input, publisherId) {
+  await cleanupExpiredCharacterUploads();
+  await assertCharacterUploadQuota(publisherId);
+  const rawPackage = input?.package && typeof input.package === 'object' ? structuredClone(input.package) : null;
+  if (!rawPackage || rawPackage.type !== 'character') throw new Error('invalid-character-upload-package');
+  const rawMedia = rawPackage.payload?.media && typeof rawPackage.payload.media === 'object' ? rawPackage.payload.media : {};
+  rawPackage.payload = { ...rawPackage.payload, media:{ avatar:String(rawMedia.avatar || ''), portraits:{ normal:String(rawMedia.portraits?.normal || ''), nude:String(rawMedia.portraits?.nude || '') } } };
+  const canonical = validatePackage(rawPackage);
+  const uploadId = randomId('xyu');
+  const dir = characterUploadDir(uploadId);
+  await fs.mkdir(dir, { recursive:true });
+  const files = {};
+  try {
+    for (const [slot, spec] of Object.entries(CHARACTER_ASSET_SPECS)) {
+      const dataUrl = input?.assets?.[slot];
+      if (!dataUrl) continue;
+      const decoded = decodeCharacterImage(dataUrl, spec);
+      const filename = `${spec.stem}-${decoded.sha256.slice(0, 16)}.${decoded.extension}`;
+      await fs.writeFile(path.join(dir, filename), decoded.buffer, { flag:'wx' });
+      files[slot] = { filename, mime:decoded.mime, bytes:decoded.buffer.length, sha256:decoded.sha256 };
+    }
+    const now = Date.now();
+    const record = {
+      uploadId,
+      ownerPublisherId:publisherId,
+      createdAt:now,
+      expiresAt:now + CHARACTER_UPLOAD_TTL_MS,
+      package:canonical,
+      files,
+    };
+    await atomicWriteJson(path.join(dir, 'upload.json'), record);
+    return {
+      uploadId,
+      expiresInMs:CHARACTER_UPLOAD_TTL_MS,
+      packageId:canonical.id,
+      assets:Object.fromEntries(Object.entries(files).map(([slot, item]) => [slot, { mime:item.mime, bytes:item.bytes, sha256:item.sha256 }])),
+    };
+  } catch (error) {
+    await fs.rm(dir, { recursive:true, force:true });
+    throw error;
+  }
+}
+
+async function readCharacterUpload(uploadId, publisherId, packageId) {
+  const id = assertUploadId(uploadId);
+  const dir = characterUploadDir(id);
+  let record;
+  try { record = JSON.parse(await fs.readFile(path.join(dir, 'upload.json'), 'utf8')); }
+  catch (_) { throw new Error('character-upload-not-found'); }
+  if (record.ownerPublisherId !== publisherId) throw new Error('character-upload-owner-mismatch');
+  if (Date.now() > Number(record.expiresAt || 0)) {
+    await fs.rm(dir, { recursive:true, force:true });
+    throw new Error('character-upload-expired');
+  }
+  if (String(record.package?.id || '') !== String(packageId || '')) throw new Error('character-upload-package-mismatch');
+  return record;
+}
+
+function packageFromCharacterUpload(record, baseUrl = PUBLIC_BASE_URL) {
+  const pkg = structuredClone(record.package);
+  const media = pkg.payload?.media || {};
+  const portraits = media.portraits || {};
+  if (record.files?.avatar) media.avatar = publicAssetUrl(pkg.id, record.files.avatar.filename, baseUrl);
+  if (record.files?.portraitNormal) portraits.normal = publicAssetUrl(pkg.id, record.files.portraitNormal.filename, baseUrl);
+  if (record.files?.portraitNude) portraits.nude = publicAssetUrl(pkg.id, record.files.portraitNude.filename, baseUrl);
+  media.portraits = portraits;
+  pkg.payload.media = media;
+  return pkg;
+}
+
+function characterMediaReference(pkg, slot) {
+  const media = pkg?.payload?.media || {};
+  if (slot === 'avatar') return String(media.avatar || '');
+  if (slot === 'portraitNormal') return String(media.portraits?.normal || '');
+  if (slot === 'portraitNude') return String(media.portraits?.nude || '');
+  return '';
+}
+
+function referencesManagedCharacterAsset(reference, packageId, item) {
+  if (!reference || !item?.filename) return false;
+  try {
+    const url = new URL(String(reference), PUBLIC_BASE_URL);
+    const parts = url.pathname.split('/').filter(Boolean).map(part => decodeURIComponent(part));
+    return parts.length >= 5
+      && parts.at(-5) === 'api'
+      && parts.at(-4) === 'workshop'
+      && parts.at(-3) === 'assets'
+      && parts.at(-2) === packageId
+      && parts.at(-1) === item.filename;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function prepareCharacterAssetBundle(record, existing, pkg) {
+  const target = characterBundleDir(record.package.id, record.uploadId);
+  await fs.mkdir(target, { recursive:true });
+  const files = {};
+  try {
+    for (const slot of Object.keys(CHARACTER_ASSET_SPECS)) {
+      const uploaded = record.files?.[slot];
+      if (uploaded) {
+        await fs.copyFile(path.join(characterUploadDir(record.uploadId), uploaded.filename), path.join(target, uploaded.filename), fs.constants.COPYFILE_EXCL);
+        files[slot] = uploaded;
+        continue;
+      }
+      const retained = existing?.assetBundle?.files?.[slot];
+      if (!referencesManagedCharacterAsset(characterMediaReference(pkg, slot), record.package.id, retained)) continue;
+      await fs.copyFile(
+        path.join(characterBundleDir(record.package.id, existing.assetBundle.uploadId), retained.filename),
+        path.join(target, retained.filename),
+        fs.constants.COPYFILE_EXCL,
+      );
+      files[slot] = retained;
+    }
+    if (!Object.keys(files).length) {
+      await fs.rm(target, { recursive:true, force:true });
+      return null;
+    }
+    return { uploadId:record.uploadId, files };
+  } catch (error) {
+    await fs.rm(target, { recursive:true, force:true });
+    throw error;
+  }
+}
+
+async function removeCharacterBundle(packageId, bundle) {
+  if (!bundle?.uploadId) return;
+  await fs.rm(characterBundleDir(packageId, bundle.uploadId), { recursive:true, force:true });
+}
+
+async function packageInputForPublish(input, publisherId) {
+  const uploadId = String(input?.uploadId || '').trim();
+  if (!uploadId) return { pkg:validatePackage(input), uploadRecord:null };
+  const record = await readCharacterUpload(uploadId, publisherId, input?.id);
+  const packageInput = packageFromCharacterUpload(record, PUBLIC_BASE_URL);
+  return { pkg:validatePackage(packageInput), uploadRecord:record };
+}
+
 async function ensureStore() {
   await fs.mkdir(PACKAGE_STORE_DIR, { recursive: true });
+  await fs.mkdir(CHARACTER_UPLOAD_DIR, { recursive:true });
+  await fs.mkdir(CHARACTER_ASSET_STORE_DIR, { recursive:true });
+  await fs.mkdir(PUBLIC_ASSET_DIR, { recursive:true });
   await fs.mkdir(path.dirname(INDEX_FILE), { recursive: true });
   await fs.mkdir(path.dirname(PUBLISHER_FILE), { recursive: true });
   await fs.mkdir(path.dirname(AUDIT_LOG_FILE), { recursive: true });
@@ -398,6 +813,20 @@ async function ensureStore() {
   } catch {
     await fs.writeFile(PUBLISHER_FILE, JSON.stringify({ version: '1.0.0', updatedAt: new Date().toISOString(), publishers: [] }, null, 2));
   }
+}
+
+async function atomicWriteFile(filePath, content) {
+  const tempFile = `${filePath}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+  try {
+    await fs.writeFile(tempFile, content);
+    await fs.rename(tempFile, filePath);
+  } finally {
+    await fs.rm(tempFile, { force: true }).catch(() => {});
+  }
+}
+
+async function atomicWriteJson(filePath, value) {
+  await atomicWriteFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 async function appendAuditLog(event) {
@@ -420,7 +849,7 @@ async function readIndex() {
 
 async function writeIndex(index) {
   index.updatedAt = new Date().toISOString();
-  await fs.writeFile(INDEX_FILE, JSON.stringify(index, null, 2));
+  await atomicWriteJson(INDEX_FILE, index);
 }
 
 async function readPublishers() {
@@ -432,10 +861,37 @@ async function readPublishers() {
 
 async function writePublishers(registry) {
   registry.updatedAt = new Date().toISOString();
-  await fs.writeFile(PUBLISHER_FILE, JSON.stringify(registry, null, 2));
+  await atomicWriteJson(PUBLISHER_FILE, registry);
 }
 
 let voteMutationTail = Promise.resolve();
+let publisherMutationTail = Promise.resolve();
+let publicOutputTail = Promise.resolve();
+const packageMutationTails = new Map();
+
+function withPublisherMutationLock(task) {
+  const run = publisherMutationTail.then(task, task);
+  publisherMutationTail = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function withPublicOutputLock(task) {
+  const run = publicOutputTail.then(task, task);
+  publicOutputTail = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function withPackageMutationLock(id, task) {
+  const key = assertPackageId(id);
+  const previous = packageMutationTails.get(key) || Promise.resolve();
+  const run = previous.then(task, task);
+  const settled = run.then(() => undefined, () => undefined);
+  packageMutationTails.set(key, settled);
+  settled.finally(() => {
+    if (packageMutationTails.get(key) === settled) packageMutationTails.delete(key);
+  });
+  return run;
+}
 
 function withVoteMutationLock(task) {
   const run = voteMutationTail.then(task, task);
@@ -526,36 +982,39 @@ async function setVote(id, publisherId, vote) {
 }
 
 async function getOrCreatePublisher(discordUserHash) {
-  const registry = await readPublishers();
-  const now = new Date().toISOString();
-  let publisher = registry.publishers.find(item => item?.provider === 'discord' && item?.discordUserHash === discordUserHash);
-  if (!publisher) {
-    publisher = {
-      provider: 'discord',
-      discordUserHash,
-      publisherId: randomId('pub'),
-      createdAt: now,
-      lastLoginAt: now,
-    };
-    registry.publishers.push(publisher);
-  } else {
-    publisher.lastLoginAt = now;
-  }
-  await writePublishers(registry);
-  return { ...publisher };
+  return withPublisherMutationLock(async () => {
+    const registry = await readPublishers();
+    const now = new Date().toISOString();
+    let publisher = registry.publishers.find(item => item?.provider === 'discord' && item?.discordUserHash === discordUserHash);
+    if (!publisher) {
+      publisher = {
+        provider: 'discord',
+        discordUserHash,
+        publisherId: randomId('pub'),
+        createdAt: now,
+        lastLoginAt: now,
+      };
+      registry.publishers.push(publisher);
+    } else {
+      publisher.lastLoginAt = now;
+    }
+    await writePublishers(registry);
+    return { ...publisher };
+  });
 }
 
 function publicPackageMeta(pkg, baseUrl = PUBLIC_BASE_URL) {
-  const { payload, ownerPublisherId, ...meta } = pkg;
+  const { payload, ownerPublisherId, assetBundle, ...meta } = pkg;
   return {
     ...meta,
+    previewMedia:previewMediaFromPackage(pkg) || pkg.previewMedia,
     manifestUrl: `${baseUrl.replace(/\/+$/, '')}/api/workshop/packages/${encodeURIComponent(pkg.id)}`,
     storage: pkg.storage?.url ? pkg.storage : { provider: PACKAGE_PUBLIC_BASE_URL ? 'cloudreve-public-url' : 'gateway', url: packagePublicUrl(pkg.id) },
   };
 }
 
 function publicPackageDetail(pkg, baseUrl = PUBLIC_BASE_URL) {
-  const { ownerPublisherId, ...publicPkg } = pkg;
+  const { ownerPublisherId, assetBundle, ...publicPkg } = pkg;
   return {
     ...publicPkg,
     manifestUrl: `${baseUrl.replace(/\/+$/, '')}/api/workshop/packages/${encodeURIComponent(pkg.id)}`,
@@ -564,18 +1023,25 @@ function publicPackageDetail(pkg, baseUrl = PUBLIC_BASE_URL) {
 }
 
 function adminPackageMeta(pkg, baseUrl = PUBLIC_BASE_URL) {
-  const { ownerPublisherId, ...meta } = pkg;
+  const { ownerPublisherId, assetBundle, ...meta } = pkg;
   return {
     ...meta,
+    reviewAssets:assetBundle?.files ? Object.fromEntries(Object.keys(assetBundle.files).map(slot => [slot, `${baseUrl.replace(/\/+$/, '')}/api/admin/review/packages/${encodeURIComponent(pkg.id)}/assets/${encodeURIComponent(slot)}`])) : undefined,
     manifestUrl: `${baseUrl.replace(/\/+$/, '')}/api/workshop/packages/${encodeURIComponent(pkg.id)}`,
     storage: pkg.storage?.url ? pkg.storage : { provider: PACKAGE_PUBLIC_BASE_URL ? 'cloudreve-public-url' : 'gateway', url: packagePublicUrl(pkg.id) },
   };
 }
 
 function ownerPackageMeta(pkg, baseUrl = PUBLIC_BASE_URL) {
-  const meta = publicPackageMeta(pkg, baseUrl);
+  const meta = publicPackageDetail(pkg, baseUrl);
+  const ownerPreview = { ...(previewMediaFromPackage(pkg) || {}) };
+  for (const slot of Object.keys(pkg.assetBundle?.files || {})) {
+    if (!(slot in CHARACTER_ASSET_SPECS)) continue;
+    ownerPreview[slot] = `${baseUrl.replace(/\/+$/, '')}/api/workshop/me/packages/${encodeURIComponent(pkg.id)}/assets/${encodeURIComponent(slot)}`;
+  }
   return {
     ...meta,
+    previewMedia:Object.values(ownerPreview).some(Boolean) ? ownerPreview : undefined,
     ownerPublisherId: undefined,
     reviewStatus: pkg.reviewStatus || 'pending',
     rejectionReason: pkg.rejectionReason || '',
@@ -656,10 +1122,10 @@ async function syncApprovedPackagesToPublicDir() {
   for (const pkg of approved) {
     const publicPkg = { ...pkg };
     delete publicPkg.ownerPublisherId;
-    await fs.writeFile(
+    delete publicPkg.assetBundle;
+    await atomicWriteFile(
       path.join(PUBLIC_PACKAGE_DIR, `${assertPackageId(pkg.id)}.json`),
       `${JSON.stringify(publicPkg, null, 2)}\n`,
-      'utf8',
     );
     copied.push(pkg.id);
   }
@@ -680,19 +1146,78 @@ async function syncApprovedPackagesToPublicDir() {
     copied,
     removed,
   };
-  await fs.writeFile(PUBLIC_SYNC_REPORT_FILE, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  await atomicWriteFile(PUBLIC_SYNC_REPORT_FILE, `${JSON.stringify(report, null, 2)}\n`);
   return report;
 }
 
+async function syncApprovedCharacterAssets() {
+  await fs.mkdir(PUBLIC_ASSET_DIR, { recursive:true });
+  const approved = (await allStoredPackages()).filter(pkg => isPublicPackage(pkg) && pkg.assetBundle?.uploadId);
+  const approvedIds = new Set(approved.map(pkg => pkg.id));
+  for (const pkg of approved) {
+    const source = characterBundleDir(pkg.id, pkg.assetBundle.uploadId);
+    const target = publicAssetPackageDir(pkg.id);
+    const staging = `${target}.staging-${randomId('swap')}`;
+    const backup = `${target}.backup-${randomId('swap')}`;
+    await fs.rm(staging, { recursive:true, force:true });
+    await fs.mkdir(staging, { recursive:true });
+    for (const item of Object.values(pkg.assetBundle.files || {})) {
+      await fs.copyFile(path.join(source, item.filename), path.join(staging, item.filename));
+    }
+    let backedUp = false;
+    try {
+      try { await fs.rename(target, backup); backedUp = true; } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+      await fs.rename(staging, target);
+      if (backedUp) await fs.rm(backup, { recursive:true, force:true });
+    } catch (error) {
+      await fs.rm(staging, { recursive:true, force:true }).catch(() => {});
+      if (backedUp) {
+        await fs.rm(target, { recursive:true, force:true }).catch(() => {});
+        await fs.rename(backup, target).catch(() => {});
+      }
+      throw error;
+    }
+  }
+  for (const name of await fs.readdir(PUBLIC_ASSET_DIR).catch(() => [])) {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,119}$/.test(name) || approvedIds.has(name)) continue;
+    await fs.rm(publicAssetPackageDir(name), { recursive:true, force:true });
+  }
+}
+
 async function refreshPublicOutputs(baseUrl = PUBLIC_BASE_URL) {
-  const index = await rebuildPublicIndex(baseUrl);
-  await syncApprovedPackagesToPublicDir();
-  return index;
+  return withPublicOutputLock(async () => {
+    await syncApprovedCharacterAssets();
+    await syncApprovedPackagesToPublicDir();
+    const index = await rebuildPublicIndex(baseUrl);
+    return index;
+  });
 }
 
 async function getPackage(id) {
   const file = packageFilePath(id);
   return JSON.parse(await fs.readFile(file, 'utf8'));
+}
+
+async function commitPackageMutation({ id, previous = null, next, audit, baseUrl = PUBLIC_BASE_URL }) {
+  const file = packageFilePath(id);
+  await atomicWriteJson(file, next);
+  try {
+    await appendAuditLog(audit);
+    await refreshPublicOutputs(baseUrl);
+    return next;
+  } catch (cause) {
+    let rollbackError = null;
+    try {
+      if (previous) await atomicWriteJson(file, previous);
+      else await fs.rm(file, { force:true });
+      await refreshPublicOutputs(baseUrl);
+    } catch (error) {
+      rollbackError = error;
+    }
+    await appendAuditLog({ action:'package.mutation_rolled_back', packageId:id, reason:String(cause?.message || cause).slice(0, 300) }).catch(() => {});
+    if (rollbackError) throw new Error(`package-mutation-rollback-failed: ${cause?.message || cause}; rollback: ${rollbackError.message || rollbackError}`);
+    throw new Error(`package-mutation-rolled-back: ${cause?.message || cause}`);
+  }
 }
 
 function reviewStatusForSave(existing, pkg, contentChanged) {
@@ -703,7 +1228,7 @@ function reviewStatusForSave(existing, pkg, contentChanged) {
   return existing.reviewStatus || pkg.reviewStatus;
 }
 
-async function savePackage(pkg, publisherId, options = {}) {
+async function savePackageUnlocked(pkg, publisherId, options = {}) {
   await ensureStore();
   const file = packageFilePath(pkg.id);
   let existing = null;
@@ -715,44 +1240,63 @@ async function savePackage(pkg, publisherId, options = {}) {
   const contentHash = packageContentHash(pkg);
   const previousRevision = Number(existing?.revision || 0);
   const contentChanged = !existing || existing.contentHash !== contentHash;
+  const nextReviewStatus = reviewStatusForSave(existing, pkg, contentChanged);
+  const stateChanged = Boolean(existing) && (nextReviewStatus !== (existing.reviewStatus || 'pending') || Boolean(existing.withdrawnAt));
+  const preparedBundle = options.uploadRecord ? await prepareCharacterAssetBundle(options.uploadRecord, existing, pkg) : null;
   const stored = {
     ...pkg,
     createdAt: existing?.createdAt || pkg.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    revision: existing ? (contentChanged ? previousRevision + 1 : previousRevision) : 1,
+    revision: existing ? ((contentChanged || stateChanged) ? previousRevision + 1 : previousRevision) : 1,
     contentHash,
-    reviewStatus: reviewStatusForSave(existing, pkg, contentChanged),
+    reviewStatus: nextReviewStatus,
     rejectionReason: contentChanged ? '' : (existing?.rejectionReason || ''),
     withdrawnAt: '',
-    storage: pkg.storage?.url
-      ? pkg.storage
-      : { provider: PACKAGE_PUBLIC_BASE_URL ? 'cloudreve-public-url' : 'gateway', url: packagePublicUrl(pkg.id) },
+    storage: { provider: PACKAGE_PUBLIC_BASE_URL ? 'cloudreve-public-url' : 'gateway', url: packagePublicUrl(pkg.id) },
+    assetBundle: options.uploadRecord ? preparedBundle : existing?.assetBundle,
     ownerPublisherId: publisherId,
   };
-  await fs.writeFile(file, JSON.stringify(stored, null, 2));
-  await appendAuditLog({
-    action: existing ? 'package.updated' : 'package.created',
-    packageId: stored.id,
-    publisherId,
-    reviewStatus: stored.reviewStatus,
-  });
-  await refreshPublicOutputs(options.baseUrl);
+  try {
+    await commitPackageMutation({ id:stored.id, previous:existing, next:stored, baseUrl:options.baseUrl, audit:{
+      action: existing ? 'package.updated' : 'package.created',
+      packageId: stored.id,
+      publisherId,
+      reviewStatus: stored.reviewStatus,
+    } });
+  } catch (error) {
+    if (preparedBundle) await removeCharacterBundle(stored.id, preparedBundle).catch(() => {});
+    throw error;
+  }
+  if (options.uploadRecord) {
+    await fs.rm(characterUploadDir(options.uploadRecord.uploadId), { recursive:true, force:true }).catch(() => {});
+    if (existing?.assetBundle?.uploadId && existing.assetBundle.uploadId !== preparedBundle?.uploadId) {
+      await removeCharacterBundle(stored.id, existing.assetBundle).catch(() => {});
+    }
+  }
   return ownerPackageMeta(stored, options.baseUrl);
 }
 
-async function deletePackage(id, publisherId, options = {}) {
+async function savePackage(pkg, publisherId, options = {}) {
+  return withPackageMutationLock(pkg.id, () => savePackageUnlocked(pkg, publisherId, options));
+}
+
+async function deletePackageUnlocked(id, publisherId, options = {}) {
   const existing = await getPackage(id);
   if (existing.ownerPublisherId !== publisherId) throw new Error('not-package-owner');
   assertRevisionMatch(existing, options.expectedRevision ?? null);
   const withdrawn = {
     ...existing,
+    revision: Number(existing.revision || 0) + 1,
     reviewStatus: 'withdrawn',
     withdrawnAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  await fs.writeFile(packageFilePath(id), JSON.stringify(withdrawn, null, 2));
-  await appendAuditLog({ action: 'package.withdrawn', packageId: id, publisherId, reviewStatus: 'withdrawn' });
-  await refreshPublicOutputs(options.baseUrl);
+  await commitPackageMutation({ id, previous:existing, next:withdrawn, baseUrl:options.baseUrl, audit:{ action:'package.withdrawn', packageId:id, publisherId, reviewStatus:'withdrawn' } });
+  return ownerPackageMeta(withdrawn, options.baseUrl);
+}
+
+async function deletePackage(id, publisherId, options = {}) {
+  return withPackageMutationLock(id, () => deletePackageUnlocked(id, publisherId, options));
 }
 
 async function listPackagesForPublisher(publisherId, baseUrl = PUBLIC_BASE_URL) {
@@ -778,26 +1322,29 @@ async function listPackagesForReview(status = 'pending', baseUrl = PUBLIC_BASE_U
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 
-async function setPackageReviewStatus(id, status, reason = '', reviewer = 'admin', options = {}) {
+async function setPackageReviewStatusUnlocked(id, status, reason = '', reviewer = 'admin', options = {}) {
   if (!REVIEW_STATES.has(status) || status === 'withdrawn') throw new Error('invalid review status');
   const existing = await getPackage(id);
   assertRevisionMatch(existing, options.expectedRevision ?? null);
   const next = {
     ...existing,
+    revision: Number(existing.revision || 0) + 1,
     reviewStatus: status,
     rejectionReason: status === 'rejected' ? String(reason || '').slice(0, 600) : '',
     updatedAt: new Date().toISOString(),
   };
-  await fs.writeFile(packageFilePath(id), JSON.stringify(next, null, 2));
-  await appendAuditLog({
+  await commitPackageMutation({ id, previous:existing, next, baseUrl:options.baseUrl, audit:{
     action: `package.${status}`,
     packageId: id,
     publisherId: existing.ownerPublisherId,
     reviewStatus: status,
     reason: reviewer === 'admin' ? reason : '',
-  });
-  await refreshPublicOutputs(options.baseUrl);
+  } });
   return ownerPackageMeta(next, options.baseUrl);
+}
+
+async function setPackageReviewStatus(id, status, reason = '', reviewer = 'admin', options = {}) {
+  return withPackageMutationLock(id, () => setPackageReviewStatusUnlocked(id, status, reason, reviewer, options));
 }
 
 function discordAuthUrl(state) {
@@ -856,6 +1403,17 @@ async function route(req, res) {
   if ((url.pathname === '/admin' || url.pathname === '/admin/') && req.method === 'GET') return file(res, 200, ADMIN_PAGE_FILE, 'text/html; charset=utf-8');
   if (url.pathname === '/api/workshop/login-success' && req.method === 'GET') return file(res, 200, LOGIN_SUCCESS_PAGE_FILE, 'text/html; charset=utf-8');
   if (url.pathname === '/health' || url.pathname === '/api/workshop/health') return json(req, res, 200, { ok: true });
+  if (/^\/api\/workshop\/assets\/[^/]+\/[^/]+$/.test(url.pathname) && req.method === 'GET') {
+    const parts = url.pathname.split('/');
+    const id = decodeURIComponent(parts[4] || '');
+    const filename = decodeURIComponent(parts[5] || '');
+    if (!/^(?:avatar|portrait-normal|portrait-nude)-[a-f0-9]{16}\.(?:png|jpg|webp)$/.test(filename)) return json(req, res, 404, { error:'not-found' });
+    const pkg = await getPackage(id);
+    if (!isPublicPackage(pkg)) return json(req, res, 404, { error:'not-found' });
+    const item = Object.values(pkg.assetBundle?.files || {}).find(candidate => candidate?.filename === filename);
+    if (!item) return json(req, res, 404, { error:'not-found' });
+    return binary(req, res, path.join(publicAssetPackageDir(id), filename), item.mime, { 'cache-control':'public, max-age=31536000, immutable', 'x-content-type-options':'nosniff' });
+  }
   if (url.pathname === '/api/workshop/packages' && req.method === 'GET') {
     const index = await readIndex();
     const votes = await readVotes();
@@ -876,9 +1434,13 @@ async function route(req, res) {
     const body = JSON.parse(await readBody(req, 4 * 1024) || '{}');
     const requestedId = normalizeLoginHandoffId(body.handoffId);
     if (requestedId && loginHandoffs.has(requestedId)) return json(req, res, 409, { error:'login-handoff-exists' }, { 'cache-control':'no-store' });
-    const id = registerLoginHandoff(requestedId, body.challenge);
-    if (!id) return json(req, res, 400, { error:'invalid-login-handoff' }, { 'cache-control':'no-store' });
-    return json(req, res, 201, { status:'pending' }, { 'cache-control':'no-store' });
+    if (!admitLoginHandoff()) return json(req, res, 429, { error:'login-handoff-rate-limited' }, { 'cache-control':'no-store', 'retry-after':String(loginHandoffRetryAfterSeconds()) });
+    const handoff = registerLoginHandoff(requestedId, body.challenge);
+    if (!handoff) return json(req, res, 400, { error:'invalid-login-handoff' }, { 'cache-control':'no-store' });
+    return json(req, res, 201, {
+      status:'pending',
+      expiresInMs: Math.max(0, handoff.expiresAt - Date.now()),
+    }, { 'cache-control':'no-store' });
   }
   if (url.pathname === '/api/workshop/login-handoff' && req.method === 'POST') {
     const body = JSON.parse(await readBody(req, 4 * 1024) || '{}');
@@ -906,10 +1468,43 @@ async function route(req, res) {
     if (!session) return json(req, res, 401, { error: 'login-required' });
     return json(req, res, 200, { packages: await listPackagesForPublisher(session.publisherId, publicBaseUrl) });
   }
+  if (/^\/api\/workshop\/me\/packages\/[^/]+\/assets\/[^/]+$/.test(url.pathname) && req.method === 'GET') {
+    const session = sessionFromRequest(req);
+    if (!session) return json(req, res, 401, { error:'login-required' });
+    const parts = url.pathname.split('/');
+    const id = decodeURIComponent(parts[5] || '');
+    const slot = decodeURIComponent(parts[7] || '');
+    const pkg = await getPackage(id);
+    if (pkg.ownerPublisherId !== session.publisherId) return json(req, res, 404, { error:'not-found' });
+    const item = pkg.assetBundle?.files?.[slot];
+    if (!item) return json(req, res, 404, { error:'not-found' });
+    return binary(req, res, path.join(characterBundleDir(id, pkg.assetBundle.uploadId), item.filename), item.mime, { 'cache-control':'private, no-store', 'x-content-type-options':'nosniff' });
+  }
+  if (url.pathname === '/api/workshop/uploads/character' && req.method === 'POST') {
+    const session = sessionFromRequest(req);
+    if (!session) return json(req, res, 401, { error:'login-required' });
+    const release = beginCharacterUploadAdmission(session.publisherId);
+    try {
+      const input = JSON.parse(await readBody(req, 26 * 1024 * 1024));
+      return json(req, res, 201, await createCharacterUpload(input, session.publisherId), { 'cache-control':'no-store' });
+    } finally {
+      release();
+    }
+  }
   if (url.pathname === '/api/admin/review/packages' && req.method === 'GET') {
     requireAdmin(req);
     const packages = await listPackagesForReview(url.searchParams.get('status') || 'pending', publicBaseUrl);
     return json(req, res, 200, { packages: applyPackageFilters(packages, url.searchParams) });
+  }
+  if (/^\/api\/admin\/review\/packages\/[^/]+\/assets\/[^/]+$/.test(url.pathname) && req.method === 'GET') {
+    requireAdmin(req);
+    const parts = url.pathname.split('/');
+    const id = decodeURIComponent(parts[5] || '');
+    const slot = decodeURIComponent(parts[7] || '');
+    const pkg = await getPackage(id);
+    const item = pkg.assetBundle?.files?.[slot];
+    if (!item) return json(req, res, 404, { error:'not-found' });
+    return binary(req, res, path.join(characterBundleDir(id, pkg.assetBundle.uploadId), item.filename), item.mime, { 'cache-control':'private, no-store', 'x-content-type-options':'nosniff' });
   }
   if (url.pathname.startsWith('/api/admin/review/packages/') && req.method === 'GET') {
     requireAdmin(req);
@@ -927,8 +1522,8 @@ async function route(req, res) {
     const session = sessionFromRequest(req);
     if (!session) return json(req, res, 401, { error: 'login-required' });
     const input = JSON.parse(await readBody(req));
-    const pkg = validatePackage(input);
-    const meta = await savePackage(pkg, session.publisherId, { createOnly: true, baseUrl: publicBaseUrl });
+    const { pkg, uploadRecord } = await packageInputForPublish(input, session.publisherId, publicBaseUrl);
+    const meta = await savePackage(pkg, session.publisherId, { createOnly: true, baseUrl: publicBaseUrl, uploadRecord });
     return json(req, res, 200, meta);
   }
   if (url.pathname.startsWith('/api/workshop/packages/') && req.method === 'PUT') {
@@ -936,17 +1531,17 @@ async function route(req, res) {
     if (!session) return json(req, res, 401, { error: 'login-required' });
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
     const input = JSON.parse(await readBody(req));
-    const pkg = validatePackage(input);
+    const { pkg, uploadRecord } = await packageInputForPublish(input, session.publisherId, publicBaseUrl);
     if (pkg.id !== id) return json(req, res, 400, { error: 'package-id-mismatch' });
-    const meta = await savePackage(pkg, session.publisherId, { updateOnly: true, expectedRevision: requiredExpectedRevision(req, input), baseUrl: publicBaseUrl });
+    const meta = await savePackage(pkg, session.publisherId, { updateOnly: true, expectedRevision: requiredExpectedRevision(req, input), baseUrl: publicBaseUrl, uploadRecord });
     return json(req, res, 200, meta);
   }
   if (url.pathname.startsWith('/api/workshop/packages/') && req.method === 'DELETE') {
     const session = sessionFromRequest(req);
     if (!session) return json(req, res, 401, { error: 'login-required' });
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
-    await deletePackage(id, session.publisherId, { expectedRevision: requiredExpectedRevision(req), baseUrl: publicBaseUrl });
-    return json(req, res, 200, { ok: true });
+    const meta = await deletePackage(id, session.publisherId, { expectedRevision: requiredExpectedRevision(req), baseUrl: publicBaseUrl });
+    return json(req, res, 200, { ok:true, package:meta });
   }
   if (/^\/api\/workshop\/packages\/[^/]+\/vote$/.test(url.pathname) && req.method === 'POST') {
     const session = sessionFromRequest(req);
@@ -1007,6 +1602,10 @@ async function assertDataPathsWritable() {
     ['VOTES_FILE', path.dirname(VOTES_FILE)],
     ['AUDIT_LOG_FILE', path.dirname(AUDIT_LOG_FILE)],
     ['PUBLIC_SYNC_REPORT_FILE', path.dirname(PUBLIC_SYNC_REPORT_FILE)],
+    ...(PUBLIC_PACKAGE_DIR ? [['PUBLIC_PACKAGE_DIR', PUBLIC_PACKAGE_DIR]] : []),
+    ['CHARACTER_UPLOAD_DIR', CHARACTER_UPLOAD_DIR],
+    ['CHARACTER_ASSET_STORE_DIR', CHARACTER_ASSET_STORE_DIR],
+    ['PUBLIC_ASSET_DIR', PUBLIC_ASSET_DIR],
   ];
   for (const [name, dir] of checks) {
     try {
@@ -1020,6 +1619,22 @@ async function assertDataPathsWritable() {
   }
 }
 
+function isLoopbackListenHost() {
+  return HOST === 'localhost' || HOST === '127.0.0.1' || HOST === '::1' || HOST === '[::1]';
+}
+
+function assertSecureConfiguration() {
+  if (isLoopbackListenHost()) return;
+  const invalid = value => Buffer.byteLength(String(value || ''), 'utf8') < 32 || /^dev-(session|hash)-secret$/.test(String(value || ''));
+  if (invalid(SESSION_SECRET) || invalid(HASH_SECRET) || SESSION_SECRET === HASH_SECRET) {
+    throw new Error('[config] 公网 Gateway 必须配置两个不同且至少 32 字节的 SESSION_SECRET / HASH_SECRET');
+  }
+  if (LOGIN_HANDOFF_RATE_PER_SEC * (LOGIN_HANDOFF_TTL_MS / 1000) + LOGIN_HANDOFF_RATE_BURST >= LOGIN_HANDOFF_MAX) {
+    throw new Error('[config] LOGIN_HANDOFF_RATE_PER_SEC / BURST 必须保证一个 TTL 窗口内无法填满 LOGIN_HANDOFF_MAX');
+  }
+}
+
+assertSecureConfiguration();
 await assertDataPathsWritable();
 await ensureStore();
 http.createServer((req, res) => {
@@ -1029,6 +1644,6 @@ http.createServer((req, res) => {
     if (status >= 500) console.error('[gateway] unhandled error:', error);
     json(req, res, status, { error: clientErrorMessage(message, status) });
   });
-}).listen(PORT, () => {
-  console.log(`Workshop Gateway listening on ${PORT}`);
+}).listen(PORT, HOST, () => {
+  console.log(`Workshop Gateway listening on ${HOST}:${PORT}`);
 });

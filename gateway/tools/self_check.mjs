@@ -6,6 +6,9 @@ const baseUrl = String(env.PUBLIC_BASE_URL || `http://localhost:${env.PORT || 87
 const adminToken = env.ADMIN_TOKEN || '';
 const packageStoreDir = env.PACKAGE_STORE_DIR || './data/packages';
 const publicPackageDir = env.PUBLIC_PACKAGE_DIR || '';
+const characterUploadDir = env.CHARACTER_UPLOAD_DIR || path.join(path.dirname(packageStoreDir), 'character-uploads');
+const characterAssetStoreDir = env.CHARACTER_ASSET_STORE_DIR || path.join(path.dirname(packageStoreDir), 'character-assets');
+const publicAssetDir = env.PUBLIC_ASSET_DIR || (publicPackageDir ? path.join(publicPackageDir, 'assets') : './data/public/assets');
 const corsOrigin = env.CORS_ORIGIN || '*';
 
 const results = [];
@@ -55,6 +58,17 @@ async function checkStorage() {
     record('ok', 'package store', `PACKAGE_STORE_DIR accessible: ${path.resolve(packageStoreDir)}`);
   } catch (error) {
     record('fail', 'package store', error.message);
+  }
+  for (const [name, dir] of [['character upload dir', characterUploadDir], ['character asset store', characterAssetStoreDir], ['public asset dir', publicAssetDir]]) {
+    try {
+      await fs.mkdir(dir, { recursive:true });
+      const testFile = path.join(dir, `.self-check-${Date.now()}.tmp`);
+      await fs.writeFile(testFile, 'ok');
+      await fs.unlink(testFile);
+      record('ok', name, `${name} is writable: ${path.resolve(dir)}`);
+    } catch (error) {
+      record('fail', name, error.message);
+    }
   }
   if (!publicPackageDir) {
     record('warn', 'public package dir', 'PUBLIC_PACKAGE_DIR is empty; Cloudreve sync will be skipped');

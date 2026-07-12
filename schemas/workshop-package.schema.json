@@ -4,7 +4,7 @@
   "title": "Rolecard DIY Workshop Package",
   "description": "A content package imported as worldbook/lorebook entries. It must not directly patch MVU save variables.",
   "type": "object",
-  "additionalProperties": true,
+  "additionalProperties": false,
   "required": [
     "packageVersion",
     "id",
@@ -282,7 +282,7 @@
             "required": [
               "name"
             ],
-            "additionalProperties": true,
+            "additionalProperties": false,
             "properties": {
               "name": {
                 "type": "string",
@@ -293,28 +293,33 @@
               "profile": {
                 "type": "object",
                 "description": "自由键值设定（身份/与user关系等）",
+                "maxProperties": 32,
                 "additionalProperties": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 4000
                 }
               },
               "appearance": {
                 "type": "object",
                 "description": "结构化外貌（身高/三围/整体印象/体型等），蓝本=世界书苏锦瑶条目",
+                "maxProperties": 32,
                 "additionalProperties": {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 12000
                 }
               },
               "personality": {
                 "type": "string",
-                "maxLength": 2000
+                "maxLength": 12000
               },
               "dialogueStyle": {
                 "type": "string",
-                "maxLength": 1000
+                "maxLength": 4000
               },
               "behavior": {
                 "type": "object",
                 "description": "行事风格与行为应对（角色编辑器对照编辑核心字段）",
+                "additionalProperties": false,
                 "properties": {
                   "行事风格": {
                     "type": "string",
@@ -328,41 +333,114 @@
               },
               "relationships": {
                 "type": "array",
+                "maxItems": 100,
                 "items": {
                   "type": "object",
+                  "required": [
+                    "target"
+                  ],
+                  "additionalProperties": false,
                   "properties": {
                     "target": {
-                      "type": "string"
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
                     },
                     "type": {
-                      "type": "string"
+                      "type": "string",
+                      "maxLength": 80
                     },
                     "note": {
-                      "type": "string"
+                      "type": "string",
+                      "maxLength": 2000
                     }
                   }
                 }
               },
               "media": {
                 "type": "object",
-                "description": "媒体引用：值为媒体库 key（type=bond,name=角色名）或图床 URL，不内嵌图片数据",
+                "description": "Gateway 发布形状只接受空值或 http(s) 图床 URL；客户端本地草稿可使用媒体库 key，但发布前必须转换",
+                "additionalProperties": false,
                 "properties": {
                   "portraits": {
                     "type": "object",
+                    "additionalProperties": false,
                     "properties": {
                       "normal": {
                         "type": "string",
-                        "description": "正常立绘媒体库 key"
+                        "maxLength": 2048,
+                        "pattern": "^(?:$|https?://)",
+                        "description": "正常立绘发布 URL（空值或 http(s)）"
                       },
                       "nude": {
                         "type": "string",
-                        "description": "赤裸立绘媒体库 key"
+                        "maxLength": 2048,
+                        "pattern": "^(?:$|https?://)",
+                        "description": "赤裸立绘发布 URL（空值或 http(s)）"
                       }
                     }
                   },
                   "avatar": {
                     "type": "string",
-                    "description": "头像媒体库 key；状态栏与对话气泡共用同一头像，气泡显示名=name"
+                    "maxLength": 2048,
+                    "pattern": "^(?:$|https?://)",
+                    "description": "头像发布 URL（空值或 http(s)）；状态栏与对话气泡共用同一头像，气泡显示名=name"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "type",
+          "cardScope"
+        ],
+        "properties": {
+          "type": {
+            "const": "world_factor"
+          },
+          "cardScope": {
+            "enum": [
+              "xingyue",
+              "shared"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": [
+              "worldFactors"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "worldFactors": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "title",
+                    "content"
+                  ],
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "content": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 16384
+                    }
                   }
                 }
               }
@@ -378,7 +456,13 @@
         ],
         "properties": {
           "type": {
-            "const": "world_factor"
+            "enum": [
+              "shop_item",
+              "blueprint",
+              "recipe",
+              "skill",
+              "function"
+            ]
           }
         }
       },
@@ -387,29 +471,32 @@
           "payload": {
             "type": "object",
             "required": [
-              "worldFactors"
+              "schemaVersion",
+              "worldbook"
             ],
-            "additionalProperties": true,
+            "additionalProperties": false,
             "properties": {
-              "worldFactors": {
-                "type": "array",
-                "minItems": 1,
-                "items": {
-                  "type": "object",
-                  "required": [
-                    "title",
-                    "content"
-                  ],
-                  "properties": {
-                    "title": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 80
-                    },
-                    "content": {
-                      "type": "string",
-                      "minLength": 1
-                    }
+              "schemaVersion": {
+                "const": 1
+              },
+              "worldbook": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "content"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "content": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16384,
+                    "pattern": "^(?![\\s\\S]*[dD][aA][tT][aA]:[iI][mM][aA][gG][eE]/)[\\s\\S]*$"
                   }
                 }
               }

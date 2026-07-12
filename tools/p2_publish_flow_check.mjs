@@ -18,6 +18,9 @@ const publisherFile = path.join(tempRoot, 'publishers.json');
 const votesFile = path.join(tempRoot, 'votes.json');
 const auditLogFile = path.join(tempRoot, 'audit-log.jsonl');
 const publicSyncReportFile = path.join(tempRoot, 'public-sync-report.json');
+const characterUploadDir = path.join(tempRoot, 'character-uploads');
+const characterAssetStoreDir = path.join(tempRoot, 'character-assets');
+const publicAssetDir = path.join(tempRoot, 'public-assets');
 const port = Number(args.port || (19000 + crypto.randomInt(1000)));
 const baseUrl = `http://127.0.0.1:${port}`;
 const adminToken = crypto.randomBytes(24).toString('base64url');
@@ -26,6 +29,7 @@ const results = [];
 let server = null;
 
 try {
+  await assertPublicSecretFailClosed();
   server = await startGateway();
   await waitForHealth();
   await runFlow();
@@ -72,7 +76,14 @@ async function startGateway() {
       AUDIT_LOG_FILE: auditLogFile,
       PUBLIC_PACKAGE_DIR: publicPackageDir,
       PUBLIC_SYNC_REPORT_FILE: publicSyncReportFile,
+      CHARACTER_UPLOAD_DIR: characterUploadDir,
+      CHARACTER_ASSET_STORE_DIR: characterAssetStoreDir,
+      PUBLIC_ASSET_DIR: publicAssetDir,
       PACKAGE_PUBLIC_BASE_URL: 'https://storage.example.invalid/workshop-json/shared',
+      LOGIN_HANDOFF_MAX: '128',
+      LOGIN_HANDOFF_TTL_MS: '60000',
+      LOGIN_HANDOFF_RATE_PER_SEC: '1',
+      LOGIN_HANDOFF_RATE_BURST: '4',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -87,6 +98,31 @@ async function startGateway() {
   child.stderr.on('data', chunk => { state.stderrText += chunk; });
   child.on('error', error => { state.stderrText += String(error.message || error); });
   return state;
+}
+
+async function assertPublicSecretFailClosed() {
+  const child = spawn(process.execPath, [path.join(gatewayRoot, 'server.js')], {
+    cwd: gatewayRoot,
+    windowsHide: true,
+    env: {
+      ...process.env,
+      PORT: String(port + 1),
+      PUBLIC_BASE_URL: '',
+      HOST: '0.0.0.0',
+      SESSION_SECRET: 'dev-session-secret',
+      HASH_SECRET: 'dev-hash-secret',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  child.stderr.on('data', chunk => { output += chunk; });
+  const exitCode = await Promise.race([
+    new Promise(resolve => child.on('close', resolve)),
+    new Promise(resolve => setTimeout(() => resolve('timeout'), 5000)),
+  ]);
+  if (exitCode === 'timeout') child.kill();
+  assert(exitCode !== 'timeout' && exitCode !== 0 && output.includes('SESSION_SECRET / HASH_SECRET'), 'all-interface Gateway rejects default secrets even when public URL is missing', 'fail-closed');
 }
 
 async function waitForHealth() {
@@ -121,6 +157,9 @@ async function runFlow() {
   const cookie = await devLoginCookie('owner');
   const me = await request('/api/workshop/me', { cookie, expected: 200 });
   assert(me.body.loggedIn === true && me.body.publisherId, 'owner login', 'dev ownership key accepted');
+  const sameIdentityCookies = await Promise.all([devLoginCookie('same-discord-hash'), devLoginCookie('same-discord-hash')]);
+  const sameIdentityMe = await Promise.all(sameIdentityCookies.map(value => request('/api/workshop/me', { cookie:value, expected:200 })));
+  assert(sameIdentityMe[0].body.publisherId === sameIdentityMe[1].body.publisherId, 'concurrent same Discord hash resolves one publisher', sameIdentityMe[0].body.publisherId);
   const bearerToken = decodeURIComponent(cookie.slice(cookie.indexOf('=') + 1));
   const crossOriginCookie = await request('/api/workshop/me', {
     cookie,
@@ -133,6 +172,24 @@ async function runFlow() {
     expected: 200,
   });
   assert(crossOriginBearer.body.publisherId === me.body.publisherId, 'cross-origin Bearer accepted', 'card API path');
+
+  const stateCasId = `${packageId}-state-cas`;
+  await request('/api/workshop/packages', { method:'POST', cookie, body:basePackage({ id:stateCasId }), expected:200 });
+  const stateCas = await Promise.all([
+    adminRequest(`/api/admin/review/packages/${encodeURIComponent(stateCasId)}`, {
+      method:'POST', body:{ status:'rejected', reason:'CAS probe', revision:1 }, expected:[200,409],
+    }),
+    request(`/api/workshop/packages/${encodeURIComponent(stateCasId)}`, {
+      method:'DELETE', cookie, headers:{ 'x-package-revision':'1' }, expected:[200,409],
+    }),
+  ]);
+  assert(stateCas.filter(result => result.status === 200).length === 1 && stateCas.filter(result => result.status === 409).length === 1, 'review and withdraw with same revision have one CAS winner', 'one HTTP 200 and one 409');
+  const createCasId = `${packageId}-create-cas`;
+  const createCas = await Promise.all([
+    request('/api/workshop/packages', { method:'POST', cookie, body:basePackage({ id:createCasId }), expected:[200,409] }),
+    request('/api/workshop/packages', { method:'POST', cookie, body:basePackage({ id:createCasId }), expected:[200,409] }),
+  ]);
+  assert(createCas.filter(result => result.status === 200).length === 1 && createCas.filter(result => result.status === 409).length === 1, 'concurrent create-only package has one owner write', 'one HTTP 200 and one 409');
 
   const openingId = `${packageId}-opening`;
   const disguisedOpening = await request('/api/workshop/packages', {
@@ -148,6 +205,23 @@ async function runFlow() {
     method: 'POST', cookie, body: openingWithPrivateSidecar, expected: 400,
   });
   assert(privateOpening.body.error.includes('unknown-opening-payload-field'), 'Gateway rejects opening private sidecars', privateOpening.body.error);
+  const rootSidecarFactor = basePackage({ id:`${openingId}-factor-sidecar` });
+  rootSidecarFactor.payload.rogue = 'sidecar';
+  const rejectedRootSidecar = await request('/api/workshop/packages', { method:'POST', cookie, body:rootSidecarFactor, expected:400 });
+  assert(rejectedRootSidecar.body.error.includes('unknown-world-factor-payload-field'), 'Gateway rejects ordinary world factor root sidecars', rejectedRootSidecar.body.error);
+
+  const rejectedLegacyExtension = await request('/api/workshop/packages', {
+    method:'POST', cookie, expected:400,
+    body:{ packageVersion:'1.0.0', id:`${openingId}-legacy-extension`, type:'skill', cardScope:'xingyue', title:'Legacy extension', payload:{ level:1 } },
+  });
+  assert(rejectedLegacyExtension.body.error.includes('extension-worldbook-contract-required'), 'Gateway rejects legacy extension publish shape', rejectedLegacyExtension.body.error);
+
+  const rejectedLocalCharacterMedia = await request('/api/workshop/packages', {
+    method:'POST', cookie, expected:400,
+    body:{ packageVersion:'1.0.0', id:`${openingId}-local-character`, type:'character', cardScope:'xingyue', title:'Local character', payload:{ name:'Local', media:{ avatar:'media://local/avatar' } } },
+  });
+  assert(rejectedLocalCharacterMedia.body.error.includes('invalid-character-avatar'), 'Gateway rejects non-portable character media key', rejectedLocalCharacterMedia.body.error);
+  await assertCharacterUploadFlow(cookie, bearerToken);
 
   const embeddedIdentity = await request('/api/workshop/packages', {
     method: 'POST', cookie,
@@ -169,12 +243,16 @@ async function runFlow() {
   const create = await request('/api/workshop/packages', {
     method: 'POST',
     cookie,
-    body: basePackage({ id: packageId, summary: 'P2 smoke package before review.', reviewStatus: 'approved', revision: 999 }),
+    body: basePackage({ id: packageId, summary: 'P2 smoke package before review.', reviewStatus: 'approved', revision: 999, storage:{ provider:'client', url:'https://evil.example.invalid/package.json' } }),
     expected: 200,
   });
   assert(create.body.reviewStatus === 'pending', 'publish creates pending package', `rev ${create.body.revision}`);
+  assert(!String(create.body.storage?.url || '').includes('evil.example.invalid'), 'client storage metadata is ignored', create.body.storage?.provider || 'gateway');
   assert(create.body.revision === 1, 'initial revision', 'revision 1');
   assert(create.body.reviewStatus === 'pending', 'client review state ignored', 'server owns review state');
+  const ownerPendingList = await request('/api/workshop/me/packages', { cookie, expected:200 });
+  const ownerPending = (ownerPendingList.body.packages || []).find(pkg => pkg.id === packageId);
+  assert(ownerPending?.payload?.worldFactors?.[0]?.content, 'owner package projection retains payload for update and rejected/withdrawn detail', 'owner-only payload present');
 
   const duplicate = await request('/api/workshop/packages', {
     method: 'POST',
@@ -201,7 +279,7 @@ async function runFlow() {
     method: 'POST',
     body: { status: 'approved', revision: 1 },
   });
-  assert(approved.body.reviewStatus === 'approved', 'admin approve', 'approved');
+  assert(approved.body.reviewStatus === 'approved' && approved.body.revision === 2, 'admin approve advances CAS revision', 'approved revision 2');
   await assertPublicIndex(true, 'approved appears in public index');
 
   const publicDetail = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, { expected: 200 });
@@ -225,20 +303,26 @@ async function runFlow() {
   });
   assert(missingRevision.body.error === 'revision-required', 'missing update revision rejected', '428 revision-required');
 
-  const updated = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, {
-    method: 'PUT',
-    cookie,
-    headers: { 'x-package-revision': '1' },
-    body: basePackage({ id: packageId, summary: 'P2 smoke package after owner update.' }),
-    expected: 200,
-  });
-  assert(updated.body.revision === 2 && updated.body.reviewStatus === 'pending', 'owner update returns to review', `rev ${updated.body.revision}`);
+  const concurrentUpdates = await Promise.all([
+    request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, {
+      method:'PUT', cookie, headers:{ 'x-package-revision':'2' },
+      body:basePackage({ id:packageId, summary:'P2 concurrent owner update A.' }), expected:[200,409],
+    }),
+    request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, {
+      method:'PUT', cookie, headers:{ 'x-package-revision':'2' },
+      body:basePackage({ id:packageId, summary:'P2 concurrent owner update B.' }), expected:[200,409],
+    }),
+  ]);
+  const updated = concurrentUpdates.find(item => item.status === 200)?.body;
+  const conflicted = concurrentUpdates.find(item => item.status === 409)?.body;
+  assert(updated && conflicted?.error === 'package-conflict', 'same-revision concurrent updates serialize to one winner', 'one HTTP 200 and one 409');
+  assert(updated.revision === 3 && updated.reviewStatus === 'pending', 'owner update returns to review', `rev ${updated.revision}`);
   await assertPublicIndex(false, 'updated pending hidden from public index');
   await assertPublicFile(false, 'updated pending removed from public dir');
 
   await adminRequest(`/api/admin/review/packages/${encodeURIComponent(packageId)}`, {
     method: 'POST',
-    body: { status: 'approved', revision: 2 },
+    body: { status: 'approved', revision: 3 },
   });
   await assertPublicIndex(true, 'reapproved update appears in public index');
   await assertPublicFile(true, 'reapproved update synced to public dir');
@@ -266,7 +350,7 @@ async function runFlow() {
   const withdrawn = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, {
     method: 'DELETE',
     cookie,
-    headers: { 'x-package-revision': '2' },
+    headers: { 'x-package-revision': '4' },
     expected: 200,
   });
   assert(withdrawn.body.ok === true, 'owner withdraw', 'ok');
@@ -280,6 +364,21 @@ async function runFlow() {
 
   const mine = await request('/api/workshop/me/packages', { cookie, expected: 200 });
   assert((mine.body.packages || []).some(pkg => pkg.id === packageId && pkg.reviewStatus === 'withdrawn'), 'my packages shows withdrawn state', packageId);
+  assert((mine.body.packages || []).find(pkg => pkg.id === packageId)?.payload?.worldFactors?.length === 1, 'withdrawn owner package remains copyable as local draft', 'payload retained');
+
+  const rollbackId = `${packageId}-projection-rollback`;
+  await request('/api/workshop/packages', { method:'POST', cookie, body:basePackage({ id:rollbackId }), expected:200 });
+  await fs.rm(publicPackageDir, { recursive:true, force:true });
+  await fs.writeFile(publicPackageDir, 'blocked projection path');
+  await adminRequest(`/api/admin/review/packages/${encodeURIComponent(rollbackId)}`, {
+    method:'POST', body:{ status:'approved', revision:1 }, expected:500,
+  });
+  const rolledBackTruth = JSON.parse(await fs.readFile(path.join(packageStoreDir, `${rollbackId}.json`), 'utf8'));
+  const rolledBackIndex = JSON.parse(await fs.readFile(indexFile, 'utf8'));
+  assert(rolledBackTruth.reviewStatus === 'pending' && rolledBackTruth.revision === 1, 'projection failure rolls package truth back to retryable revision', 'pending revision 1');
+  assert(!(rolledBackIndex.packages || []).some(pkg => pkg.id === rollbackId), 'projection rollback restores public index', 'package remains non-public');
+  await fs.rm(publicPackageDir, { force:true });
+  await fs.mkdir(publicPackageDir, { recursive:true });
 
   await assertPrivacyFiles();
 }
@@ -291,6 +390,8 @@ async function assertLoginHandoffFlow() {
     const challenge = crypto.createHash('sha256').update(secret, 'utf8').digest('hex');
     const started = await request('/api/workshop/login-handoff/start', { method:'POST', body:{ handoffId, challenge }, expected:201 });
     assert(started.body.status === 'pending', 'OAuth handoff challenge registered', handoffId);
+    const expiresInMs = Number(started.body.expiresInMs);
+    assert(Number.isFinite(expiresInMs) && expiresInMs >= 59_000 && expiresInMs <= 60_000, 'OAuth handoff exposes server TTL', `${started.body.expiresInMs}ms`);
     return { handoffId, secret, challenge };
   };
 
@@ -328,6 +429,151 @@ async function assertLoginHandoffFlow() {
   new Function(loginSuccessScript);
   record('ok', 'login success inline script parses', 'handoff signal page syntax valid');
   assert(!loginSuccess.includes("safeReturn || '*'") && loginSuccess.includes('xy-workshop-handoff-ready'), 'login success never wildcard-posts Bearer', 'exact local target only');
+
+  const capacityCandidates = Array.from({ length:128 }, () => {
+    const handoffId = 'xyh_' + crypto.randomBytes(24).toString('hex');
+    const secret = crypto.randomBytes(32).toString('hex');
+    const challenge = crypto.createHash('sha256').update(secret, 'utf8').digest('hex');
+    return { handoffId, secret, challenge };
+  });
+  const capacityResults = await Promise.all(capacityCandidates.map(item => request('/api/workshop/login-handoff/start', {
+    method:'POST', body:{ handoffId:item.handoffId, challenge:item.challenge }, expected:[201,429,503],
+  })));
+  const acceptedIndexes = capacityResults.map((result, index) => result.status === 201 ? index : -1).filter(index => index >= 0);
+  assert(acceptedIndexes.length > 0 && acceptedIndexes.length < 128 && capacityResults.some(result => result.status === 429), 'OAuth handoff admission rate prevents anonymous capacity exhaustion', `${acceptedIndexes.length} accepted before HTTP 429`);
+  const preserved = capacityCandidates[acceptedIndexes[0]];
+  const preservedClaim = await request('/api/workshop/login-handoff', { method:'POST', body:preserved, expected:202 });
+  assert(preservedClaim.body.status === 'pending', 'capacity overflow preserves existing active handoffs', 'accepted handle remains claimable');
+  const rateLimited = capacityResults.find(result => result.status === 429);
+  const retryAfterSeconds = Number(rateLimited?.headers?.get('retry-after'));
+  assert(Number.isInteger(retryAfterSeconds) && retryAfterSeconds >= 1, 'OAuth handoff rate limit returns an actionable Retry-After', `${retryAfterSeconds}s`);
+  await new Promise(resolve => setTimeout(resolve, retryAfterSeconds * 1000 + 150));
+  const retryCandidate = capacityCandidates.find((_, index) => !acceptedIndexes.includes(index));
+  const retryStart = await request('/api/workshop/login-handoff/start', { method:'POST', body:{ handoffId:retryCandidate.handoffId, challenge:retryCandidate.challenge }, expected:201 });
+  assert(retryStart.body.status === 'pending', 'rate-limited normal login can retry after bounded delay', 'HTTP 201 after refill');
+}
+
+async function assertCharacterUploadFlow(ownerCookie, ownerToken) {
+  const id = `${packageId}-character-upload`;
+  const packageBody = {
+    packageVersion:'1.0.0',
+    id,
+    type:'character',
+    cardScope:'xingyue',
+    title:'P2 Character Upload',
+    summary:'Character JSON and three reviewed media files.',
+    authorName:'ops-smoke',
+    rating:'general',
+    language:'zh-CN',
+    tags:['p2-smoke','character'],
+    payload:{ name:'P2 Character', media:{ avatar:'', portraits:{ normal:'', nude:'' } } },
+  };
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZfOoAAAAASUVORK5CYII=';
+  const invalidMagic = await request('/api/workshop/uploads/character', {
+    method:'POST', headers:{ authorization:`Bearer ${ownerToken}` }, body:{ package:packageBody, assets:{ avatar:'data:image/png;base64,AAAA' } }, expected:400,
+  });
+  assert(invalidMagic.body.error === 'invalid-character-image-magic', 'character upload rejects fake image bytes', invalidMagic.body.error);
+  const upload = await request('/api/workshop/uploads/character', {
+    method:'POST',
+    headers:{ authorization:`Bearer ${ownerToken}` },
+    body:{ package:packageBody, assets:{ avatar:png, portraitNormal:png, portraitNude:png } },
+    expected:201,
+  });
+  assert(/^xyu_[A-Za-z0-9_-]+$/.test(upload.body.uploadId || '') && Object.keys(upload.body.assets || {}).length === 3, 'character bundle staged with three validated images', upload.body.uploadId);
+
+  const otherCookie = await devLoginCookie('character-upload-other-owner');
+  const wrongOwner = await request('/api/workshop/packages', {
+    method:'POST', cookie:otherCookie, body:{ ...packageBody, uploadId:upload.body.uploadId }, expected:403,
+  });
+  assert(wrongOwner.body.error === 'character-upload-owner-mismatch', 'character upload id is owner-bound', wrongOwner.body.error);
+
+  const created = await request('/api/workshop/packages', {
+    method:'POST', headers:{ authorization:`Bearer ${ownerToken}` }, body:{ ...packageBody, uploadId:upload.body.uploadId }, expected:200,
+  });
+  assert(created.body.reviewStatus === 'pending' && created.body.revision === 1, 'character bundle publish enters review', 'pending revision 1');
+  const reused = await request('/api/workshop/packages', {
+    method:'POST', headers:{ authorization:`Bearer ${ownerToken}` }, body:{ ...packageBody, uploadId:upload.body.uploadId }, expected:404,
+  });
+  assert(reused.body.error === 'not-found', 'consumed character upload id cannot be reused', reused.body.error);
+  const pendingAssetPath = new URL(created.body.payload.media.avatar).pathname;
+  const pendingAsset = await request(pendingAssetPath, { expected:404 });
+  assert(pendingAsset.status === 404, 'pending character media is not public', 'HTTP 404');
+
+  const adminDetail = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`);
+  assert(Object.keys(adminDetail.body.reviewAssets || {}).length === 3, 'admin review exposes three authenticated media previews', 'avatar + two portraits');
+  const adminAssetPath = new URL(adminDetail.body.reviewAssets.avatar, baseUrl).pathname;
+  const adminAsset = await adminRequest(adminAssetPath);
+  assert(String(adminAsset.headers.get('content-type') || '').startsWith('image/png'), 'admin can inspect staged character image', 'image/png');
+
+  const approved = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`, {
+    method:'POST', body:{ status:'approved', reason:'', revision:1 }, expected:200,
+  });
+  assert(approved.body.reviewStatus === 'approved' && approved.body.revision === 2, 'approved character bundle advances revision', 'revision 2');
+  const publicIndex = await request('/api/workshop/packages');
+  const publicCharacter = (publicIndex.body.packages || []).find(pkg => pkg.id === id);
+  assert(Object.values(publicCharacter?.previewMedia || {}).filter(Boolean).length === 3, 'public character index exposes avatar and two portrait references', 'three preview URLs');
+  const publicAsset = await request(pendingAssetPath);
+  assert(String(publicAsset.headers.get('content-type') || '').startsWith('image/png'), 'approved character media is public', 'image/png');
+
+  const retainedInput = { ...packageBody, title:'P2 Character Upload Retained', revision:2, payload:created.body.payload };
+  const retainedUpload = await request('/api/workshop/uploads/character', {
+    method:'POST', headers:{ authorization:`Bearer ${ownerToken}` }, body:{ package:retainedInput, assets:{} }, expected:201,
+  });
+  const retainedUpdate = await request(`/api/workshop/packages/${encodeURIComponent(id)}`, {
+    method:'PUT', headers:{ authorization:`Bearer ${ownerToken}`, 'x-package-revision':'2' }, body:{ ...retainedInput, uploadId:retainedUpload.body.uploadId }, expected:200,
+  });
+  const retainedAdmin = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`);
+  assert(Object.keys(retainedAdmin.body.reviewAssets || {}).length === 3, 'character metadata update retains all three managed media slots', 'three retained review assets');
+  await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`, {
+    method:'POST', body:{ status:'approved', reason:'', revision:3 }, expected:200,
+  });
+
+  const replacementBuffer = Buffer.from(png.split(',')[1], 'base64');
+  replacementBuffer[45] ^= 1;
+  const replacementPng = `data:image/png;base64,${replacementBuffer.toString('base64')}`;
+  const partialInput = { ...packageBody, summary:'One image changed; portraits retained.', revision:4, payload:retainedUpdate.body.payload };
+  const partialUpload = await request('/api/workshop/uploads/character', {
+    method:'POST', headers:{ authorization:`Bearer ${ownerToken}` }, body:{ package:partialInput, assets:{ avatar:replacementPng } }, expected:201,
+  });
+  const partialUpdate = await request(`/api/workshop/packages/${encodeURIComponent(id)}`, {
+    method:'PUT', headers:{ authorization:`Bearer ${ownerToken}`, 'x-package-revision':'4' }, body:{ ...partialInput, uploadId:partialUpload.body.uploadId }, expected:200,
+  });
+  const partialAdmin = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`);
+  assert(Object.keys(partialAdmin.body.reviewAssets || {}).length === 3, 'single-slot character update retains the other managed media slots', 'avatar replaced; portraits retained');
+  assert(
+    partialUpdate.body.payload.media.avatar !== retainedUpdate.body.payload.media.avatar
+      && partialUpdate.body.payload.media.portraits.normal === retainedUpdate.body.payload.media.portraits.normal
+      && partialUpdate.body.payload.media.portraits.nude === retainedUpdate.body.payload.media.portraits.nude,
+    'single-slot update changes only its public media reference',
+    'portrait URLs unchanged',
+  );
+
+  const rejected = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`, {
+    method:'POST', body:{ status:'rejected', reason:'test retention', revision:5 }, expected:200,
+  });
+  const rejectedAdmin = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`);
+  const rejectedAssetPath = new URL(rejectedAdmin.body.reviewAssets.avatar, baseUrl).pathname;
+  const rejectedAsset = await adminRequest(rejectedAssetPath);
+  assert(rejected.body.revision === 6 && String(rejectedAsset.headers.get('content-type') || '').startsWith('image/png'), 'rejected character retains private review media for correction', 'private media retained');
+
+  await request(`/api/workshop/packages/${encodeURIComponent(id)}`, {
+    method:'DELETE', headers:{ authorization:`Bearer ${ownerToken}`, 'x-package-revision':'6' }, expected:200,
+  });
+  const withdrawnAsset = await request(pendingAssetPath, { expected:404 });
+  assert(withdrawnAsset.status === 404 && !(await fileExists(path.join(publicAssetDir, id))), 'withdraw removes character media from public projection', 'public asset directory removed');
+  const withdrawnAdmin = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`);
+  const withdrawnPrivateAsset = await adminRequest(new URL(withdrawnAdmin.body.reviewAssets.avatar, baseUrl).pathname);
+  assert(String(withdrawnPrivateAsset.headers.get('content-type') || '').startsWith('image/png'), 'withdrawn character retains private media for resubmission', 'private media retained');
+
+  const resubmitInput = { ...packageBody, title:'P2 Character Resubmitted', revision:7, payload:partialUpdate.body.payload };
+  const resubmitUpload = await request('/api/workshop/uploads/character', {
+    method:'POST', headers:{ authorization:`Bearer ${ownerToken}` }, body:{ package:resubmitInput, assets:{} }, expected:201,
+  });
+  await request(`/api/workshop/packages/${encodeURIComponent(id)}`, {
+    method:'PUT', headers:{ authorization:`Bearer ${ownerToken}`, 'x-package-revision':'7' }, body:{ ...resubmitInput, uploadId:resubmitUpload.body.uploadId }, expected:200,
+  });
+  const resubmittedAdmin = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`);
+  assert(Object.keys(resubmittedAdmin.body.reviewAssets || {}).length === 3, 'withdrawn character can be resubmitted without losing managed media', 'three review assets after resubmit');
 }
 
 async function devLoginCookie(id) {

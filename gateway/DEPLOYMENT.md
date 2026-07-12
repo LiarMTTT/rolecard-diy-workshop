@@ -88,6 +88,7 @@ Use long random values for secrets:
 
 ```bash
 PUBLIC_BASE_URL=https://workshop.example.com
+HOST=0.0.0.0
 LOGIN_SUCCESS_REDIRECT=https://workshop.example.com/
 SESSION_SECRET=...
 HASH_SECRET=...
@@ -96,6 +97,8 @@ CORS_ORIGIN=https://your-sillytavern.example.com
 COOKIE_SAME_SITE=None
 REQUIRE_REVIEW=true
 DEV_LOGIN_ENABLED=false
+LOGIN_HANDOFF_RATE_PER_SEC=10
+LOGIN_HANDOFF_RATE_BURST=20
 ```
 
 Start from `.env.production.example` on the VPS:
@@ -109,6 +112,8 @@ Then fill every secret and public URL before starting the service.
 `CORS_ORIGIN` must be the exact front-end origin when cookie login is used. Do not use `*` for a public cookie deployment.
 
 Keep `DEV_LOGIN_ENABLED=false` in public deployments. The dev login route exists only for local smoke tests without Discord OAuth.
+
+`HOST` controls the actual listen boundary. Development default secrets are accepted only when `HOST` is explicitly loopback (`127.0.0.1`, `::1`, or `localhost`); an all-interface listener fails closed unless both secrets are different and at least 32 UTF-8 bytes. The handoff admission bucket is process-local, contains no IP or profile data, and keeps anonymous requests from filling the full login capacity inside one TTL window.
 
 After the service starts, run:
 
@@ -132,6 +137,10 @@ Set:
 ```bash
 PACKAGE_PUBLIC_BASE_URL=https://cloudreve.example.com/f/xingyue/packages
 PUBLIC_PACKAGE_DIR=/srv/cloudreve/xingyue/packages
+CHARACTER_UPLOAD_DIR=/var/lib/rolecard-diy-workshop/character-uploads
+CHARACTER_ASSET_STORE_DIR=/var/lib/rolecard-diy-workshop/character-assets
+PUBLIC_ASSET_DIR=/srv/cloudreve/xingyue/packages/assets
+ASSET_PUBLIC_BASE_URL=https://workshop.example.com/api/workshop/assets
 ```
 
 The gateway still stores local JSON copies in `PACKAGE_STORE_DIR`. Cloudreve is treated as a public storage hint for package files and optional media. User-uploaded content must remain JSON/media only; do not execute uploaded JavaScript.
@@ -201,7 +210,7 @@ After approval or withdrawal, sync the public Cloudreve folder:
 npm run sync:public
 ```
 
-When a publisher edits package content, the gateway increments `revision`. With `REQUIRE_REVIEW=true`, content changes move the package back to `pending` so the edited JSON must be reviewed again before returning to the public index.
+Every stored package mutation advances `revision`, including review and withdrawal. With `REQUIRE_REVIEW=true`, content changes move the package back to `pending` so the edited JSON must be reviewed again before returning to the public index.
 
 For owner-side updates, pass the last known revision as `X-Package-Revision` or `revision` in the JSON body. Stale edits return `409 package-conflict` instead of overwriting a newer package.
 

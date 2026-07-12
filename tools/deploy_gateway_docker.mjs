@@ -139,6 +139,28 @@ CORS=$(printf '%s' "$CORS" | tr ',' '\\n' | tr -d '\\r' | awk 'NF && !seen[$0]++
 TMP=$(mktemp)
 awk -v cors="$CORS" 'BEGIN{done=0} /^CORS_ORIGIN=/{print "CORS_ORIGIN=" cors; done=1; next} {print} END{if(!done) print "CORS_ORIGIN=" cors}' .env > "$TMP"
 mv "$TMP" .env
+TMP=$(mktemp)
+awk '
+BEGIN {
+  values["PACKAGE_STORE_DIR"]="/data/packages"
+  values["INDEX_FILE"]="/data/index.json"
+  values["PUBLISHER_FILE"]="/data/publishers.json"
+  values["VOTES_FILE"]="/data/votes.json"
+  values["AUDIT_LOG_FILE"]="/data/audit-log.jsonl"
+  values["PUBLIC_SYNC_REPORT_FILE"]="/data/public-sync-report.json"
+  values["CHARACTER_UPLOAD_DIR"]="/data/character-uploads"
+  values["CHARACTER_ASSET_STORE_DIR"]="/data/character-assets"
+  values["PUBLIC_PACKAGE_DIR"]="/public-packages"
+  values["PUBLIC_ASSET_DIR"]="/public-packages/assets"
+}
+{
+  key=$0; sub(/=.*/, "", key)
+  if (key in values) { if (!seen[key]++) print key "=" values[key]; next }
+  print
+}
+END { for (key in values) if (!seen[key]) print key "=" values[key] }
+' .env > "$TMP"
+mv "$TMP" .env
 OLD_NAME=${shQuote(container)}
 BAK_NAME="${container}-prev-$STAMP"
 if docker ps -a --format '{{.Names}}' | grep -qx "$OLD_NAME"; then

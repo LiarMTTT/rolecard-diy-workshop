@@ -15,7 +15,7 @@
       "id": "control-center",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.0/control-center.js",
       "bytes": 593393,
-      "sha256": "935f4923c4399cc6a562b23902923c33e4923c2506d97083858b3c0352a9cf22"
+      "sha256": "b1993698a5465aaf50854bc285f455de4d5906f87566757c782f3e0961551b8f"
     },
     {
       "id": "omni-analysis",
@@ -56,8 +56,8 @@
     {
       "id": "worldbook-factory-baseline",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.0/worldbook-factory-baseline.json",
-      "bytes": 164232,
-      "sha256": "8d5a7ae9e0e1f04d61084fc18e1bc954530f8d170b0ecea43950ac984e95314b"
+      "bytes": 173470,
+      "sha256": "2331c830076421f5ae8f6ade9bbab2288fa1a1a2abbffe688e45a48c7a05c93c"
     }
   ]
 }

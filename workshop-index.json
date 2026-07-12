@@ -1,14 +1,14 @@
 {
   "version": "1.0.0",
   "title": "Rolecard DIY Workshop",
-  "updatedAt": "2026-07-11T00:00:00.000Z",
+  "updatedAt": "2026-07-12T06:00:00.000Z",
   "cards": [
     {
       "cardScope": "xingyue",
       "title": "Xingyue Private Academy",
-      "cardVersion": "3.4.0",
+      "cardVersion": "3.4.1",
       "indexUrl": "cards/xingyue/index.json",
-      "runtimeManifestUrl": "runtime/xingyue/3.4.0/manifest.json",
+      "runtimeManifestUrl": "runtime/xingyue/3.4.1/manifest.json",
       "packageTypes": [
         "character",
         "user_identity",

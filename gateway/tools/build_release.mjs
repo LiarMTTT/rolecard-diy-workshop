@@ -17,6 +17,7 @@ const entries = [
   'tools/self_check.mjs',
   'tools/server_takeover.mjs',
   'tools/sync_public_packages.mjs',
+  'tools/purge_known_samples.mjs',
 ];
 
 async function copyEntry(relativePath) {

@@ -52,6 +52,8 @@ Cross-origin card clients use `Authorization: Bearer`; Cookie fallback is accept
 - `GET /api/workshop/me`: current login state.
 - `GET /api/workshop/me/packages`: packages owned by the logged-in publisher.
 - `POST /api/workshop/packages`: create a new package; duplicate IDs return `409 package-exists`.
+- `POST /api/workshop/uploads/character`: stage a normalized character JSON plus optional avatar, normal portrait, and nude portrait; returns a short-lived owner-bound `uploadId` for package publish.
+- `GET /api/workshop/assets/:packageId/:filename`: serve approved character media only.
 - `PUT /api/workshop/packages/:id`: update an owned package; revision is mandatory.
 - `DELETE /api/workshop/packages/:id`: withdraw an owned package; revision is mandatory.
 - `POST /api/workshop/packages/:id/vote`: vote on an approved package.
@@ -63,7 +65,9 @@ Cross-origin card clients use `Authorization: Bearer`; Cookie fallback is accept
 
 ## Storage Notes
 
-The gateway stores package JSON in `PACKAGE_STORE_DIR`, the public index in `INDEX_FILE`, publisher hashes in `PUBLISHER_FILE`, package-scoped HMAC vote keys in `VOTES_FILE`, and audit events in `AUDIT_LOG_FILE`. Login tokens are stateless HMAC tokens containing only publisher ID and expiry, so normal restarts do not invalidate them.
+The gateway stores package JSON in `PACKAGE_STORE_DIR`, private character upload staging in `CHARACTER_UPLOAD_DIR`, reviewed character assets in `CHARACTER_ASSET_STORE_DIR`, approved media projection in `PUBLIC_ASSET_DIR`, the public index in `INDEX_FILE`, publisher hashes in `PUBLISHER_FILE`, package-scoped HMAC vote keys in `VOTES_FILE`, and audit events in `AUDIT_LOG_FILE`. Login tokens are stateless HMAC tokens containing only publisher ID and expiry, so normal restarts do not invalidate them.
+
+Character media uses a two-stage flow. Upload accepts only PNG, JPEG, or WebP data URLs, validates MIME, file magic, byte limits, and SHA-256, then binds the staging record to the authenticated publisher. Package publish consumes the `uploadId` once. Media stays private while pending, is available to the authenticated review page, and becomes public only after approval. Rejection or withdrawal removes the public projection. Client-supplied `storage` metadata is ignored.
 
 If `REQUIRE_REVIEW=true`, newly published packages are saved as `pending` and do not appear in the public index until an admin approves them. Withdrawing a package marks it as `withdrawn` and removes it from the public index while preserving a minimal audit trail.
 

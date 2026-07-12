@@ -17,6 +17,8 @@ const OPENING_SCHEMA_VERSION = 1;
 const OPENING_MIN_RUNTIME_VERSION = '3.4.0';
 const GRADE_BANDS = new Set(['primary', 'middle', 'high', 'university', 'none', 'custom', 'all']);
 const RATINGS = new Set(['general', 'mature', 'restricted']);
+const EXTENSION_TYPES = new Set(['shop_item', 'blueprint', 'recipe', 'skill', 'function']);
+const CHARACTER_FIELDS = new Set(['name', 'profile', 'appearance', 'personality', 'dialogueStyle', 'behavior', 'relationships', 'media']);
 const IDENTITY_TEXT_LIMITS = Object.freeze({
   identity: 80,
   grade: 80,
@@ -68,6 +70,22 @@ function cleanIdentityMediaReference(value, code) {
   return text;
 }
 
+function cleanCharacterMediaReference(value, code, portableOnly = false) {
+  const text = cleanIdentityMediaReference(value, code);
+  if (portableOnly && text && !/^https?:\/\//i.test(text)) fail(code);
+  return text;
+}
+
+function normalizeStringRecord(value, code, { maxEntries = 32, valueLimit = 4000 } = {}) {
+  if (!isObject(value)) fail(code);
+  const entries = Object.entries(value);
+  if (entries.length > maxEntries) fail(code);
+  return Object.fromEntries(entries.map(([key, item]) => [
+    cleanString(key, 80, code, { required:true }),
+    cleanString(item, valueLimit, code),
+  ]));
+}
+
 function containsEmbeddedImageData(value) {
   if (typeof value === 'string') return /data:image\//i.test(value);
   if (!value || typeof value !== 'object') return false;
@@ -103,7 +121,7 @@ function normalizeTags(value) {
   return tags;
 }
 
-function normalizeWorldFactors(payload, { allowLegacyFactors = true } = {}) {
+function normalizeWorldFactors(payload, { allowLegacyFactors = true, unknownFieldCode = 'unknown-world-factor-field' } = {}) {
   const source = Array.isArray(payload.worldFactors)
     ? payload.worldFactors
     : (allowLegacyFactors && Array.isArray(payload.factors) ? payload.factors : null);
@@ -114,8 +132,10 @@ function normalizeWorldFactors(payload, { allowLegacyFactors = true } = {}) {
       return { title: `Legacy world factor ${index + 1}`, content };
     }
     if (!isObject(item)) fail('invalid-world-factor', String(index));
+    Object.keys(item).forEach(key => {
+      if (key !== 'title' && key !== 'content') fail(unknownFieldCode, `${index}:${key}`);
+    });
     return {
-      ...clone(item),
       title: cleanString(item.title, 120, 'invalid-world-factor-title', { required: true }),
       content: cleanString(item.content, 16384, 'invalid-world-factor-content', { required: true })
         .replace(/\r\n?/g, '\n')
@@ -161,7 +181,7 @@ function normalizeOpeningPayload(payload, title, runtimeVersion, allowLegacyFact
   );
   if (compareVersions(minRuntimeVersion, OPENING_MIN_RUNTIME_VERSION) < 0) fail('opening-min-runtime-too-old');
   if (runtimeVersion && compareVersions(runtimeVersion, minRuntimeVersion) < 0) fail('runtime-too-old');
-  const worldFactors = normalizeWorldFactors(payload, { allowLegacyFactors });
+  const worldFactors = normalizeWorldFactors(payload, { allowLegacyFactors, unknownFieldCode:'unknown-opening-world-factor-field' });
   const sourceFactors = Array.isArray(payload.worldFactors) ? payload.worldFactors : payload.factors;
   sourceFactors.forEach((item, index) => {
     if (!isObject(item)) return;
@@ -229,6 +249,102 @@ function normalizeIdentityPayload(payload) {
   return normalized;
 }
 
+function normalizeCharacterPayload(payload, { portableMediaOnly = false, allowLegacyCharacterAliases = true } = {}) {
+  if (containsEmbeddedImageData(payload)) fail('embedded-character-image-data');
+  const source = clone(payload);
+  if (allowLegacyCharacterAliases) {
+    if (source.role !== undefined || source.relationship !== undefined) {
+      source.profile = isObject(source.profile) ? source.profile : {};
+      if (source.role !== undefined && source.profile['身份'] === undefined) source.profile['身份'] = source.role;
+      if (source.relationship !== undefined && source.profile['与user的关系'] === undefined) source.profile['与user的关系'] = source.relationship;
+    }
+    if (isObject(source.mediaRefs)) {
+      source.media = isObject(source.media) ? source.media : {};
+      source.media.portraits = isObject(source.media.portraits) ? source.media.portraits : {};
+      if (source.mediaRefs.normal !== undefined && source.media.portraits.normal === undefined) source.media.portraits.normal = source.mediaRefs.normal;
+      if (source.mediaRefs.nude !== undefined && source.media.portraits.nude === undefined) source.media.portraits.nude = source.mediaRefs.nude;
+      if (source.mediaRefs.avatar !== undefined && source.media.avatar === undefined) source.media.avatar = source.mediaRefs.avatar;
+    }
+    delete source.role;
+    delete source.relationship;
+    delete source.mediaRefs;
+  }
+  Object.keys(source).forEach(key => {
+    if (!CHARACTER_FIELDS.has(key)) fail('unknown-character-field', key);
+  });
+  const normalized = {
+    name: cleanString(source.name, 80, 'invalid-character-name', { required:true }),
+  };
+  if (source.profile !== undefined) normalized.profile = normalizeStringRecord(source.profile, 'invalid-character-profile');
+  if (source.appearance !== undefined) normalized.appearance = normalizeStringRecord(source.appearance, 'invalid-character-appearance', { valueLimit:12000 });
+  if (source.personality !== undefined) normalized.personality = cleanString(source.personality, 12000, 'invalid-character-personality');
+  if (source.dialogueStyle !== undefined) normalized.dialogueStyle = cleanString(source.dialogueStyle, 4000, 'invalid-character-dialogue-style');
+  if (source.behavior !== undefined) {
+    if (!isObject(source.behavior)) fail('invalid-character-behavior');
+    Object.keys(source.behavior).forEach(key => {
+      if (key !== '行事风格' && key !== '行为应对') fail('unknown-character-behavior-field', key);
+    });
+    normalized.behavior = {};
+    if (source.behavior['行事风格'] !== undefined) normalized.behavior['行事风格'] = cleanString(source.behavior['行事风格'], 4000, 'invalid-character-behavior-style');
+    if (source.behavior['行为应对'] !== undefined) normalized.behavior['行为应对'] = cleanString(source.behavior['行为应对'], 4000, 'invalid-character-behavior-response');
+  }
+  if (source.relationships !== undefined) {
+    if (!Array.isArray(source.relationships) || source.relationships.length > 100) fail('invalid-character-relationships');
+    normalized.relationships = source.relationships.map((item, index) => {
+      if (!isObject(item)) fail('invalid-character-relationship', String(index));
+      Object.keys(item).forEach(key => {
+        if (key !== 'target' && key !== 'type' && key !== 'note') fail('unknown-character-relationship-field', `${index}:${key}`);
+      });
+      return {
+        target: cleanString(item.target, 120, 'invalid-character-relationship-target', { required:true }),
+        type: cleanString(item.type, 80, 'invalid-character-relationship-type'),
+        note: cleanString(item.note, 2000, 'invalid-character-relationship-note'),
+      };
+    });
+  }
+  if (source.media !== undefined) {
+    if (!isObject(source.media)) fail('invalid-character-media');
+    Object.keys(source.media).forEach(key => {
+      if (key !== 'avatar' && key !== 'portraits') fail('unknown-character-media-field', key);
+    });
+    normalized.media = {};
+    if (source.media.avatar !== undefined) normalized.media.avatar = cleanCharacterMediaReference(source.media.avatar, 'invalid-character-avatar', portableMediaOnly);
+    if (source.media.portraits !== undefined) {
+      if (!isObject(source.media.portraits)) fail('invalid-character-portraits');
+      Object.keys(source.media.portraits).forEach(key => {
+        if (key !== 'normal' && key !== 'nude') fail('unknown-character-portrait-field', key);
+      });
+      normalized.media.portraits = {};
+      if (source.media.portraits.normal !== undefined) normalized.media.portraits.normal = cleanCharacterMediaReference(source.media.portraits.normal, 'invalid-character-portrait-normal', portableMediaOnly);
+      if (source.media.portraits.nude !== undefined) normalized.media.portraits.nude = cleanCharacterMediaReference(source.media.portraits.nude, 'invalid-character-portrait-nude', portableMediaOnly);
+    }
+  }
+  return normalized;
+}
+
+function normalizeExtensionPayload(payload, title, { allowLegacyExtensions = true } = {}) {
+  if (containsEmbeddedImageData(payload)) fail('embedded-extension-image-data');
+  if (payload.schemaVersion === 1 && isObject(payload.worldbook)) {
+    Object.keys(payload).forEach(key => {
+      if (key !== 'schemaVersion' && key !== 'worldbook') fail('unknown-extension-payload-field', key);
+    });
+    Object.keys(payload.worldbook).forEach(key => {
+      if (key !== 'title' && key !== 'content') fail('unknown-extension-worldbook-field', key);
+    });
+    return {
+      schemaVersion: 1,
+      worldbook: {
+        title: cleanString(payload.worldbook.title || title, 120, 'invalid-extension-title', { required:true }),
+        content: cleanString(payload.worldbook.content, 16384, 'invalid-extension-content', { required:true }).replace(/\r\n?/g, '\n'),
+      },
+    };
+  }
+  if (!allowLegacyExtensions) fail('extension-worldbook-contract-required');
+  const content = JSON.stringify(payload, null, 2);
+  if (utf8ByteLength(content) > 16384) fail('invalid-extension-content');
+  return { schemaVersion:1, worldbook:{ title, content } };
+}
+
 function normalizePackage(input, options = {}) {
   if (!isObject(input)) fail('package-not-object');
   if (JSON.stringify(input).length > 256 * 1024) fail('package-too-large');
@@ -254,16 +370,20 @@ function normalizePackage(input, options = {}) {
   const allowLegacyFactors = options.allowLegacyFactors !== false;
   if (openingByScope) normalizedPayload = normalizeOpeningPayload(payload, title, options.runtimeVersion, allowLegacyFactors);
   else if (type === 'world_factor') {
-    normalizedPayload = clone(payload);
-    normalizedPayload.worldFactors = normalizeWorldFactors(payload, { allowLegacyFactors });
-    delete normalizedPayload.factors;
-  } else if (type === 'user_identity') normalizedPayload = normalizeIdentityPayload(payload);
+    Object.keys(payload).forEach(key => {
+      if (key !== 'worldFactors' && key !== 'factors') fail('unknown-world-factor-payload-field', key);
+    });
+    if (!allowLegacyFactors && Object.hasOwn(payload, 'factors')) fail('legacy-world-factors-not-publishable');
+    normalizedPayload = { worldFactors:normalizeWorldFactors(payload, { allowLegacyFactors }) };
+  }
+  else if (type === 'user_identity') normalizedPayload = normalizeIdentityPayload(payload);
+  else if (type === 'character') normalizedPayload = normalizeCharacterPayload(payload, options);
+  else if (EXTENSION_TYPES.has(type)) normalizedPayload = normalizeExtensionPayload(payload, title, options);
   const rating = pkg.rating === undefined ? 'general' : cleanString(pkg.rating, 20, 'invalid-package-rating', { required: true });
   if (!RATINGS.has(rating)) fail('invalid-package-rating');
   const language = pkg.language === undefined ? 'zh-CN' : cleanString(pkg.language, 24, 'invalid-package-language', { required: true });
   if (!/^[a-zA-Z]{2,8}(?:-[a-zA-Z0-9]{2,8}){0,2}$/.test(language)) fail('invalid-package-language');
-  return {
-    ...pkg,
+  const normalized = {
     packageVersion,
     id,
     type,
@@ -276,10 +396,14 @@ function normalizePackage(input, options = {}) {
     tags: normalizeTags(pkg.tags),
     payload: normalizedPayload,
   };
+  ['createdAt','updatedAt','revision','contentHash','reviewStatus','rejectionReason','withdrawnAt'].forEach(key => {
+    if (pkg[key] !== undefined) normalized[key] = clone(pkg[key]);
+  });
+  return normalized;
 }
 
 const api = Object.freeze({
-  version: '1.0.0',
+  version: '1.1.0',
   OPENING_CARD_SCOPE,
   OPENING_TARGET,
   OPENING_SCHEMA_VERSION,
