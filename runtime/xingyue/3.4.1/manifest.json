@@ -2,7 +2,7 @@
   "schemaVersion": "1",
   "cardScope": "xingyue",
   "runtimeVersion": "3.4.1",
-  "runtimeRevision": "3.4.1-release-r1-20260712",
+  "runtimeRevision": "3.4.1-stability-r28-20260712",
   "publishedAt": "2026-07-12T06:00:00.000Z",
   "modules": [
     {
@@ -14,8 +14,8 @@
     {
       "id": "control-center",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.1/control-center.js",
-      "bytes": 623423,
-      "sha256": "3c3194ab68c17022a1f654413659afeeceffbb01b4ea5a50b516dcd8108778c6"
+      "bytes": 623426,
+      "sha256": "0d9b8ec63980bd1bc651bf89b67e1b854d68d4c42d18c7fe7a77fbcfab192581"
     },
     {
       "id": "omni-analysis",
