@@ -2,8 +2,8 @@
   "schemaVersion": "1",
   "cardScope": "xingyue",
   "runtimeVersion": "3.4.1",
-  "runtimeRevision": "3.4.1-stability-r30-20260712",
-  "publishedAt": "2026-07-12T07:54:35.951Z",
+  "runtimeRevision": "3.4.1-stability-r31-20260712",
+  "publishedAt": "2026-07-12T08:26:04.786Z",
   "modules": [
     {
       "id": "bubble-css",
@@ -15,7 +15,7 @@
       "id": "control-center",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.1/control-center.js",
       "bytes": 627328,
-      "sha256": "36fa284f6a980676d0e914d6ca3673f70410fb70a8b32bdf4ae02baf05015219"
+      "sha256": "5931f95e4b1d81bbb3769f9e7d3d5fb3c54099b41c8b9f659c097fd587cf653a"
     },
     {
       "id": "omni-analysis",
@@ -38,8 +38,8 @@
     {
       "id": "opening-page",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.1/opening-page.html",
-      "bytes": 291264,
-      "sha256": "0f7c3886164777b34787828ad877e15f60ac40f80d7f4857f2565f8afcbb6495"
+      "bytes": 292500,
+      "sha256": "86041ccba46a95aa38da4737a33223544f6435a52c89d765e5a3fea55a513bcc"
     },
     {
       "id": "status-bar",

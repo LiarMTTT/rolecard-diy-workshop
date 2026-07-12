@@ -213,7 +213,7 @@ const loginUrlFactory = new Function('hostWindow', 'gatewayBaseUrl', 'URL', 'URL
 const localLoginUrl = loginUrlFactory(() => ({ location:{ origin:'http://127.0.0.1:8000' } }), () => 'https://gateway.invalid', URL, URLSearchParams)('xyh_test');
 const remoteLoginUrl = loginUrlFactory(() => ({ location:{ origin:'http://192.168.1.2:8000' } }), () => 'https://gateway.invalid', URL, URLSearchParams)('xyh_test');
 ok(localLoginUrl.includes('return=http%3A%2F%2F127.0.0.1%3A8000') && !remoteLoginUrl.includes('return='), '3.4.1 handoff only sends Gateway-approved loopback return origins');
-ok(runtime341.includes("GIT_RUNTIME_REVISION = '3.4.1-stability-r30-20260712'"), '3.4.1 runtime exposes D7 r30 revision');
+ok(runtime341.includes("GIT_RUNTIME_REVISION = '3.4.1-stability-r31-20260712'"), '3.4.1 runtime exposes C04 r31 revision');
 ok(runtime341.includes('publishSelection') && runtime341.includes('state.publishSelection = clone(pkg)'), '3.4.1 publish object is explicit for owner updates and opening drafts');
 ok(runtime341.includes('refreshPackageInspections') && openingPage341.includes('data-xy-package-inspection'), '3.4.1 exposes installed revision and dirty inspection status');
 ok(openingPage341.includes('data-xy-login-cancel') && openingPage341.includes('data-xy-workshop-error'), '3.4.1 workshop has cancel and persistent error feedback');
@@ -262,9 +262,20 @@ ok(openingPage341.includes('function focusViewportRect(doc = root.ownerDocument 
   && openingPage341.includes("vv.addEventListener('resize', schedule")
   && openingPage341.includes("vv.addEventListener('scroll', schedule")
   && openingPage341.includes('width:100dvw;max-width:100dvw;height:100dvh;max-height:100dvh'), '3.4.1 standalone opening preview shares the mobile viewport boundary lock');
+ok(openingPage341.includes('@container (max-width:360px)')
+  && openingPage341.includes('width:calc(100% - 84px)!important')
+  && openingPage341.includes('flex:0 0 94px!important')
+  && openingPage341.includes('min-height:44px!important')
+  && openingPage341.includes('scrollbar-width:none'), '3.4.1 C04 keeps compact wizard navigation single-row, touch-sized and clear of the focus control');
+ok(openingPage341.includes('function syncWizardNavigation()')
+  && openingPage341.includes('root.getBoundingClientRect().width > 360')
+  && openingPage341.includes("wizard.scrollIntoView({ block: 'start', inline: 'nearest' })")
+  && openingPage341.includes('current.offsetLeft - (nav.clientWidth - current.offsetWidth) / 2')
+  && openingPage341.includes("if (view === 'wizard') syncWizardNavigation()")
+  && openingPage341.includes('renderAttributes();\n    syncWizardNavigation();'), '3.4.1 C04 returns wizard tasks and the active step to the compact scroll owners');
 const openingPageHash341 = crypto.createHash('sha256').update(openingPage341.replace(/\r\n?/g, '\n'), 'utf8').digest('hex');
 const openingPageModule341 = manifest341.modules.find(module => module.id === 'opening-page');
-ok(runtime341.includes("OPENING_PAGE_REVISION = '20260712-341-stability-r30'")
+ok(runtime341.includes("OPENING_PAGE_REVISION = '20260712-341-stability-r31'")
   && runtime341.includes(`OPENING_PAGE_SHA256 = '${openingPageHash341}'`)
   && openingPageModule341?.sha256 === openingPageHash341
   && openingPageModule341?.bytes === Buffer.byteLength(openingPage341, 'utf8'), '3.4.1 opening-page cache revision, runtime integrity hash and manifest stay aligned');

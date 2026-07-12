@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>星月 3.4.1 C04 · r31 紧凑导航预览</title>
+  <style>
+    :root{color-scheme:dark;font-family:Inter,"Noto Sans SC",system-ui,sans-serif;background:#080b10;color:#f5eadc}*{box-sizing:border-box}
+    body{margin:0;min-height:100vh;background:radial-gradient(circle at 18% 0,rgba(210,161,94,.14),transparent 34%),#080b10}
+    .page{max-width:980px;margin:auto;padding:22px}.head{display:grid;gap:9px;margin-bottom:18px}.head h1{margin:0;font-size:clamp(22px,4vw,34px)}.head p{margin:0;color:#b9ad9f;line-height:1.6}
+    .contract{display:flex;flex-wrap:wrap;gap:8px}.pill{padding:5px 9px;border:1px solid rgba(228,185,125,.28);border-radius:999px;background:rgba(228,185,125,.08);font-size:12px;color:#ead5b8}
+    .layout{display:grid;grid-template-columns:minmax(260px,1fr) 320px;gap:24px;align-items:start}.evidence,.live{display:grid;gap:12px}.evidence h2,.live h2{margin:0;font-size:18px}
+    .evidence-grid,.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.card{min-height:72px;padding:10px;border:1px solid rgba(255,255,255,.09);border-radius:9px;background:rgba(255,255,255,.035)}.card b{display:block;font-size:12px;color:#dcc29d}.card span{display:block;margin-top:5px;color:#a99c8d;font-size:12px;line-height:1.45}.card.problem{border-color:rgba(237,114,106,.52)}.card.ok{border-color:rgba(93,207,148,.46)}.card.bad{border-color:rgba(237,114,106,.52)}
+    .device{width:320px;height:568px;border:1px solid rgba(228,185,125,.45);border-radius:16px;overflow:hidden;background:#05070a;box-shadow:0 18px 50px rgba(0,0,0,.42)}iframe{display:block;width:320px;height:568px;border:0;background:#0d0a07}
+    .metrics{width:320px}.metric{min-height:58px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:rgba(255,255,255,.035)}.metric b{display:block;font-size:12px;color:#dcc29d}.metric span{display:block;margin-top:4px;font-size:12px;color:#a99c8d}
+    .controls{display:flex;flex-wrap:wrap;gap:7px}.controls button{min-height:44px;padding:8px 12px;border:1px solid rgba(228,185,125,.34);border-radius:7px;background:#21170f;color:#f5eadc;cursor:pointer}.controls button:focus-visible{outline:2px solid #efc785;outline-offset:2px}
+    .note{padding:12px;border:1px solid rgba(228,185,125,.22);border-radius:10px;background:rgba(228,185,125,.055);color:#cdbda9;line-height:1.6}
+    @media(max-width:760px){.page{padding:14px 0}.head,.evidence{padding:0 10px}.layout{grid-template-columns:1fr}.live{justify-items:center}.live h2{padding:0 10px}.controls{justify-content:center}.note{margin:0 10px}.evidence-grid{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+<main class="page">
+  <header class="head">
+    <h1>C04 · r31 紧凑导航实装预览</h1>
+    <p>右侧直接加载正式 <code>opening-page.html</code>，没有预览层 CSS/JS 注入。页面会模拟从 320×568 启动页底部进入开局设置。</p>
+    <div class="contract"><span class="pill">六步语义不变</span><span class="pill">触控目标 ≥44px</span><span class="pill">单行横向导航</span><span class="pill">换步回到任务顶部</span><span class="pill">D1–D7 路径不改</span></div>
+  </header>
+  <section class="layout">
+    <article class="evidence">
+      <h2>r30 问题证据</h2>
+      <div class="evidence-grid">
+        <div class="card problem"><b>进入位置</b><span>保留启动页底部滚动，实测 scrollY 941–1811</span></div>
+        <div class="card problem"><b>导航高度</b><span>154px，六步折成三行，占 27% 视口高度</span></div>
+        <div class="card problem"><b>主任务</b><span>进入后身份输入和步骤导航均在视口上方</span></div>
+        <div class="card problem"><b>滚动 owner</b><span>切换步骤时没有把新任务与当前步骤送回可视区</span></div>
+      </div>
+      <p class="note">r31 只调整 360px 以下的向导导航和向导滚动同步；桌面/平板、工坊 portal、登录、HUD、状态栏与输入栏锚定保持原路径。</p>
+    </article>
+    <article class="live">
+      <h2>r31 正式 runtime · 320×568</h2>
+      <div class="device"><iframe id="runtime" title="r31 正式开局页 320×568" src="../runtime/xingyue/3.4.1/opening-page.html"></iframe></div>
+      <div class="metrics" id="metrics"></div>
+      <div class="controls"><button data-action="replay">重播进入</button><button data-step="1">步骤 1</button><button data-step="3">步骤 3</button><button data-step="6">步骤 6</button></div>
+    </article>
+  </section>
+</main>
+<script>
+const frame=document.getElementById('runtime');
+function replay(){
+  const doc=frame.contentDocument,win=frame.contentWindow;
+  const agreement=doc.querySelector('[data-xy-opening-agreement]');
+  const enter=doc.querySelector('[data-xy-opening-action="enter-entry"]');
+  if(!agreement||!enter)return;
+  win.scrollTo(0,doc.documentElement.scrollHeight);
+  agreement.checked=true;agreement.dispatchEvent(new Event('change',{bubbles:true}));enter.click();
+  requestAnimationFrame(()=>requestAnimationFrame(measure));
+}
+function measure(){
+  const doc=frame.contentDocument,win=frame.contentWindow,root=doc.querySelector('[data-xy-opening-page]');
+  const nav=root?.querySelector('.xy-steps'),current=nav?.querySelector('[aria-current="step"]');
+  const heading=root?.querySelector('[data-xy-opening-pane]:not([hidden]) h2,[data-xy-opening-pane]:not([hidden]) h3');
+  const focus=root?.querySelector('[data-xy-opening-action="toggle-focus-mode"]');
+  if(!root||!nav||!current||!focus)return;
+  const nr=nav.getBoundingClientRect(),cr=current.getBoundingClientRect(),fr=focus.getBoundingClientRect();
+  const overlap=Math.max(0,Math.min(nr.right,fr.right)-Math.max(nr.left,fr.left))*Math.max(0,Math.min(nr.bottom,fr.bottom)-Math.max(nr.top,fr.top));
+  const values=[
+    ['进入位置',`scrollY ${Math.round(win.scrollY)}`,win.scrollY<16],
+    ['导航高度',`${Math.round(nr.height)}px`,nr.height<=58],
+    ['当前步骤',current.textContent.trim(),cr.left>=nr.left-1&&cr.right<=nr.right+1],
+    ['主任务首屏',heading?.textContent.trim()||'未显示',!!heading&&heading.getBoundingClientRect().top<568],
+    ['触控基线',`${Math.round(cr.height)}px`,cr.height>=44],
+    ['与全屏按钮',overlap?`重叠 ${Math.round(overlap)}px²`:'无重叠',overlap===0],
+    ['横向边界',`${doc.documentElement.scrollWidth}/${doc.documentElement.clientWidth}`,doc.documentElement.scrollWidth<=doc.documentElement.clientWidth],
+    ['步骤滚动',`${nav.clientWidth}/${nav.scrollWidth}`,nav.scrollWidth>nav.clientWidth]
+  ];
+  document.getElementById('metrics').innerHTML=values.map(([k,v,ok])=>`<div class="metric ${ok?'ok':'bad'}"><b>${k}</b><span>${v}</span></div>`).join('');
+}
+frame.addEventListener('load',replay);
+document.addEventListener('click',event=>{
+  const button=event.target.closest('button');if(!button)return;
+  if(button.dataset.action==='replay'){frame.contentWindow.location.reload();return;}
+  if(button.dataset.step){frame.contentDocument.querySelector(`[data-xy-step-target="${button.dataset.step}"]`)?.click();requestAnimationFrame(()=>requestAnimationFrame(measure));}
+});
+</script>
+</body>
+</html>

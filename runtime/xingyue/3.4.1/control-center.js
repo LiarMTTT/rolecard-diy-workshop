@@ -106,7 +106,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.4.1-stability-r30-20260712';
+  const GIT_RUNTIME_REVISION = '3.4.1-stability-r31-20260712';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -10071,8 +10071,8 @@
   // first_mes 仅放 [data-xy-opening-remote] 短标记；控制中心 fetch 远程开局页 + 注入 + 绑定（display-only，绝不进 LLM）。
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
-  const OPENING_PAGE_REVISION = '20260712-341-stability-r30';
-  const OPENING_PAGE_SHA256 = '0f7c3886164777b34787828ad877e15f60ac40f80d7f4857f2565f8afcbb6495';
+  const OPENING_PAGE_REVISION = '20260712-341-stability-r31';
+  const OPENING_PAGE_SHA256 = '86041ccba46a95aa38da4737a33223544f6435a52c89d765e5a3fea55a513bcc';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.1/opening-page.html?v=' + OPENING_PAGE_REVISION,

@@ -666,6 +666,11 @@
 .xy-opening-page[data-xy-focus-mode="1"] .xy-view[data-xy-view="workshop"]{position:relative!important;width:100%;height:100%;min-height:0;overflow:hidden;padding:0!important;background:transparent;backdrop-filter:none}
 .xy-opening-page[data-xy-focus-mode="1"] .xy-view[data-xy-view="workshop"]>.xy-panel{width:100%!important;height:100%!important;border-radius:8px!important}
 .xy-opening-page[data-xy-focus-mode="1"] .xy-workshop-main{overscroll-behavior:contain;scrollbar-gutter:stable}
+@container (max-width:360px){
+.xy-opening-page .xy-view[data-xy-view="wizard"]>.xy-steps{display:flex!important;flex-wrap:nowrap!important;width:calc(100% - 84px)!important;max-width:calc(100% - 84px)!important;overflow-x:auto!important;overflow-y:hidden!important;overscroll-behavior-inline:contain;scroll-snap-type:x mandatory;scrollbar-width:none}
+.xy-opening-page .xy-view[data-xy-view="wizard"]>.xy-steps::-webkit-scrollbar{display:none}
+.xy-opening-page .xy-view[data-xy-view="wizard"]>.xy-steps>.xy-step{flex:0 0 94px!important;min-width:94px!important;min-height:44px!important;padding:5px 8px!important;scroll-snap-align:start}
+}
 @media(prefers-reduced-motion:reduce){.xy-opening-page *,.xy-opening-page *::before,.xy-opening-page *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 </style>
 
@@ -1326,10 +1331,20 @@
     const agreed = !!root.querySelector('[data-xy-opening-agreement]')?.checked;
     all('[data-xy-requires-agreement]').forEach(button => { button.disabled = !agreed; });
   }
+  function syncWizardNavigation() {
+    const wizard = root.querySelector('[data-xy-view="wizard"]');
+    if (!wizard || wizard.hidden || root.getBoundingClientRect().width > 360) return;
+    root.scrollTop = 0;
+    wizard.scrollIntoView({ block: 'start', inline: 'nearest' });
+    const nav = wizard.querySelector('.xy-steps');
+    const current = nav?.querySelector('[aria-current="step"]');
+    if (nav && current) nav.scrollLeft = Math.max(0, current.offsetLeft - (nav.clientWidth - current.offsetWidth) / 2);
+  }
   function setView(view) {
     root.dataset.xyOpeningView = view;
     all('[data-xy-view]').forEach(node => { node.hidden = node.dataset.xyView !== view; });
     if (view === 'workshop') renderWorkshop();
+    if (view === 'wizard') syncWizardNavigation();
   }
   function setStep(step) {
     const next = Math.max(1, Math.min(6, Number(step) || 1));
@@ -1339,6 +1354,7 @@
     const bar = root.querySelector('[data-xy-opening-progress]');
     if (bar) bar.style.width = String(next * 100 / 6) + '%';
     renderAttributes();
+    syncWizardNavigation();
   }
   function attrTotal() {
     return attrKeys.reduce((sum, key) => sum + (Number(attrs[key]) || 0), 0);

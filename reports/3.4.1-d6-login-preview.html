@@ -14,13 +14,13 @@
 <body>
 <main>
   <section class="hero">
-    <div><p class="eyebrow">XINGYUE 3.4.1 · D6 DEBUG</p><h1>Discord 登录兼容验收</h1><p>直接读取本机 <code>control-center.js</code> r30，验证安全随机数与 SHA-256 摘要已解耦。此页不连接 Discord、不生成真实会话，也不保存任何身份信息。</p></div>
+    <div><p class="eyebrow">XINGYUE 3.4.1 · D6 DEBUG</p><h1>Discord 登录兼容验收</h1><p>直接读取本机 <code>control-center.js</code> r31，验证安全随机数与 SHA-256 摘要已解耦。此页不连接 Discord、不生成真实会话，也不保存任何身份信息。</p></div>
     <button id="rerun" type="button">重新执行测试</button>
   </section>
   <section class="grid">
     <article class="card"><h2>当前浏览器能力</h2><div class="caps" id="caps"></div><p class="note">缺少 <code>SubtleCrypto</code> 不应再阻断登录；缺少安全随机数仍必须拒绝。</p></article>
     <article class="card"><h2>D6 修复矩阵</h2><div class="tests" id="tests"></div></article>
-    <article class="card summary" id="summary" data-state="pending"><div><h2>本地运行结论</h2><p class="note" id="detail">正在读取 r30 runtime…</p></div><strong id="result">检测中</strong></article>
+    <article class="card summary" id="summary" data-state="pending"><div><h2>本地运行结论</h2><p class="note" id="detail">正在读取 r31 runtime…</p></div><strong id="result">检测中</strong></article>
   </section>
   <div class="foot">本页证明客户端能力分流与 challenge 一致性；真实 OAuth 弹窗、Discord 授权和登录态刷新仍由总监在实机验收。</div>
 </main>
@@ -50,7 +50,7 @@
       ['安全上下文', window.isSecureContext === true ? '是' : '否'],
       ['安全随机数', typeof window.crypto?.getRandomValues === 'function' ? '可用' : '不可用'],
       ['SubtleCrypto', typeof window.crypto?.subtle?.digest === 'function' ? '可用' : '不可用'],
-      ['Runtime 目标', 'r30'],
+      ['Runtime 目标', 'r31'],
     ];
     caps.innerHTML = values.map(([label,value]) => '<div class="cap"><span>'+escapeHtml(label)+'</span><strong>'+escapeHtml(value)+'</strong></div>').join('');
   }
@@ -59,12 +59,12 @@
     return '<div class="test" data-state="'+state+'"><span class="dot">'+icon+'</span><b>'+escapeHtml(label)+'</b><em>'+escapeHtml(note)+'</em></div>';
   }
   async function run() {
-    renderCaps(); tests.innerHTML = row('读取本地 runtime','skip','执行中'); summary.dataset.state='pending'; result.textContent='检测中'; detail.textContent='正在读取 r30 runtime…';
+    renderCaps(); tests.innerHTML = row('读取本地 runtime','skip','执行中'); summary.dataset.state='pending'; result.textContent='检测中'; detail.textContent='正在读取 r31 runtime…';
     try {
       const response = await fetch(runtimeUrl + '?d6=' + Date.now(), { cache:'no-store' });
       if (!response.ok) throw new Error('runtime HTTP ' + response.status);
       const source = await response.text();
-      if (!source.includes("3.4.1-stability-r30-20260712")) throw new Error('runtime 不是 r30');
+      if (!source.includes("3.4.1-stability-r31-20260712")) throw new Error('runtime 不是 r31');
       const fallbackHash = new Function(functionSource(source,'sha256HexFallback')+'\nreturn sha256HexFallback;')();
       const factory = new Function('window','hostWindow','sha256HexFallback','TextEncoder', [
         'workshopCryptoTargets','workshopRandomCrypto','randomWorkshopHex','createWorkshopHandoffCredentials','workshopHandoffChallenge'
@@ -86,16 +86,16 @@
         nativeState = await native.workshopHandoffChallenge(secret) === expected ? 'pass' : 'fail'; nativeNote = nativeState === 'pass' ? '优先使用浏览器摘要' : '摘要不一致';
       }
       const rows = [
-        ['读取本地 r30 runtime','pass','源码与修订号匹配'],
+        ['读取本地 r31 runtime','pass','源码与修订号匹配'],
         ['仅安全随机数、无 SubtleCrypto',fallbackPass && rngPass ? 'pass':'fail','fallback challenge 与 256-bit secret'],
         ['原生 SubtleCrypto 路径',nativeState,nativeNote],
         ['完全无安全随机数',refusalPass ? 'pass':'fail','继续安全拒绝，不用 Math.random'],
         ['非回环 return 来源',returnPass ? 'pass':'fail','省略 return，保留 handoff 轮询'],
       ];
       tests.innerHTML = rows.map(item => row(...item)).join('');
-      const passed = rows.every(item => item[1] !== 'fail'); summary.dataset.state = passed ? 'pass':'fail'; result.textContent = passed ? 'D6 本地通过':'存在失败'; detail.textContent = passed ? '能力分流、challenge 与来源防御均符合 r30 契约。':'请查看失败项，暂不可发布。';
+      const passed = rows.every(item => item[1] !== 'fail'); summary.dataset.state = passed ? 'pass':'fail'; result.textContent = passed ? 'D6 本地通过':'存在失败'; detail.textContent = passed ? '能力分流、challenge 与来源防御均符合 r31 契约。':'请查看失败项，暂不可发布。';
     } catch (error) {
-      tests.innerHTML = row('读取或执行 r30 runtime','fail',error?.message || String(error)); summary.dataset.state='fail'; result.textContent='检测失败'; detail.textContent='未能完成本地兼容矩阵。';
+      tests.innerHTML = row('读取或执行 r31 runtime','fail',error?.message || String(error)); summary.dataset.state='fail'; result.textContent='检测失败'; detail.textContent='未能完成本地兼容矩阵。';
     }
   }
   document.getElementById('rerun').addEventListener('click', run); void run();
