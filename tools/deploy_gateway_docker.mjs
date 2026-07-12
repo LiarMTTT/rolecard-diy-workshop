@@ -16,6 +16,7 @@ const buildReleaseScript = fileURLToPath(new URL('../gateway/tools/build_release
 const shouldBuildRelease = !args.localGateway;
 const inspectOnly = args.inspect === 'true';
 const remoteCheckOnly = args.remoteCheck === 'true';
+const purgeKnownSamplesMode = String(args.purgeKnownSamples || '').trim().toLowerCase();
 const skipScp = args['no-scp'] === 'true' || process.env.WORKSHOP_NO_SCP === '1';
 const container = args.container || secretConfig?.vps?.gatewayContainer || 'rolecard-workshop-gateway';
 const image = args.image || 'node:20-alpine';
@@ -205,7 +206,49 @@ printf 'health=ok\\n'
 `;
 }
 
+function remotePurgeKnownSamplesScript(mode) {
+  if (!['preview', 'apply'].includes(mode)) throw new Error('purgeKnownSamples must be preview or apply');
+  const applyArgs = mode === 'apply' ? ' --apply --gateway-stopped' : '';
+  return `
+set -eu
+cd ${shQuote(gatewayDir)}
+ACTIVE_FILE=${shQuote(path.posix.join(gatewayDir, '.releases', '.active'))}
+test -f "$ACTIVE_FILE"
+APP_DIR=$(cat "$ACTIVE_FILE")
+case "$APP_DIR" in
+  ${shQuote(path.posix.join(gatewayDir, '.releases'))}/release-*) ;;
+  *) printf 'invalid active release: %s\n' "$APP_DIR" >&2; exit 3 ;;
+esac
+test -f "$APP_DIR/tools/purge_known_samples.mjs"
+WAS_RUNNING=0
+if docker ps --format '{{.Names}}' | grep -qx ${shQuote(container)}; then
+  WAS_RUNNING=1
+  docker stop ${shQuote(container)} >/dev/null
+fi
+restore_gateway() {
+  if [ "$WAS_RUNNING" -eq 1 ]; then docker start ${shQuote(container)} >/dev/null; fi
+}
+trap restore_gateway EXIT INT TERM
+docker run --rm --env-file ${shQuote(path.posix.join(gatewayDir, '.env'))} -v "$APP_DIR:/app:ro" -v ${shQuote(dataDir)}:/data -v ${shQuote(publicDir)}:/public-packages -w /app ${shQuote(image)} node tools/purge_known_samples.mjs --all-known${applyArgs}
+restore_gateway
+WAS_RUNNING=0
+trap - EXIT INT TERM
+if [ ${mode === 'apply' ? '1' : '0'} -eq 1 ]; then
+  sleep 2
+  curl -fsS ${shQuote(healthUrl)} >/dev/null
+  printf 'health=ok\n'
+fi
+`;
+}
+
 async function main() {
+  if (purgeKnownSamplesMode) {
+    const result = await runSshScript(remotePurgeKnownSamplesScript(purgeKnownSamplesMode));
+    if (result.stderr.trim()) console.error(result.stderr.trim());
+    console.log(result.stdout.trim());
+    if (result.code) process.exitCode = result.code;
+    return;
+  }
   if (remoteCheckOnly) {
     const result = await runSshScript(`set -eu\ndocker exec ${shQuote(container)} sh -lc 'cd /app && npm run self-check'\n`);
     if (result.stderr.trim()) console.error(result.stderr.trim());
