@@ -44,8 +44,6 @@ const takeover = await run('node', [
   'tools/ops_takeover.mjs',
   '--corsOrigin',
   origins.join(','),
-  '--ssh',
-  'rolecard-workshop-vps',
 ], {
   timeout: 180000,
   env: adminToken ? { ...process.env, ADMIN_TOKEN: adminToken } : process.env,
@@ -54,6 +52,22 @@ console.log(takeover.stdout);
 if (!takeover.ok) {
   console.error(takeover.stderr || takeover.stdout);
   process.exit(1);
+}
+
+if (await fileExists('rolecard-workshop-secrets.secret.json')) {
+  const remote = await run('node', [
+    'tools/deploy_gateway_docker.mjs',
+    '--secretFile',
+    'rolecard-workshop-secrets.secret.json',
+    '--remoteCheck',
+  ], { timeout:180000 });
+  console.log(remote.stdout);
+  if (!remote.ok) {
+    console.error(remote.stderr || remote.stdout);
+    process.exit(1);
+  }
+} else {
+  console.log('[warn] remote container self-check skipped: local secret file not available');
 }
 
 console.log('\n[p1] external chain check passed');
@@ -66,4 +80,8 @@ async function readLocalAdminToken() {
   } catch {
     return '';
   }
+}
+
+async function fileExists(filename) {
+  try { await fs.access(filename); return true; } catch { return false; }
 }
