@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>星月 3.4.1 · D6 Discord 登录兼容验收</title>
+  <style>
+    :root{color-scheme:dark;--bg:#090d16;--panel:#121a2a;--panel2:#18243a;--line:#344b70;--text:#edf4ff;--muted:#9fb0c8;--good:#72e6ae;--bad:#ff8585;--warn:#ffd27a;--accent:#7cb8ff}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 85% 0,#18335a 0,transparent 32%),linear-gradient(145deg,#080b12,#0d1422 55%,#111b2d);color:var(--text);font:15px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+    main{width:min(980px,calc(100% - 28px));margin:0 auto;padding:38px 0 56px}.eyebrow{margin:0 0 8px;color:var(--accent);font-size:12px;font-weight:800;letter-spacing:.14em}.hero{display:flex;justify-content:space-between;gap:24px;align-items:flex-end;margin-bottom:24px}.hero h1{margin:0;font-size:clamp(26px,5vw,44px);line-height:1.15}.hero p{max-width:630px;margin:12px 0 0;color:var(--muted)}button{border:1px solid #5f85ba;border-radius:12px;background:#1b3559;color:#fff;padding:11px 17px;font:inherit;font-weight:750;cursor:pointer}button:hover{background:#244777}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(155deg,rgba(24,36,58,.96),rgba(14,22,37,.94));box-shadow:0 18px 50px rgba(0,0,0,.26);padding:20px}.card h2{margin:0 0 14px;font-size:17px}.caps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.cap,.test{border:1px solid #304665;border-radius:12px;background:rgba(6,11,20,.42);padding:12px}.cap span,.test small{display:block;color:var(--muted);font-size:12px}.cap strong{font-size:15px}.tests{display:grid;gap:10px}.test{display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:center}.dot{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:900;background:#28364c;color:var(--muted)}.test[data-state="pass"] .dot{background:rgba(114,230,174,.18);color:var(--good)}.test[data-state="fail"] .dot{background:rgba(255,133,133,.18);color:var(--bad)}.test[data-state="skip"] .dot{background:rgba(255,210,122,.16);color:var(--warn)}.test b{font-size:14px}.test em{font-style:normal;font-size:12px;color:var(--muted);text-align:right}.summary{grid-column:1/-1;display:flex;justify-content:space-between;gap:24px;align-items:center}.summary strong{font-size:22px}.summary[data-state="pass"] strong{color:var(--good)}.summary[data-state="fail"] strong{color:var(--bad)}code{color:#c9dcff}.note{margin:12px 0 0;color:var(--muted);font-size:13px}.foot{margin-top:18px;padding:15px 18px;border-left:3px solid var(--accent);background:rgba(14,24,41,.7);color:var(--muted)}
+    @media(max-width:720px){main{padding-top:24px}.hero{display:block}.hero button{margin-top:16px;width:100%}.grid{grid-template-columns:1fr}.summary{display:block}.summary strong{display:block;margin-top:8px}.caps{grid-template-columns:1fr}.test{grid-template-columns:28px 1fr}.test em{grid-column:2;text-align:left}}
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div><p class="eyebrow">XINGYUE 3.4.1 · D6 DEBUG</p><h1>Discord 登录兼容验收</h1><p>直接读取本机 <code>control-center.js</code> r30，验证安全随机数与 SHA-256 摘要已解耦。此页不连接 Discord、不生成真实会话，也不保存任何身份信息。</p></div>
+    <button id="rerun" type="button">重新执行测试</button>
+  </section>
+  <section class="grid">
+    <article class="card"><h2>当前浏览器能力</h2><div class="caps" id="caps"></div><p class="note">缺少 <code>SubtleCrypto</code> 不应再阻断登录；缺少安全随机数仍必须拒绝。</p></article>
+    <article class="card"><h2>D6 修复矩阵</h2><div class="tests" id="tests"></div></article>
+    <article class="card summary" id="summary" data-state="pending"><div><h2>本地运行结论</h2><p class="note" id="detail">正在读取 r30 runtime…</p></div><strong id="result">检测中</strong></article>
+  </section>
+  <div class="foot">本页证明客户端能力分流与 challenge 一致性；真实 OAuth 弹窗、Discord 授权和登录态刷新仍由总监在实机验收。</div>
+</main>
+<script>
+(() => {
+  const runtimeUrl = '/runtime/xingyue/3.4.1/control-center.js';
+  const expected = 'df0790f236013511e91fa4532fb7761f62320a51a3868dabf4a13fe5f53e3263';
+  const caps = document.getElementById('caps');
+  const tests = document.getElementById('tests');
+  const summary = document.getElementById('summary');
+  const result = document.getElementById('result');
+  const detail = document.getElementById('detail');
+  const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  function functionSource(source, name) {
+    let start = source.indexOf('function ' + name + '(');
+    if (start < 0) throw new Error('缺少函数 ' + name);
+    if (source.slice(Math.max(0, start - 6), start) === 'async ') start -= 6;
+    const open = source.indexOf('{', start); let depth = 0;
+    for (let index = open; index < source.length; index += 1) {
+      if (source[index] === '{') depth += 1;
+      else if (source[index] === '}' && --depth === 0) return source.slice(start, index + 1);
+    }
+    throw new Error('函数未闭合 ' + name);
+  }
+  function renderCaps() {
+    const values = [
+      ['安全上下文', window.isSecureContext === true ? '是' : '否'],
+      ['安全随机数', typeof window.crypto?.getRandomValues === 'function' ? '可用' : '不可用'],
+      ['SubtleCrypto', typeof window.crypto?.subtle?.digest === 'function' ? '可用' : '不可用'],
+      ['Runtime 目标', 'r30'],
+    ];
+    caps.innerHTML = values.map(([label,value]) => '<div class="cap"><span>'+escapeHtml(label)+'</span><strong>'+escapeHtml(value)+'</strong></div>').join('');
+  }
+  function row(label, state, note) {
+    const icon = state === 'pass' ? '✓' : state === 'skip' ? '–' : '×';
+    return '<div class="test" data-state="'+state+'"><span class="dot">'+icon+'</span><b>'+escapeHtml(label)+'</b><em>'+escapeHtml(note)+'</em></div>';
+  }
+  async function run() {
+    renderCaps(); tests.innerHTML = row('读取本地 runtime','skip','执行中'); summary.dataset.state='pending'; result.textContent='检测中'; detail.textContent='正在读取 r30 runtime…';
+    try {
+      const response = await fetch(runtimeUrl + '?d6=' + Date.now(), { cache:'no-store' });
+      if (!response.ok) throw new Error('runtime HTTP ' + response.status);
+      const source = await response.text();
+      if (!source.includes("3.4.1-stability-r30-20260712")) throw new Error('runtime 不是 r30');
+      const fallbackHash = new Function(functionSource(source,'sha256HexFallback')+'\nreturn sha256HexFallback;')();
+      const factory = new Function('window','hostWindow','sha256HexFallback','TextEncoder', [
+        'workshopCryptoTargets','workshopRandomCrypto','randomWorkshopHex','createWorkshopHandoffCredentials','workshopHandoffChallenge'
+      ].map(name => functionSource(source,name)).join('\n')+'\nreturn {createWorkshopHandoffCredentials,workshopHandoffChallenge};');
+      const rngOnlyWindow = { crypto:{ getRandomValues(bytes){ bytes.fill(0xa5); return bytes; } }, TextEncoder:window.TextEncoder };
+      const rngOnly = factory(rngOnlyWindow, () => rngOnlyWindow, fallbackHash, window.TextEncoder);
+      const credentials = rngOnly.createWorkshopHandoffCredentials();
+      const secret = 'ff'.repeat(32);
+      const fallbackPass = await rngOnly.workshopHandoffChallenge(secret) === expected;
+      const rngPass = /^xyh_[0-9a-f]{48}$/.test(credentials.handoffId) && /^[0-9a-f]{64}$/.test(credentials.secret);
+      const missing = factory({crypto:{},TextEncoder:window.TextEncoder}, () => ({crypto:{},TextEncoder:window.TextEncoder}), fallbackHash, window.TextEncoder);
+      let refusalPass = false; try { missing.createWorkshopHandoffCredentials(); } catch (error) { refusalPass = /安全随机数 API 不可用/.test(String(error?.message || error)); }
+      const loginUrlFactory = new Function('hostWindow','gatewayBaseUrl','URL','URLSearchParams',functionSource(source,'workshopLoginUrl')+'\nreturn workshopLoginUrl;');
+      const remoteUrl = loginUrlFactory(() => ({location:{origin:'http://192.168.1.2:8000'}}), () => 'https://gateway.invalid', URL, URLSearchParams)('xyh_test');
+      const returnPass = !remoteUrl.includes('return=') && remoteUrl.includes('handoff=xyh_test');
+      let nativeState = 'skip', nativeNote = '当前环境无 SubtleCrypto';
+      if (typeof window.crypto?.subtle?.digest === 'function' && typeof window.crypto?.getRandomValues === 'function') {
+        const native = factory(window, () => window, () => { throw new Error('意外进入 fallback'); }, window.TextEncoder);
+        nativeState = await native.workshopHandoffChallenge(secret) === expected ? 'pass' : 'fail'; nativeNote = nativeState === 'pass' ? '优先使用浏览器摘要' : '摘要不一致';
+      }
+      const rows = [
+        ['读取本地 r30 runtime','pass','源码与修订号匹配'],
+        ['仅安全随机数、无 SubtleCrypto',fallbackPass && rngPass ? 'pass':'fail','fallback challenge 与 256-bit secret'],
+        ['原生 SubtleCrypto 路径',nativeState,nativeNote],
+        ['完全无安全随机数',refusalPass ? 'pass':'fail','继续安全拒绝，不用 Math.random'],
+        ['非回环 return 来源',returnPass ? 'pass':'fail','省略 return，保留 handoff 轮询'],
+      ];
+      tests.innerHTML = rows.map(item => row(...item)).join('');
+      const passed = rows.every(item => item[1] !== 'fail'); summary.dataset.state = passed ? 'pass':'fail'; result.textContent = passed ? 'D6 本地通过':'存在失败'; detail.textContent = passed ? '能力分流、challenge 与来源防御均符合 r30 契约。':'请查看失败项，暂不可发布。';
+    } catch (error) {
+      tests.innerHTML = row('读取或执行 r30 runtime','fail',error?.message || String(error)); summary.dataset.state='fail'; result.textContent='检测失败'; detail.textContent='未能完成本地兼容矩阵。';
+    }
+  }
+  document.getElementById('rerun').addEventListener('click', run); void run();
+})();
+</script>
+</body>
+</html>

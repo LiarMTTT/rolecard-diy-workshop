@@ -106,7 +106,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.4.1-stability-r28-20260712';
+  const GIT_RUNTIME_REVISION = '3.4.1-stability-r30-20260712';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -833,29 +833,49 @@
       return commitWorkshopAuth({ checked:true, loggedIn:false, publisherId:'', error:error.message || String(error) });
     }
   }
-  function workshopCrypto() {
+  function workshopCryptoTargets() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
+    return targets;
+  }
+  function workshopRandomCrypto() {
+    const targets = workshopCryptoTargets();
     for (const target of targets) {
-      try { if (target?.crypto?.getRandomValues && target.crypto.subtle?.digest) return target.crypto; } catch (_) {}
+      try { if (typeof target?.crypto?.getRandomValues === 'function') return target.crypto; } catch (_) {}
     }
     throw new Error('浏览器安全随机数 API 不可用，无法启动 Discord 登录');
   }
   function randomWorkshopHex(byteLength) {
     const bytes = new Uint8Array(byteLength);
-    workshopCrypto().getRandomValues(bytes);
+    workshopRandomCrypto().getRandomValues(bytes);
     return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
   }
   function createWorkshopHandoffCredentials() {
     return { handoffId:'xyh_' + randomWorkshopHex(24), secret:randomWorkshopHex(32) };
   }
   async function workshopHandoffChallenge(secret) {
-    const digest = await workshopCrypto().subtle.digest('SHA-256', new TextEncoder().encode(String(secret || '')));
-    return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+    const value = String(secret || '');
+    let Encoder = typeof TextEncoder === 'function' ? TextEncoder : null;
+    for (const target of workshopCryptoTargets()) {
+      try {
+        const targetEncoder = typeof target?.TextEncoder === 'function' ? target.TextEncoder : Encoder;
+        if (!Encoder && targetEncoder) Encoder = targetEncoder;
+        const subtle = target?.crypto?.subtle;
+        if (typeof subtle?.digest !== 'function' || !targetEncoder) continue;
+        const digest = await subtle.digest('SHA-256', new targetEncoder().encode(value));
+        return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+      } catch (_) {}
+    }
+    return sha256HexFallback(value, Encoder);
   }
   function workshopLoginUrl(handoffId = '') {
     let ret = '';
-    try { ret = hostWindow().location.origin || ''; } catch (_) {}
+    try {
+      const origin = String(hostWindow().location.origin || '');
+      const parsed = new URL(origin);
+      const local = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+      if (local && (parsed.protocol === 'http:' || parsed.protocol === 'https:') && origin === parsed.origin) ret = origin;
+    } catch (_) {}
     const params = new URLSearchParams();
     if (ret) params.set('return', ret);
     if (handoffId) params.set('handoff', String(handoffId));
@@ -8143,6 +8163,7 @@
   }
   let openingFocusPortal = null;
   let openingFocusReturnFocus = null;
+  let openingFocusViewportCleanup = null;
   function openingFocusActive() { return root.dataset.xyFocusMode === '1'; }
   function syncOpeningFocusButton() {
     const active = openingFocusActive();
@@ -8150,6 +8171,63 @@
       button.textContent = active ? '退出全屏' : '全屏';
       button.setAttribute('aria-pressed', active ? 'true' : 'false');
     });
+  }
+  function openingFocusViewportRect(doc = root.ownerDocument || document) {
+    const win = doc.defaultView || hostWindow();
+    const vv = win.visualViewport;
+    const layoutWidth = Math.max(1, Number(win.innerWidth || doc.documentElement?.clientWidth || 1));
+    const layoutHeight = Math.max(1, Number(win.innerHeight || doc.documentElement?.clientHeight || 1));
+    const left = Math.max(0, Math.min(layoutWidth - 1, Number(vv?.offsetLeft) || 0));
+    const top = Math.max(0, Math.min(layoutHeight - 1, Number(vv?.offsetTop) || 0));
+    const width = Math.max(1, Math.min(Number(vv?.width) || layoutWidth, layoutWidth - left));
+    const height = Math.max(1, Math.min(Number(vv?.height) || layoutHeight, layoutHeight - top));
+    return { left, top, width, height };
+  }
+  function syncOpeningFocusViewport() {
+    const dialog = openingFocusPortal?.dialog;
+    if (!dialog?.isConnected) return;
+    const rect = openingFocusViewportRect(dialog.ownerDocument || root.ownerDocument || document);
+    dialog.style.position = 'fixed';
+    dialog.style.inset = 'auto';
+    dialog.style.left = rect.left + 'px';
+    dialog.style.top = rect.top + 'px';
+    dialog.style.right = 'auto';
+    dialog.style.bottom = 'auto';
+    dialog.style.width = rect.width + 'px';
+    dialog.style.height = rect.height + 'px';
+    dialog.style.maxWidth = rect.width + 'px';
+    dialog.style.maxHeight = rect.height + 'px';
+    dialog.style.margin = '0';
+    dialog.style.transform = 'none';
+    root.style.setProperty('--xy-visible-w', rect.width + 'px');
+    root.style.setProperty('--xy-visible-h', rect.height + 'px');
+  }
+  function bindOpeningFocusViewport(dialog) {
+    try { openingFocusViewportCleanup?.(); } catch (_) {}
+    const win = dialog.ownerDocument?.defaultView || hostWindow();
+    const vv = win.visualViewport;
+    let frame = 0;
+    const schedule = () => {
+      if (frame) win.cancelAnimationFrame(frame);
+      frame = win.requestAnimationFrame(() => { frame = 0; syncOpeningFocusViewport(); });
+    };
+    win.addEventListener('resize', schedule, { passive:true });
+    win.addEventListener('orientationchange', schedule, { passive:true });
+    if (vv) {
+      vv.addEventListener('resize', schedule, { passive:true });
+      vv.addEventListener('scroll', schedule, { passive:true });
+    }
+    openingFocusViewportCleanup = () => {
+      if (frame) win.cancelAnimationFrame(frame);
+      win.removeEventListener('resize', schedule);
+      win.removeEventListener('orientationchange', schedule);
+      if (vv) {
+        vv.removeEventListener('resize', schedule);
+        vv.removeEventListener('scroll', schedule);
+      }
+      frame = 0;
+    };
+    syncOpeningFocusViewport();
   }
   function enterOpeningFocusMode() {
     if (openingFocusActive()) return true;
@@ -8173,18 +8251,27 @@
       exitOpeningFocusMode({ restoreFocus:false });
       return false;
     }
+    bindOpeningFocusViewport(dialog);
     syncOpeningFocusButton();
     try { root.focus({ preventScroll:true }); } catch (_) {}
     return true;
   }
   function exitOpeningFocusMode(options = {}) {
-    if (!openingFocusPortal) { delete root.dataset.xyFocusMode; syncOpeningFocusButton(); return false; }
+    if (!openingFocusPortal) {
+      try { openingFocusViewportCleanup?.(); } catch (_) {}
+      openingFocusViewportCleanup = null;
+      delete root.dataset.xyFocusMode;
+      syncOpeningFocusButton();
+      return false;
+    }
     const { placeholder, dialog, mount } = openingFocusPortal;
     placeholder.parentNode?.insertBefore(root, placeholder);
     placeholder.remove();
     try { if (mount?.__xyOpeningPortalRoot === root) delete mount.__xyOpeningPortalRoot; } catch (_) {}
     try { if (dialog.open) dialog.close(); } catch (_) {}
     dialog.remove();
+    try { openingFocusViewportCleanup?.(); } catch (_) {}
+    openingFocusViewportCleanup = null;
     openingFocusPortal = null;
     delete root.dataset.xyFocusMode;
     syncOpeningFocusButton();
@@ -9984,8 +10071,8 @@
   // first_mes 仅放 [data-xy-opening-remote] 短标记；控制中心 fetch 远程开局页 + 注入 + 绑定（display-only，绝不进 LLM）。
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
-  const OPENING_PAGE_REVISION = '20260712-341-release-r1';
-  const OPENING_PAGE_SHA256 = 'b200d5343262d52376c48987562e3efd811bfbed570689627d3054de1d36b2df';
+  const OPENING_PAGE_REVISION = '20260712-341-stability-r30';
+  const OPENING_PAGE_SHA256 = '0f7c3886164777b34787828ad877e15f60ac40f80d7f4857f2565f8afcbb6495';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.1/opening-page.html?v=' + OPENING_PAGE_REVISION,

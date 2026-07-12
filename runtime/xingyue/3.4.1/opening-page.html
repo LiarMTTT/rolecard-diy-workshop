@@ -654,7 +654,7 @@
 .xy-opening-page[data-xy-opening-view="workshop"]{overflow:hidden!important}
 .xy-opening-page[data-xy-opening-view="workshop"] [data-xy-opening-story-editor]{display:none!important}
 .xy-focus-toggle{position:absolute;top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right));z-index:2200;min-width:76px;padding:7px 12px!important;background:rgba(18,13,9,.86)!important;backdrop-filter:blur(10px);box-shadow:0 6px 20px rgba(0,0,0,.3)}
-[data-xy-opening-focus-dialog]{position:fixed;inset:0;width:100vw;max-width:none;height:100dvh;max-height:none;margin:0;padding:0;border:0;background:#0c0a08;color:#f6ede1;overflow:hidden}
+[data-xy-opening-focus-dialog]{position:fixed;inset:auto;left:0;top:0;right:auto;bottom:auto;width:100dvw;max-width:100dvw;height:100dvh;max-height:100dvh;margin:0;padding:0;border:0;background:#0c0a08;color:#f6ede1;overflow:hidden;box-sizing:border-box}
 [data-xy-opening-focus-dialog]::backdrop{background:rgba(0,0,0,.78)}
 .xy-opening-page[data-xy-focus-mode="1"]{width:100%!important;max-width:none!important;height:100%!important;max-height:none!important;margin:0!important;padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;background:#0c0a08;box-sizing:border-box}
 .xy-opening-page[data-xy-focus-mode="1"] .xy-opening-shell{height:auto;min-height:100%;overflow:visible}
@@ -1221,6 +1221,66 @@
   const attrs = { 格斗:5, 平衡:5, 反应:5, 感知:5, 技巧:5, 精神:5 };
   function all(selector) { return Array.from(root.querySelectorAll(selector)); }
   let focusPortal = null;
+  let focusViewportCleanup = null;
+  function focusViewportRect(doc = root.ownerDocument || document) {
+    const win = doc.defaultView || window;
+    const vv = win.visualViewport;
+    const layoutWidth = Math.max(1, Number(win.innerWidth || doc.documentElement?.clientWidth || 1));
+    const layoutHeight = Math.max(1, Number(win.innerHeight || doc.documentElement?.clientHeight || 1));
+    const left = Math.max(0, Math.min(layoutWidth - 1, Number(vv?.offsetLeft) || 0));
+    const top = Math.max(0, Math.min(layoutHeight - 1, Number(vv?.offsetTop) || 0));
+    return {
+      left, top,
+      width: Math.max(1, Math.min(Number(vv?.width) || layoutWidth, layoutWidth - left)),
+      height: Math.max(1, Math.min(Number(vv?.height) || layoutHeight, layoutHeight - top)),
+    };
+  }
+  function syncFocusViewport() {
+    const dialog = focusPortal?.dialog;
+    if (!dialog?.isConnected) return;
+    const rect = focusViewportRect(dialog.ownerDocument || root.ownerDocument || document);
+    dialog.style.position = 'fixed';
+    dialog.style.inset = 'auto';
+    dialog.style.left = rect.left + 'px';
+    dialog.style.top = rect.top + 'px';
+    dialog.style.right = 'auto';
+    dialog.style.bottom = 'auto';
+    dialog.style.width = rect.width + 'px';
+    dialog.style.height = rect.height + 'px';
+    dialog.style.maxWidth = rect.width + 'px';
+    dialog.style.maxHeight = rect.height + 'px';
+    dialog.style.margin = '0';
+    dialog.style.transform = 'none';
+    root.style.setProperty('--xy-visible-w', rect.width + 'px');
+    root.style.setProperty('--xy-visible-h', rect.height + 'px');
+  }
+  function bindFocusViewport(dialog) {
+    try { focusViewportCleanup?.(); } catch (_e) {}
+    const win = dialog.ownerDocument?.defaultView || window;
+    const vv = win.visualViewport;
+    let frame = 0;
+    const schedule = () => {
+      if (frame) win.cancelAnimationFrame(frame);
+      frame = win.requestAnimationFrame(() => { frame = 0; syncFocusViewport(); });
+    };
+    win.addEventListener('resize', schedule, { passive:true });
+    win.addEventListener('orientationchange', schedule, { passive:true });
+    if (vv) {
+      vv.addEventListener('resize', schedule, { passive:true });
+      vv.addEventListener('scroll', schedule, { passive:true });
+    }
+    focusViewportCleanup = () => {
+      if (frame) win.cancelAnimationFrame(frame);
+      win.removeEventListener('resize', schedule);
+      win.removeEventListener('orientationchange', schedule);
+      if (vv) {
+        vv.removeEventListener('resize', schedule);
+        vv.removeEventListener('scroll', schedule);
+      }
+      frame = 0;
+    };
+    syncFocusViewport();
+  }
   function syncFocusButton() {
     const active = root.dataset.xyFocusMode === '1';
     all('[data-xy-opening-action="toggle-focus-mode"]').forEach(button => {
@@ -1247,6 +1307,7 @@
         setFocusMode(false);
         return;
       }
+      bindFocusViewport(dialog);
       root.focus({ preventScroll:true });
     } else if (focusPortal) {
       const { placeholder, dialog } = focusPortal;
@@ -1254,6 +1315,8 @@
       placeholder.remove();
       try { if (dialog.open) dialog.close(); } catch (_e) {}
       dialog.remove();
+      try { focusViewportCleanup?.(); } catch (_e) {}
+      focusViewportCleanup = null;
       focusPortal = null;
       delete root.dataset.xyFocusMode;
     }

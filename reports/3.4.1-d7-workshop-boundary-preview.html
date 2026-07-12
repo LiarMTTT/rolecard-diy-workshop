@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>星月 3.4.1 D7 · 创意工坊边界锁定预览</title>
+  <style>
+    *{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#06090e;color:#e8f7ff;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+    body{display:grid;grid-template-rows:auto minmax(0,1fr)}
+    .bar{z-index:10;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) 8px max(8px,env(safe-area-inset-left));background:#0b121c;border-bottom:1px solid rgba(107,199,242,.35)}
+    .bar strong{margin-right:auto}.bar button{min-height:44px;padding:8px 12px;border:1px solid rgba(107,199,242,.5);border-radius:8px;background:#101d2b;color:#dff6ff;cursor:pointer}.bar button:focus-visible{outline:3px solid #ffd47a;outline-offset:2px}
+    .status{padding:7px 10px;border-radius:999px;font:600 12px/1.2 ui-monospace,Consolas,monospace;background:#372423;color:#ffd0c8}.status.ok{background:#12362b;color:#8ff0c7}
+    .stage{min-height:0;display:grid;place-items:center;overflow:auto;padding:8px;background:radial-gradient(circle at 50% 20%,rgba(53,127,169,.18),transparent 46%)}
+    .device{position:relative;width:min(390px,100%);height:min(844px,100%);max-width:100%;max-height:100%;overflow:hidden;border:2px solid rgba(107,199,242,.55);border-radius:16px;background:#0c0a08;box-shadow:0 18px 50px rgba(0,0,0,.55)}
+    .device[data-fill="1"]{width:100%;height:100%;border-radius:8px}
+    iframe{display:block;width:100%;height:100%;border:0;background:#0c0a08}
+    .metrics{position:absolute;z-index:20;left:8px;bottom:8px;max-width:calc(100% - 16px);padding:6px 8px;border:1px solid rgba(107,199,242,.42);border-radius:7px;background:rgba(4,9,16,.9);color:#bfeaff;font:11px/1.45 ui-monospace,Consolas,monospace;pointer-events:none;white-space:pre-wrap}
+    @media(max-width:560px){.bar strong{width:100%}.bar button{flex:1 1 92px}.stage{padding:0}.device{width:100%;height:100%;border:0;border-radius:0}.metrics{font-size:10px}}
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <strong>D7 · 创意工坊浮窗不得越界</strong>
+    <button type="button" data-size="390,844">竖屏</button>
+    <button type="button" data-size="844,390">横屏</button>
+    <button type="button" data-size="390,520">短视口</button>
+    <button type="button" data-fill>填满</button>
+    <button type="button" data-reopen>重新进入工坊</button>
+    <span class="status" data-status>等待工坊载入</span>
+  </div>
+  <main class="stage">
+    <div class="device" data-device data-fill="0">
+      <iframe title="星月 3.4.1 开局页工坊预览" src="../runtime/xingyue/3.4.1/opening-page.html"></iframe>
+      <div class="metrics" data-metrics>等待几何数据…</div>
+    </div>
+  </main>
+  <script>
+    (() => {
+      const device = document.querySelector('[data-device]');
+      const frame = document.querySelector('iframe');
+      const status = document.querySelector('[data-status]');
+      const metrics = document.querySelector('[data-metrics]');
+      let monitorFrame = 0;
+      function enterWorkshop() {
+        const doc = frame.contentDocument;
+        const button = doc?.querySelector('[data-xy-opening-action="open-workshop"]');
+        if (!button) return false;
+        button.disabled = false;
+        button.click();
+        return true;
+      }
+      function measure() {
+        const win = frame.contentWindow;
+        const dialog = frame.contentDocument?.querySelector('[data-xy-opening-focus-dialog]');
+        const vv = win?.visualViewport;
+        if (!win || !dialog) {
+          status.textContent = '等待工坊浮窗';
+          status.classList.remove('ok');
+          metrics.textContent = '等待 dialog…';
+        } else {
+          const rect = dialog.getBoundingClientRect();
+          const left = Number(vv?.offsetLeft) || 0;
+          const top = Number(vv?.offsetTop) || 0;
+          const width = Number(vv?.width) || win.innerWidth;
+          const height = Number(vv?.height) || win.innerHeight;
+          const epsilon = 1;
+          const inside = rect.left >= left - epsilon && rect.top >= top - epsilon && rect.right <= left + width + epsilon && rect.bottom <= top + height + epsilon;
+          status.textContent = inside ? '通过：0 越界' : '失败：浮窗越界';
+          status.classList.toggle('ok', inside);
+          metrics.textContent = 'viewport ' + Math.round(left) + ',' + Math.round(top) + ' · ' + Math.round(width) + '×' + Math.round(height) + '\ndialog   ' + Math.round(rect.left) + ',' + Math.round(rect.top) + ' · ' + Math.round(rect.width) + '×' + Math.round(rect.height);
+        }
+        monitorFrame = requestAnimationFrame(measure);
+      }
+      frame.addEventListener('load', () => { setTimeout(() => { enterWorkshop(); measure(); }, 80); }, { once:true });
+      document.querySelectorAll('[data-size]').forEach(button => button.addEventListener('click', () => {
+        const [width, height] = button.dataset.size.split(',').map(Number);
+        device.dataset.fill = '0';
+        device.style.width = Math.min(width, document.documentElement.clientWidth) + 'px';
+        device.style.height = Math.min(height, document.documentElement.clientHeight) + 'px';
+      }));
+      document.querySelector('[data-fill]').addEventListener('click', () => { device.dataset.fill = '1'; device.style.width = ''; device.style.height = ''; });
+      document.querySelector('[data-reopen]').addEventListener('click', () => {
+        const doc = frame.contentDocument;
+        doc?.querySelector('[data-xy-opening-action="return-from-workshop"]')?.click();
+        setTimeout(enterWorkshop, 30);
+      });
+      window.addEventListener('beforeunload', () => cancelAnimationFrame(monitorFrame), { once:true });
+    })();
+  </script>
+</body>
+</html>

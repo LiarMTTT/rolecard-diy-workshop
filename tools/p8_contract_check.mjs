@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +23,7 @@ const loader = await readOptional(path.join(workspaceRoot, '星月', '星月 3.4
 const preview = await readOptional(path.join(workspaceRoot, '星月', '星月 3.4.0', 'components', '_preview.html'));
 const openingPage = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.0', 'opening-page.html'), 'utf8');
 const openingPage341 = await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.1', 'opening-page.html'), 'utf8');
+const manifest341 = JSON.parse(await fs.readFile(path.join(repoRoot, 'runtime', 'xingyue', '3.4.1', 'manifest.json'), 'utf8'));
 const gatewayServer = await fs.readFile(path.join(repoRoot, 'gateway', 'server.js'), 'utf8');
 const schema = JSON.parse(await fs.readFile(path.join(repoRoot, 'schemas', 'workshop-package.schema.json'), 'utf8'));
 
@@ -30,6 +32,18 @@ function ok(condition, name) {
   assert.ok(condition, name);
   passed += 1;
   console.log(`[ok] ${name}`);
+}
+function functionSource(source, name) {
+  let start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `missing function ${name}`);
+  if (source.slice(Math.max(0, start - 6), start) === 'async ') start -= 6;
+  const open = source.indexOf('{', start);
+  let depth = 0;
+  for (let index = open; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    else if (source[index] === '}' && --depth === 0) return source.slice(start, index + 1);
+  }
+  assert.fail(`unterminated function ${name}`);
 }
 function rejects(mutator, code, name, options = {}) {
   const input = structuredClone(example);
@@ -174,6 +188,32 @@ ok(currentRuntime.includes('Promise.allSettled(refreshes.map(refresh => refresh(
 ok(currentRuntime.includes('角色包包含仅本机可见的媒体库 key'), 'character publish blocks non-portable local media keys');
 ok(currentRuntime.includes('dataset.xyDiscordAvatar'), 'Discord avatar is rendered from memory-only identity');
 ok(runtime341.includes('deadlineAt') && runtime341.includes('expiresInMs') && runtime341.includes('cancelWorkshopLogin'), '3.4.1 OAuth consumes server deadline and exposes cancel');
+assert.doesNotThrow(() => new Function(runtime341));
+passed += 1;
+console.log('[ok] 3.4.1 runtime parses as executable script');
+const fallbackHash = new Function(`${functionSource(runtime341, 'sha256HexFallback')}\nreturn sha256HexFallback;`)();
+const cryptoFactory = new Function('window', 'hostWindow', 'sha256HexFallback', 'TextEncoder', `${[
+  'workshopCryptoTargets', 'workshopRandomCrypto', 'randomWorkshopHex', 'createWorkshopHandoffCredentials', 'workshopHandoffChallenge',
+].map(name => functionSource(runtime341, name)).join('\n')}\nreturn { createWorkshopHandoffCredentials, workshopHandoffChallenge };`);
+const secret = 'ff'.repeat(32);
+const expectedChallenge = crypto.createHash('sha256').update(secret, 'utf8').digest('hex');
+const rngOnlyWindow = { crypto:{ getRandomValues(bytes) { bytes.fill(0xa5); return bytes; } }, TextEncoder };
+const rngOnlyCrypto = cryptoFactory(rngOnlyWindow, () => rngOnlyWindow, fallbackHash, TextEncoder);
+const credentials = rngOnlyCrypto.createWorkshopHandoffCredentials();
+ok(/^xyh_[0-9a-f]{48}$/.test(credentials.handoffId) && /^[0-9a-f]{64}$/.test(credentials.secret), '3.4.1 login keeps CSPRNG handoff id and 256-bit secret without SubtleCrypto');
+ok(await rngOnlyCrypto.workshopHandoffChallenge(secret) === expectedChallenge, '3.4.1 login falls back to matching SHA-256 when SubtleCrypto is unavailable');
+const nativeWindow = { crypto:{ getRandomValues: rngOnlyWindow.crypto.getRandomValues, subtle:{ async digest(_algorithm, bytes) { return Uint8Array.from(crypto.createHash('sha256').update(Buffer.from(bytes)).digest()).buffer; } } }, TextEncoder };
+const nativeCrypto = cryptoFactory(nativeWindow, () => nativeWindow, () => { throw new Error('unexpected-fallback'); }, TextEncoder);
+ok(await nativeCrypto.workshopHandoffChallenge(secret) === expectedChallenge, '3.4.1 login prefers native SubtleCrypto SHA-256');
+const missingCrypto = cryptoFactory({ crypto:{}, TextEncoder }, () => ({ crypto:{}, TextEncoder }), fallbackHash, TextEncoder);
+assert.throws(() => missingCrypto.createWorkshopHandoffCredentials(), /安全随机数 API 不可用/);
+passed += 1;
+console.log('[ok] 3.4.1 login still refuses non-cryptographic random fallback');
+const loginUrlFactory = new Function('hostWindow', 'gatewayBaseUrl', 'URL', 'URLSearchParams', `${functionSource(runtime341, 'workshopLoginUrl')}\nreturn workshopLoginUrl;`);
+const localLoginUrl = loginUrlFactory(() => ({ location:{ origin:'http://127.0.0.1:8000' } }), () => 'https://gateway.invalid', URL, URLSearchParams)('xyh_test');
+const remoteLoginUrl = loginUrlFactory(() => ({ location:{ origin:'http://192.168.1.2:8000' } }), () => 'https://gateway.invalid', URL, URLSearchParams)('xyh_test');
+ok(localLoginUrl.includes('return=http%3A%2F%2F127.0.0.1%3A8000') && !remoteLoginUrl.includes('return='), '3.4.1 handoff only sends Gateway-approved loopback return origins');
+ok(runtime341.includes("GIT_RUNTIME_REVISION = '3.4.1-stability-r30-20260712'"), '3.4.1 runtime exposes D7 r30 revision');
 ok(runtime341.includes('publishSelection') && runtime341.includes('state.publishSelection = clone(pkg)'), '3.4.1 publish object is explicit for owner updates and opening drafts');
 ok(runtime341.includes('refreshPackageInspections') && openingPage341.includes('data-xy-package-inspection'), '3.4.1 exposes installed revision and dirty inspection status');
 ok(openingPage341.includes('data-xy-login-cancel') && openingPage341.includes('data-xy-workshop-error'), '3.4.1 workshop has cancel and persistent error feedback');
@@ -208,6 +248,26 @@ ok(openingPage341.includes('.xy-opening-page .xy-view[data-xy-view="workshop"]{p
   && !openingPage341.includes('.xy-opening-page .xy-view[data-xy-view="workshop"]{position:fixed!important')
   && runtime341.includes("if (nextView === 'workshop' && !openingFocusActive()) state.workshopFocusOwned = enterOpeningFocusMode()")
   && runtime341.includes('if (leavingOwnedWorkshop) { state.workshopFocusOwned = false; exitOpeningFocusMode(); }'), '3.4.1 workshop overlay uses the stable focus portal and restores its original message position');
+const openingFocusViewportBlock341 = runtime341.slice(runtime341.indexOf('function openingFocusViewportRect'), runtime341.indexOf('function enterOpeningFocusMode'));
+ok(openingFocusViewportBlock341.includes('win.visualViewport')
+  && openingFocusViewportBlock341.includes('vv?.offsetLeft')
+  && openingFocusViewportBlock341.includes('vv?.offsetTop')
+  && openingFocusViewportBlock341.includes("dialog.style.inset = 'auto'")
+  && openingFocusViewportBlock341.includes("dialog.style.width = rect.width + 'px'")
+  && openingFocusViewportBlock341.includes("dialog.style.height = rect.height + 'px'")
+  && openingFocusViewportBlock341.includes("vv.addEventListener('resize', schedule")
+  && openingFocusViewportBlock341.includes("vv.addEventListener('scroll', schedule"), '3.4.1 workshop focus portal is hard-clamped to the mobile visual viewport');
+ok(openingPage341.includes('function focusViewportRect(doc = root.ownerDocument || document)')
+  && openingPage341.includes("dialog.style.inset = 'auto'")
+  && openingPage341.includes("vv.addEventListener('resize', schedule")
+  && openingPage341.includes("vv.addEventListener('scroll', schedule")
+  && openingPage341.includes('width:100dvw;max-width:100dvw;height:100dvh;max-height:100dvh'), '3.4.1 standalone opening preview shares the mobile viewport boundary lock');
+const openingPageHash341 = crypto.createHash('sha256').update(openingPage341.replace(/\r\n?/g, '\n'), 'utf8').digest('hex');
+const openingPageModule341 = manifest341.modules.find(module => module.id === 'opening-page');
+ok(runtime341.includes("OPENING_PAGE_REVISION = '20260712-341-stability-r30'")
+  && runtime341.includes(`OPENING_PAGE_SHA256 = '${openingPageHash341}'`)
+  && openingPageModule341?.sha256 === openingPageHash341
+  && openingPageModule341?.bytes === Buffer.byteLength(openingPage341, 'utf8'), '3.4.1 opening-page cache revision, runtime integrity hash and manifest stay aligned');
 ok(runtime341.includes("'/api/workshop/uploads/character'")
   && runtime341.includes('async function uploadCharacterPackage(input)')
   && runtime341.includes('resolveCharacterUploadMedia')
