@@ -6301,13 +6301,46 @@
     ].join('');
     (doc.head || doc.documentElement).appendChild(style);
   }
+  // 3.4.5：HUD 段自含采集/缩略图，不跨闭包依赖开局段的 collectDialogSpeakers/avatarManagerThumb（那些闭包 root，HUD 段不可达会 ReferenceError）。
+  function hudCollectSpeakers() {
+    const doc = hostDocument();
+    const names = new Map();
+    names.set('{{user}}', { kind: 'user' });
+    const userAliases = new Set(['user', 'player', '{{user}}', '玩家', '主角']);
+    try {
+      doc.querySelectorAll('[data-xy-dialog-speaker]').forEach(node => {
+        const raw = String(node.getAttribute('data-xy-dialog-speaker') || '').trim();
+        if (raw && !userAliases.has(raw.toLowerCase()) && !userAliases.has(raw)) names.set(raw, { kind: 'npc' });
+      });
+      doc.querySelectorAll('.xy-dialog-speaker, .custom-xy-dialog-speaker').forEach(node => {
+        const raw = String(node.textContent || '').trim();
+        if (raw && raw !== '{{user}}' && !names.has(raw)) names.set(raw, { kind: 'npc' });
+      });
+    } catch (_) {}
+    try {
+      (mediaLibrary()?.listManagedAssets?.() || []).forEach(item => {
+        if (item?.type === 'bond' && item?.slot === 'avatar' && item.name && item.name !== '{{user}}' && !names.has(item.name)) names.set(item.name, { kind: 'npc' });
+      });
+    } catch (_) {}
+    return [...names.entries()].map(([name, info]) => ({ name, ...info }));
+  }
+  function hudAvatarThumb(name) {
+    try {
+      const lib = mediaLibrary();
+      const exact = lib?.getExactAsset?.({ type: 'bond', slot: 'avatar', name, variant: 'normal' });
+      if (exact) return exact.dataUrl || exact.url || exact.src || '';
+      const loose = lib?.getAsset?.({ type: 'bond', slot: 'avatar', name, variant: 'normal' });
+      return loose?.dataUrl || loose?.url || loose?.src || '';
+    } catch (_) { return ''; }
+  }
   function renderHudAvatarManagerList() {
     const list = hostDocument().querySelector('#xingyue-hud-avatar-mgr .xy-ham-list');
     if (!list) return;
-    const speakers = collectDialogSpeakers();
+    let speakers = [];
+    try { speakers = hudCollectSpeakers(); } catch (_) { speakers = [{ name: '{{user}}', kind: 'user' }]; }
     list.innerHTML = speakers.map(item => {
       const isUser = item.kind === 'user';
-      const src = isUser ? (controlCenter()?.resolvePlayerAvatarSrc?.('') || avatarManagerThumb(item.name)) : avatarManagerThumb(item.name);
+      const src = isUser ? (controlCenter()?.resolvePlayerAvatarSrc?.('') || hudAvatarThumb(item.name)) : hudAvatarThumb(item.name);
       const hint = isUser ? '玩家气泡兜底头像' : (src ? '已绑定' : '未绑定 · 气泡显示占位头像');
       return '<div class="xy-ham-row">'
         + (src ? '<img class="xy-ham-thumb" src="' + escapeHtml(src) + '" alt="">' : '<span class="xy-ham-thumb"></span>')
@@ -6316,6 +6349,9 @@
         + (src && !isUser ? '<button type="button" data-xy-ham-clear data-name="' + escapeHtml(item.name) + '">清除</button>' : '')
         + '</div>';
     }).join('') || '<div class="xy-ham-empty">当前聊天还没有出现对话气泡；可以先在上方手动添加名字。</div>';
+  }
+  function hudRefreshDialogBubbles() {
+    try { mediaLibrary()?.renderDialogBubbles?.({ force: true }); } catch (_) {}
   }
   function closeHudAvatarManager() {
     try { hostDocument().getElementById('xingyue-hud-avatar-mgr')?.remove(); } catch (_) {}
@@ -6328,7 +6364,7 @@
     try {
       const item = await lib.requestLocalImport({ type: 'bond', name: clean, slot: 'avatar', variant: 'normal' });
       if (item && item.key) {
-        refreshDialogBubblesAfterAvatarChange();
+        hudRefreshDialogBubbles();
         renderHudAvatarManagerList();
         toast('success', '已给「' + clean + '」绑定气泡头像，聊天中立即生效');
       }
@@ -6356,7 +6392,7 @@
       if (clearBtn) {
         const name = String(clearBtn.dataset.name || '').trim();
         try { mediaLibrary()?.removeAsset?.({ type: 'bond', name, slot: 'avatar', variant: 'normal' }); } catch (_) {}
-        refreshDialogBubblesAfterAvatarChange();
+        hudRefreshDialogBubbles();
         renderHudAvatarManagerList();
         toast('success', '已清除「' + name + '」的气泡头像');
         return;
