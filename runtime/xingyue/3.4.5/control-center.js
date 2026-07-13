@@ -6333,6 +6333,10 @@
       return loose?.dataUrl || loose?.url || loose?.src || '';
     } catch (_) { return ''; }
   }
+  // 3.4.5：HUD 段可达的 CC api getter——controlCenter() 在 bindOpeningPage 闭包内、HUD 段调它会 ReferenceError。
+  function hudControlCenterApi() {
+    try { return window.XingyueControlCenter || hostWindow().XingyueControlCenter || null; } catch (_) { return null; }
+  }
   function renderHudAvatarManagerList() {
     const list = hostDocument().querySelector('#xingyue-hud-avatar-mgr .xy-ham-list');
     if (!list) return;
@@ -6340,7 +6344,7 @@
     try { speakers = hudCollectSpeakers(); } catch (_) { speakers = [{ name: '{{user}}', kind: 'user' }]; }
     list.innerHTML = speakers.map(item => {
       const isUser = item.kind === 'user';
-      const src = isUser ? (controlCenter()?.resolvePlayerAvatarSrc?.('') || hudAvatarThumb(item.name)) : hudAvatarThumb(item.name);
+      const src = isUser ? (hudControlCenterApi()?.resolvePlayerAvatarSrc?.('') || hudAvatarThumb(item.name)) : hudAvatarThumb(item.name);
       const hint = isUser ? '玩家气泡兜底头像' : (src ? '已绑定' : '未绑定 · 气泡显示占位头像');
       return '<div class="xy-ham-row">'
         + (src ? '<img class="xy-ham-thumb" src="' + escapeHtml(src) + '" alt="">' : '<span class="xy-ham-thumb"></span>')
