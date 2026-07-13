@@ -1,0 +1,14 @@
+.xy-dialog-bubble-wrap{display:flex;gap:10px;align-items:flex-start;margin:10px 0;max-width:100%}
+.xy-dialog-bubble-wrap.xy-dialog-user{flex-direction:row-reverse}
+/* 3.4.7：头像由圆形改方形圆角、尺寸 38→46px 稍放大 */
+.xy-dialog-avatar{width:46px;height:46px;flex:0 0 46px;border-radius:12px;overflow:hidden;border:1px solid rgba(104,199,239,.45);background:linear-gradient(135deg,rgba(104,199,239,.18),rgba(245,140,210,.16));display:grid;place-items:center;color:rgba(230,248,255,.82);font-size:13px;font-weight:700}
+.xy-dialog-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.xy-dialog-body{min-width:0;max-width:min(72ch,calc(100% - 60px))}
+.xy-dialog-speaker{font-size:12px;color:rgba(196,231,246,.78);margin:0 0 4px 2px}
+.xy-dialog-user .xy-dialog-speaker{text-align:right;margin-left:0;margin-right:2px}
+.xy-dialog-text{border:1px solid rgba(104,199,239,.28);background:rgba(8,20,30,.78);box-shadow:0 8px 24px rgba(0,0,0,.18);padding:10px 12px;border-radius:8px;color:rgba(238,249,255,.96);line-height:1.72;white-space:pre-wrap;word-break:break-word}
+.xy-dialog-user .xy-dialog-text{border-color:rgba(245,140,210,.30);background:rgba(34,16,32,.78)}
+.xy-dialog-npc .xy-dialog-text{border-color:rgba(104,199,239,.30)}
+/* 3.4.7：气泡间旁白作普通正文文本，不进气泡框 */
+.xy-dialog-narration{margin:8px 2px;color:rgba(226,240,248,.86);line-height:1.72;white-space:pre-wrap;word-break:break-word}
+@media(max-width:640px){.xy-dialog-bubble-wrap{gap:8px}.xy-dialog-avatar{width:40px;height:40px;flex-basis:40px;border-radius:10px}.xy-dialog-body{max-width:calc(100% - 48px)}.xy-dialog-text{padding:9px 10px}}
