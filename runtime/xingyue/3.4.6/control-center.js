@@ -106,7 +106,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.4.6-stability-r36-20260713';
+  const GIT_RUNTIME_REVISION = '3.4.6-stability-r37-20260713';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -5893,7 +5893,7 @@
   // 3.4.6：拖尾灵动感调优——tailRatio 0.58→0.70（更多粒子参与甩尾）、dragShear 1.28→1.72（甩尾幅度更明显）
   // 3.4.6：radius 0→56（固定粒子场半径=56 buffer=28 CSS，球视觉仍 56px）；canvas 缓冲放大到 200（下方 ensureSidebarBall），
   // 粒子场不再填满 canvas，四周留出空间让拖尾甩出球外不被裁。
-  const XY_ORB_CFG = { n: 46, linkDist: 33, speed: 0.3, glowIntensity: 1.08, tailRatio: 0.70, dragShear: 1.72, colorTokens: { particle: '#6bc7f2', bright: '#4be4ff', highlight: '#cdf3ff' }, radius: 56 };
+  const XY_ORB_CFG = { n: 46, linkDist: 33, speed: 0.3, glowIntensity: 1.08, tailRatio: 0.35, dragShear: 0.9, colorTokens: { particle: '#6bc7f2', bright: '#4be4ff', highlight: '#cdf3ff' }, radius: 56 };
   const XY_ORB_STATES = {
     'idle': { speedMul: 1.0, linkDistMul: 1.0, glowMul: 1.0 },
     'hover': { speedMul: 1.8, linkDistMul: 1.4, glowMul: 1.6 },
@@ -5933,16 +5933,17 @@
         this._dragDX = xyOrbLerp(this._dragDX || 0, nx, 0.42);
         this._dragDY = xyOrbLerp(this._dragDY || 0, ny, 0.42);
       }
-      // 3.4.6：甩尾更明显——位移上限 0.9→1.15r 让尾巴甩得更远，速度踢 0.035→0.052 起手更活
-      const cap = this._effectiveRadius() * 1.15;
+      // 3.4.6-r37：拖动=部分点阵本身被惯性留在后方(靠点阵连线拉成拖影)，非给每个点加尾巴线。位移上限放到 2.4r 配合 240px 画布不裁；甩离幅度走 dragShear，速度踢随幅度缩放
+      const cap = this._effectiveRadius() * 2.4;
       for (const p of this._particles) {
-        const pull = p.tail ? p.lag : 0.12;
-        const shear = p.tail ? this._cfg.dragShear : 0.28;
+        const pull = p.tail ? p.lag : 0.10;
+        const shear = p.tail ? this._cfg.dragShear : 0.22;
         p.sx = Math.max(-cap, Math.min(cap, p.sx - dx * 2 * pull * shear));
         p.sy = Math.max(-cap, Math.min(cap, p.sy - dy * 2 * pull * shear));
         if (p.tail) {
-          p.svx -= dx * 0.052 * p.lag;
-          p.svy -= dy * 0.052 * p.lag;
+          const kick = 0.05 * (this._cfg.dragShear / 1.72);
+          p.svx -= dx * kick * p.lag;
+          p.svy -= dy * kick * p.lag;
         }
       }
     }
@@ -5992,9 +5993,9 @@
       for (const p of this._particles) {
         p.blink += p.blinkSpeed * dtFrac * 0.04; if (p.blink > 1) p.blink -= 1;
         if (p.tail && (p.sx || p.sy || p.svx || p.svy)) {
-          // ⑧c 欠阻尼弹簧：拉回中心偏移。3.4.6 软化弹回——松手刚度 x2.8→x1.7 不再猛缩，
+          // ⑧c 欠阻尼弹簧：拉回中心偏移。3.4.6-r37 再软化——松手刚度 x1.7→x1.5 回中更绵，
           // 松手阻尼略降(springD-0.03)让回中带轻微惯性过冲、更绵软丝滑；收敛后清零避免残余漂移。
-          const k = p.springK * (this._tailDrag ? 0.62 : 1.7);
+          const k = p.springK * (this._tailDrag ? 0.62 : 1.5);
           const damp = Math.pow(this._tailDrag ? Math.min(0.985, p.springD + 0.045) : Math.max(0.82, p.springD - 0.03), dtFrac);
           p.svx = (p.svx - k * p.sx * dtFrac) * damp;
           p.svy = (p.svy - k * p.sy * dtFrac) * damp;
@@ -6058,19 +6059,7 @@
       grad.addColorStop(0, 'rgba(' + br2 + ',' + bg2 + ',' + bb2 + ',0.3)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
-      if (dragE > 0.03 && (this._dragDX || this._dragDY)) {
-        const dx = this._dragDX || 0, dy = this._dragDY || 0;
-        ctx.save();
-        ctx.lineCap = 'round';
-        for (const p of ps) {
-          if (!p.tail) continue;
-          const len = (8 + 18 * p.lag) * dragE * drawScale;
-          ctx.strokeStyle = 'rgba(' + br2 + ',' + bg2 + ',' + bb2 + ',' + (0.12 + 0.2 * dragE).toFixed(3) + ')';
-          ctx.lineWidth = (0.65 + 0.9 * p.lag) * drawScale;
-          ctx.beginPath(); ctx.moveTo(p.rx - dx * len, p.ry - dy * len); ctx.lineTo(p.rx, p.ry); ctx.stroke();
-        }
-        ctx.restore();
-      }
+      // 3.4.6-r37：删除错误的"拖尾线"绘制——数据史莱姆的甩尾=部分点阵本身被惯性留在后方(rx/ry 含 sx/sy 滞后偏移)+下方点阵连线自然拉成拖影，不再给每个点画尾巴线段。
       ctx.save();
       for (let i = 0; i < ps.length; i++) {
         for (let j = i + 1; j < ps.length; j++) {
@@ -6202,7 +6191,7 @@
       '#xingyue-sidebar-ball:hover::before{opacity:.9;}',
       '#xingyue-sidebar-ball.dock-ease{transition:left .24s ease,top .24s ease,filter .2s;}',
       '#xingyue-sidebar-ball.dock-ease.dock-out{transition:left .32s cubic-bezier(.34,1.56,.64,1),top .32s cubic-bezier(.34,1.56,.64,1),filter .2s;}',
-      '#xingyue-sidebar-ball canvas{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:100px;height:100px;pointer-events:none;}',
+      '#xingyue-sidebar-ball canvas{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:240px;height:240px;pointer-events:none;}',
       '#xingyue-sidebar-menu{position:fixed;inset:0;z-index:2147483550;pointer-events:none;}',
       '.xy-orb-radial-btn{position:fixed;pointer-events:auto;display:flex;align-items:center;gap:6px;padding:7px 13px;background:linear-gradient(180deg,rgba(10,20,34,.96),rgba(5,9,18,.97));border:1px solid rgba(107,199,242,.42);border-radius:999px;color:#cfeaff;font:600 12px/1 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;letter-spacing:1px;box-shadow:0 6px 18px rgba(0,0,0,.5),0 0 10px rgba(75,228,255,.14);cursor:pointer;white-space:nowrap;transform:scale(.6);opacity:0;transition:transform .22s cubic-bezier(.34,1.56,.64,1),opacity .18s,border-color .15s,color .15s;z-index:2147483550;}',
       '.xy-orb-radial-btn.show{transform:scale(1);opacity:1;}',
@@ -7404,7 +7393,7 @@
     sidebarBall.id = 'xingyue-sidebar-ball';
     sidebarBall.title = '星月 · 桌宠球（点击展开功能轮盘 · 拖动吸附左右边 · 长按切换收纳深度）';
     const canvas = doc.createElement('canvas');
-    canvas.width = 200; canvas.height = 200; // 3.4.6：2x 物理分辨率(100px CSS)，比 56px 球大，四周留拖尾空间
+    canvas.width = 480; canvas.height = 480; // 3.4.6-r37：2x 物理分辨率(240px CSS)，远大于 56px 球，四周留足空间让被甩离的点阵不被裁
     sidebarBall.appendChild(canvas);
     doc.body.appendChild(sidebarBall);
     try { petOrbRenderer?.destroy(); } catch (_) {}
