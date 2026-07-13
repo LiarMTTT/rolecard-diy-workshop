@@ -15,7 +15,7 @@
 
   红线（勿违反）：① 用户 LLM/绘图 key 必须走 Gateway 代理，前端不出现明文 key；
   ② 成人向绘图选 NovelAI / 自部署 SD，非云商用 API；③ 同人资料只“打开参考链接”不自动抓取。
-  导出包 schema 需与 control_center.js 的 importPackage 对齐：本骨架用 STUDIO_PACKAGE_SCHEMA 占位，集成时核对。
+  导出包 schema 已对齐 shared/workshop-package-contract.js@1.1.0（3.4.2 D8：角色页=user_identity、世界书页=world_factor）。
 -->
 <style>
   :root{
@@ -154,7 +154,7 @@
     </div>
     <div class="card">
       <h3>导出 / 发布 <span class="tag">卡内 importPackage 直接吃</span></h3>
-      <div class="muted">导出的 character 包结构对齐 control_center.js importPackage（STUDIO_PACKAGE_SCHEMA）。</div>
+      <div class="muted">角色页导出身份模板（user_identity）、世界书页导出世界因子（world_factor），均为工坊安全契约正格式，卡内「本地导入」直接吃。</div>
       <div class="ai-row" style="margin-top:10px">
         <button class="primary" data-export>⬇ 导出 .json 包</button>
         <button data-publish>☁ 发布到工坊（需登录）</button>
@@ -180,15 +180,9 @@ const TOKEN_KEY = 'xingyue-workshop-token';          // 与卡内 setWorkshopTok
 const ATTRIBUTE_KEYS = ['格斗','平衡','反应','感知','技巧','精神']; // 与 control_center.js 同源
 const ATTR_TOTAL = 30;
 
-/* 导出包占位 schema —— 集成时须与 control_center.js importPackage 核对字段名 */
-const STUDIO_PACKAGE_SCHEMA = {
-  schema: 'xingyue-workshop-package@1',
-  type: 'character',            // character | world_factor | shop_item | blueprint | recipe | skill | function
-  title: '', author: '',
-  worldbookEntries: [],         // [{ comment, keys, content }] → 卡内 upsertEntries
-  media: [],                    // [{ name, dataUrl|url }] → 媒体库 upsertAsset
-  meta: {}
-};
+/* 导出包已对齐 shared/workshop-package-contract.js@1.1.0：
+   角色页 → user_identity 身份模板（identity/background/appearance/skills/core_attributes/media）
+   世界书页 → world_factor（payload.worldFactors）。旧 worldbookEntries 自造格式已废弃（3.4.2 D8）。 */
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -311,35 +305,79 @@ $$('[data-ai]').forEach(btn => btn.addEventListener('click', () => {
 }));
 
 /* ---- 导出 / 发布 ---- */
+function studioSlug(){
+  const ascii = String(draft.name || draft.wf_name || '').replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 40);
+  return (ascii && /^[a-zA-Z0-9]/.test(ascii) ? ascii + '-' : '') + Date.now().toString(36);
+}
 function buildPackage(){
-  const pkg = JSON.parse(JSON.stringify(STUDIO_PACKAGE_SCHEMA));
-  pkg.type = $('[data-pane="character"]').hidden ? 'world_factor' : 'character';
-  pkg.title = draft.name || draft.wf_name || '未命名创作';
-  pkg.worldbookEntries = buildEntries();
-  if (draft.portrait) pkg.media.push({ name: `${pkg.title}-立绘`, url: draft.portrait });
-  if (draft.avatar) pkg.media.push({ name: `${pkg.title}-气泡头像`, url: draft.avatar });
-  pkg.meta = { createdWith: 'workshop-studio', schemaNote: '集成时核对 control_center.js importPackage 字段' };
-  return pkg;
+  const isCharacter = !$('[data-pane="character"]').hidden;
+  const now = new Date().toISOString();
+  const base = {
+    packageVersion: '1.0.0',
+    cardScope: 'xingyue',
+    language: 'zh-CN',
+    rating: 'general',
+    authorName: '工作台创作',
+    createdAt: now,
+    updatedAt: now,
+  };
+  if (isCharacter){
+    const payload = {};
+    const identityBits = [draft.gender ? `性别 ${draft.gender}` : '', draft.age ? `年龄 ${draft.age}` : ''].filter(Boolean).join('，');
+    if (draft.name) payload.callname = draft.name;
+    payload.identity = [draft.name || '', identityBits].filter(Boolean).join('，') || '自定义身份';
+    if (draft.background) payload.background = draft.background;
+    if (draft.appearance) payload.appearance = draft.appearance;
+    if (draft.skills) payload.skills = draft.skills;
+    if (ATTRIBUTE_KEYS.some(k => draft.attrs[k])) {
+      payload.core_attributes = Object.fromEntries(ATTRIBUTE_KEYS.map(k => [k, Number(draft.attrs[k]) || 0]));
+    }
+    const media = {};
+    if (/^https?:\/\//i.test(draft.avatar || '')) media.avatar = draft.avatar;
+    if (/^https?:\/\//i.test(draft.portrait || '')) media.portrait = draft.portrait;
+    if (Object.keys(media).length) payload.media = media;
+    return {
+      ...base,
+      id: 'identity-' + studioSlug(),
+      type: 'user_identity',
+      title: (draft.name || '未命名身份').slice(0, 120),
+      summary: (draft.background || draft.appearance || '工作台创作的身份模板').slice(0, 600),
+      tags: ['身份模板'],
+      payload,
+    };
+  }
+  const title = (draft.wf_name || '未命名世界因子').slice(0, 120);
+  return {
+    ...base,
+    id: 'wf-' + studioSlug(),
+    type: 'world_factor',
+    title,
+    summary: (draft.wf_content || '工作台创作的世界因子').slice(0, 600),
+    tags: ['世界因子'],
+    payload: { worldFactors: [{ title, content: draft.wf_content || '' }] },
+  };
 }
 $('[data-export]').addEventListener('click', () => {
   const pkg = buildPackage();
   const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `${pkg.title}.xingyue-package.json`;
+  a.download = `${pkg.id}.json`;
   a.click(); URL.revokeObjectURL(a.href);
-  setStatus('已导出包 — 可在卡内开局页「导入工坊包」直接吃', 'ok');
+  setStatus('已导出包 — 在卡内开局页对应分页点「本地导入」直接吃', 'ok');
 });
 $('[data-publish]').addEventListener('click', async () => {
   if (!getToken()){ setStatus('请先 Discord 登录再发布', 'warn'); return; }
   const pkg = buildPackage();
   setStatus('发布中…', '');
   try {
-    const res = await fetch(`${GATEWAY_BASE}/api/workshop/publish`, {
+    const res = await fetch(`${GATEWAY_BASE}/api/workshop/packages`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(pkg)
     });
-    setStatus(res.ok ? '发布成功（待审核）' : '发布失败 HTTP ' + res.status, res.ok ? 'ok' : 'warn');
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) setStatus('发布成功，已直接上架（工坊列表即刻可见）', 'ok');
+    else setStatus('发布失败：' + (body.error || ('HTTP ' + res.status)), 'warn');
   } catch (err) { setStatus('发布请求失败：' + err.message, 'warn'); }
 });
 
