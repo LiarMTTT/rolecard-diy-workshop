@@ -42,6 +42,7 @@ const CHARACTER_ASSET_SPECS = Object.freeze({
   avatar: { stem:'avatar', maxBytes:2 * 1024 * 1024, maxDimension:2048, maxPixels:4 * 1024 * 1024 },
   portraitNormal: { stem:'portrait-normal', maxBytes:8 * 1024 * 1024, maxDimension:4096, maxPixels:16 * 1024 * 1024 },
   portraitNude: { stem:'portrait-nude', maxBytes:8 * 1024 * 1024, maxDimension:4096, maxPixels:16 * 1024 * 1024 },
+  portraitAftermath: { stem:'portrait-aftermath', maxBytes:8 * 1024 * 1024, maxDimension:4096, maxPixels:16 * 1024 * 1024 },
 });
 const characterUploadRateWindows = new Map();
 const activeCharacterUploadOwners = new Set();
@@ -607,6 +608,7 @@ function previewMediaFromPackage(pkg) {
     avatar:String(media.avatar || ''),
     portraitNormal:String(media.portraits?.normal || ''),
     portraitNude:String(media.portraits?.nude || ''),
+    portraitAftermath:String(media.portraits?.aftermath || ''),
   };
   return Object.values(preview).some(Boolean) ? preview : undefined;
 }
@@ -721,6 +723,7 @@ function packageFromCharacterUpload(record, baseUrl = PUBLIC_BASE_URL) {
   if (record.files?.avatar) media.avatar = publicAssetUrl(pkg.id, record.files.avatar.filename, baseUrl);
   if (record.files?.portraitNormal) portraits.normal = publicAssetUrl(pkg.id, record.files.portraitNormal.filename, baseUrl);
   if (record.files?.portraitNude) portraits.nude = publicAssetUrl(pkg.id, record.files.portraitNude.filename, baseUrl);
+  if (record.files?.portraitAftermath) portraits.aftermath = publicAssetUrl(pkg.id, record.files.portraitAftermath.filename, baseUrl);
   media.portraits = portraits;
   pkg.payload.media = media;
   return pkg;
@@ -731,6 +734,7 @@ function characterMediaReference(pkg, slot) {
   if (slot === 'avatar') return String(media.avatar || '');
   if (slot === 'portraitNormal') return String(media.portraits?.normal || '');
   if (slot === 'portraitNude') return String(media.portraits?.nude || '');
+  if (slot === 'portraitAftermath') return String(media.portraits?.aftermath || '');
   return '';
 }
 

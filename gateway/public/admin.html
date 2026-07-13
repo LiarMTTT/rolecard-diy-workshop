@@ -336,7 +336,7 @@
       const host = $('reviewMedia');
       const entries = Object.entries(pkg.reviewAssets || {});
       if (!host || !entries.length) return;
-      const labels = { avatar:'Avatar', portraitNormal:'Normal portrait', portraitNude:'Nude portrait' };
+      const labels = { avatar:'Avatar', portraitNormal:'Normal portrait', portraitNude:'Nude portrait', portraitAftermath:'Aftermath portrait' };
       const cards = await Promise.all(entries.map(async ([slot, url]) => {
         try {
           const res = await fetch(url, { headers:tokenHeaders(), cache:'no-store' });

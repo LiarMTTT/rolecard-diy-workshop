@@ -312,11 +312,13 @@ function normalizeCharacterPayload(payload, { portableMediaOnly = false, allowLe
     if (source.media.portraits !== undefined) {
       if (!isObject(source.media.portraits)) fail('invalid-character-portraits');
       Object.keys(source.media.portraits).forEach(key => {
-        if (key !== 'normal' && key !== 'nude') fail('unknown-character-portrait-field', key);
+        if (key !== 'normal' && key !== 'nude' && key !== 'aftermath') fail('unknown-character-portrait-field', key);
       });
       normalized.media.portraits = {};
       if (source.media.portraits.normal !== undefined) normalized.media.portraits.normal = cleanCharacterMediaReference(source.media.portraits.normal, 'invalid-character-portrait-normal', portableMediaOnly);
       if (source.media.portraits.nude !== undefined) normalized.media.portraits.nude = cleanCharacterMediaReference(source.media.portraits.nude, 'invalid-character-portrait-nude', portableMediaOnly);
+      // 3.4.4：事后立绘为可选追加变体，契约版本保持 1.1.0（additive-optional、向后兼容旧卡）
+      if (source.media.portraits.aftermath !== undefined) normalized.media.portraits.aftermath = cleanCharacterMediaReference(source.media.portraits.aftermath, 'invalid-character-portrait-aftermath', portableMediaOnly);
     }
   }
   return normalized;
