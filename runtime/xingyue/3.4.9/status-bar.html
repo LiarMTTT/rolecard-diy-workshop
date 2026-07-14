@@ -39,6 +39,7 @@
     --theme-low:     rgba(107,199,242,0.16);
   }
 
+  html, body { height: 100%; }
   body {
     margin: 0; padding: 0;
     font-family: 'Courier New', 'Consolas', monospace;
@@ -47,14 +48,17 @@
   }
 
   /* ============ HUD 主容器 (v1.1.6: 左上+右下 切角, 完全固定色) ============ */
+  /* 3.4.9 #2(i): min-height 撑满外壳，消除「壳背景/切角从真身边框外露出」的错位；
+     背景改半透明，让外壳 backdrop-filter 磨砂（3.3.1 深黑玻璃）透过来 */
   .hud-container {
     width: 100%;
     max-width: var(--hud-base-width);
+    min-height: 100%;
     margin: 0 auto;
     box-sizing: border-box;
     padding: 4px;
     position: relative;
-    background: linear-gradient(180deg, var(--hud-bg-1) 0%, var(--hud-bg-2) 100%);
+    background: linear-gradient(180deg, rgba(18,49,74,0.72) 0%, rgba(6,18,27,0.86) 100%);
     border: 1px solid var(--hud-border);
     border-radius: 0;
     --cut: 14px;

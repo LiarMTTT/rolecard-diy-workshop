@@ -6499,6 +6499,7 @@
     host: null,
     blobUrl: null,
     abortController: null,
+    watchdog: null,          // #7：不依赖 iframe load 的兜底超时
     generation: 0,
     contextRevision: 0,
     iframe: null,
@@ -6561,6 +6562,10 @@
     if (hudSession.readyTimer) {
       clearTimeout(hudSession.readyTimer);
       hudSession.readyTimer = null;
+    }
+    if (hudSession.watchdog) {          // #7：换聊天/重载时别让旧看门狗误报
+      clearTimeout(hudSession.watchdog);
+      hudSession.watchdog = null;
     }
     try { hudSession.abortController?.abort(); } catch (_) {}
     hudSession.abortController = null;
@@ -6816,16 +6821,49 @@
     host.__XY_HUD_BRIDGE = hudBridge;
     return hudBridge;
   }
-  function buildHudBlobHtml(html) {
+  // 3.4.9 #7：手机端「状态栏空壳」根因。原实现在 blob iframe 里用 document.write 从 CDN 同步拉 jQuery/lodash：
+  // 壳的 jQuery 绑在壳文档上（probe.ownerDocument===document 必然为 false），所以每次都必然走 CDN；弱网/VPN 下
+  // 同步 <script> 阻塞 iframe 文档解析 → load 事件不触发 → 所有失败兜底（都挂在 load 回调里）永远跑不到 →
+  // loading 又已被 replaceChildren 干掉 → 用户看到一个永久空壳。
+  // 改法：在壳里预取依赖源码（复用 status-bar.html 那套双 CDN 兜底的 fetch），把源码【内联】进 blob；
+  // iframe 侧零网络依赖，jQuery 在 iframe 内自己实例化（正确绑定本文档）。
+  const HUD_LIB_CDNS = ['https://cdn.jsdelivr.net', 'https://testingcf.jsdelivr.net'];
+  const HUD_LIB_PATHS = {
+    jquery: '/npm/jquery@3.7.1/dist/jquery.min.js',
+    lodash: '/npm/lodash@4.17.21/lodash.min.js',
+  };
+  const hudLibCache = { jquery: null, lodash: null };
+  async function fetchHudLibSource(kind, signal) {
+    if (hudLibCache[kind]) return hudLibCache[kind];
     const host = hostWindow();
-    const jqueryUrl = host.XY_HUD_JQUERY_OVERRIDE || window.XY_HUD_JQUERY_OVERRIDE || 'https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js';
-    const lodashUrl = host.XY_HUD_LODASH_OVERRIDE || window.XY_HUD_LODASH_OVERRIDE || 'https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js';
+    const override = kind === 'jquery'
+      ? (host.XY_HUD_JQUERY_OVERRIDE || window.XY_HUD_JQUERY_OVERRIDE)
+      : (host.XY_HUD_LODASH_OVERRIDE || window.XY_HUD_LODASH_OVERRIDE);
+    const urls = override ? [override] : HUD_LIB_CDNS.map(base => base + HUD_LIB_PATHS[kind]);
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, { cache: 'force-cache', signal });
+        if (!res.ok) continue;
+        const src = await res.text();
+        if (src && src.length > 1000) { hudLibCache[kind] = src; return src; }
+      } catch (_) {
+        if (signal?.aborted) return null;
+      }
+    }
+    return null;
+  }
+  // 内联源码里若出现 </script> 会提前闭合 blob 里的 script 标签，必须转义
+  function escapeInlineScript(src) {
+    return String(src || '').replace(/<\/script>/gi, '<\\/script>');
+  }
+  function buildHudBlobHtml(html, libSources) {
+    const jqSrc = escapeInlineScript(libSources?.jquery);
+    const lodashSrc = escapeInlineScript(libSources?.lodash);
     const libs = '<script>(function(){var B=(window.parent&&window.parent.__XY_HUD_BRIDGE)||null;var f=B&&B.fns||{};'
-      + 'try{var jq=f.jQuery||f.$;var probe=jq&&jq("<i>")[0];if(probe&&probe.ownerDocument===document){window.jQuery=jq;window.$=jq;}}catch(e){}'
-      + 'if(!window._&&f._)window._=f._;'
-      + 'if(!window.jQuery)document.write(\'<script src="' + String(jqueryUrl).replace(/"/g, '&quot;') + '"><\\/script>\');'
-      + 'if(!window._)document.write(\'<script src="' + String(lodashUrl).replace(/"/g, '&quot;') + '"><\\/script>\');'
-      + '})();<\/script>';
+      + 'if(!window._&&f._)window._=f._;'   // lodash 是纯函数库、不绑文档 → 能直接借壳的，借不到才用下面内联的
+      + '})();<\/script>'
+      + (jqSrc ? '<script>' + jqSrc + '<\/script>' : '')
+      + (lodashSrc ? '<script>if(!window._){' + lodashSrc + '}<\/script>' : '');
     // ⑦⑨b：真身文档撑满 iframe 视口（杀文档级滚动条，绘制矩形恒等于外壳矩形，右下握把天然贴角）；
     // 注入点在真身样式之前，同权重会被真身盖回——布局声明必须带 !important（审查实锤雷）。
     const shellFit = '<style>'
@@ -6922,12 +6960,13 @@
       '#xingyue-hud-panel .xy-hud-resize::before{content:"";position:absolute;right:3px;bottom:3px;width:24px;height:24px;background:rgba(75,228,255,.76);clip-path:polygon(100% 0,100% 6px,6px 100%,0 100%,0 calc(100% - 3px),calc(100% - 3px) 0);filter:drop-shadow(0 0 6px rgba(75,228,255,.38));}',
       '#xingyue-hud-panel .xy-hud-resize::after{content:"";position:absolute;right:9px;bottom:9px;width:13px;height:13px;background:rgba(207,243,255,.34);clip-path:polygon(100% 0,100% 3px,3px 100%,0 100%,0 calc(100% - 2px),calc(100% - 2px) 0);}',
       '#xingyue-hud-panel:hover .xy-hud-resize{opacity:1;}',
-      '#xingyue-hud-panel .xy-hud-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6f9daf;font:12px/1.6 Consolas,monospace;letter-spacing:1px;background:rgba(4,8,14,.9);border:1px solid rgba(107,199,242,.3);border-radius:0;clip-path:inherit;}',
+      '#xingyue-hud-panel .xy-hud-loading{position:absolute;inset:0;z-index:4;display:flex;align-items:center;justify-content:center;color:#6f9daf;font:12px/1.6 Consolas,monospace;letter-spacing:1px;background:rgba(4,8,14,.9);border:1px solid rgba(107,199,242,.3);border-radius:0;clip-path:inherit;}',
     ].join('');
     (doc.head || doc.body).appendChild(style);
   }
   function failHudLoad(hostEl, message) {
     setHudPhase('failed');
+    if (hudSession.watchdog) { clearTimeout(hudSession.watchdog); hudSession.watchdog = null; }
     let loading = hostEl?.querySelector?.('.xy-hud-loading');
     if (!loading) {
       const body = hostEl?.querySelector?.('.xy-hud-body');
@@ -6939,11 +6978,11 @@
     }
     if (loading) loading.textContent = message || '状态栏远程组件加载失败，请检查网络后重试。';
   }
-  function mountHudBody(html, expectedHost, generation, signal) {
+  function mountHudBody(html, expectedHost, generation, signal, libSources) {
     const hostEl = currentHudHost();
     if (!hostEl || hostEl !== expectedHost || signal?.aborted || generation !== hudSession.generation) return false;
     const bridge = publishHudBridge();
-    html = buildHudBlobHtml(html);
+    html = buildHudBlobHtml(html, libSources);
     try {
       if (hudSession.blobUrl) URL.revokeObjectURL(hudSession.blobUrl);
       hudSession.blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
@@ -6976,6 +7015,8 @@
         if (healthy) {
           hudSession.readyTimer = null;
           hudSession.abortController = null;
+          if (hudSession.watchdog) { clearTimeout(hudSession.watchdog); hudSession.watchdog = null; }
+          expectedHost.querySelector?.('.xy-hud-loading')?.remove();   // #7：握手成功才摘「加载中」
           setHudPhase('ready');
           emitHudSignal('data-changed', { force: true });
           return;
@@ -6990,9 +7031,38 @@
       };
       checkReady();
     }, { once: true });
+    // #7：iframe 自身加载失败（blob 被拦等）也要报出来，不许静默
+    frame.addEventListener('error', () => {
+      if (generation !== hudSession.generation || hudSession.iframe !== frame) return;
+      failHudLoad(expectedHost, '状态栏面板加载失败（iframe error），请重试。');
+    }, { once: true });
+
     hudSession.iframe = frame;
     hudSession.host = hostEl;
+
+    // #7：「加载中」不再被 replaceChildren 干掉 —— 它盖在 iframe 之上（CSS z-index），握手成功才摘。
+    // 这样即使 iframe 白屏，用户至少看得见「加载中」，超时后还能看到明确报错。
+    const doc = hostEl.ownerDocument;
+    let loading = body.querySelector('.xy-hud-loading');
     body.replaceChildren(frame);
+    if (!loading) {
+      loading = doc.createElement('div');
+      loading.className = 'xy-hud-loading';
+      loading.textContent = '〔 OMNI-NEXUS 〕状态栏加载中…';
+    }
+    body.appendChild(loading);
+
+    // #7：看门狗【不挂在 load 回调里】—— 即便 iframe 的 load 永远不触发（脚本阻塞解析 / blob 被 CSP 拦），
+    // 也一定会超时报错，不再留一个永久空壳。
+    if (hudSession.watchdog) clearTimeout(hudSession.watchdog);
+    hudSession.watchdog = setTimeout(() => {
+      hudSession.watchdog = null;
+      if (signal?.aborted || generation !== hudSession.generation
+        || currentHudHost() !== expectedHost || hudSession.iframe !== frame) return;
+      if (hudSession.phase === 'ready') return;
+      failHudLoad(expectedHost, '状态栏加载超时：远程组件或依赖未能就绪，请检查网络后重试。');
+    }, 20000);
+
     return true;
   }
   async function fetchHudBody() {
@@ -7015,7 +7085,13 @@
         if (!response.ok) throw new Error('HTTP ' + response.status);
         const html = await response.text();
         if (controller.signal.aborted || generation !== hudSession.generation || currentHudHost() !== hostEl) return;
-        if (mountHudBody(html, hostEl, generation, controller.signal)) return;
+        // #7：在壳里预取依赖源码（双 CDN 兜底），内联进 blob → iframe 侧不再有任何网络依赖
+        const libSources = {
+          jquery: await fetchHudLibSource('jquery', controller.signal),
+          lodash: await fetchHudLibSource('lodash', controller.signal),
+        };
+        if (controller.signal.aborted || generation !== hudSession.generation || currentHudHost() !== hostEl) return;
+        if (mountHudBody(html, hostEl, generation, controller.signal, libSources)) return;
       } catch (error) {
         if (controller.signal.aborted || error?.name === 'AbortError') return;
       }
@@ -7133,25 +7209,39 @@
     const style = doc.createElement('style');
     style.id = STATUS_HUD_DRAWER_STYLE_ID;
     style.textContent = [
-      '#' + STATUS_HUD_DRAWER_ID + '{--xy-hud-drawer-y:0px;--xy-hud-drawer-max:100dvh;position:fixed;left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));top:var(--xy-hud-drawer-y);bottom:auto;z-index:2147483535;pointer-events:none;color:#d9f4ff;font:12px/1.45 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;}',
+      // 3.4.9 #2：抽屉改「拉出式」—— 完整面板整体从显示区外滑进来，把手跟着拉出的边缘走。
+      // --xy-hud-open-h = 当前拉出多少；--xy-hud-handle-x = 把手水平位置（可拖动 + 吸附）。
+      '#' + STATUS_HUD_DRAWER_ID + '{--xy-hud-drawer-y:0px;--xy-hud-drawer-max:100dvh;--xy-hud-open-h:0px;--xy-hud-handle-x:50%;position:fixed;left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));top:var(--xy-hud-drawer-y);bottom:auto;z-index:2147483535;pointer-events:none;color:#d9f4ff;font:12px/1.45 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;}',
       '#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"]{top:var(--xy-hud-drawer-y);bottom:auto;}',
-      '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle{position:absolute;top:0;left:50%;transform:translateX(-50%);pointer-events:auto;min-width:116px;height:30px;padding:0 18px;border:1px solid rgba(107,199,242,.5);border-top:none;border-radius:0 0 12px 12px;background:linear-gradient(180deg,rgba(8,18,30,.96),rgba(4,9,16,.96));color:#cfeaff;box-shadow:0 8px 22px rgba(0,0,0,.42),0 0 14px rgba(75,228,255,.16);cursor:pointer;letter-spacing:1px;touch-action:none;}',
-      '#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"] .xy-hud-drawer-handle{top:auto;bottom:0;border-top:1px solid rgba(107,199,242,.5);border-bottom:none;border-radius:12px 12px 0 0;background:linear-gradient(0deg,rgba(8,18,30,.96),rgba(4,9,16,.96));box-shadow:0 -8px 22px rgba(0,0,0,.42),0 0 14px rgba(75,228,255,.16);}',
+      // 裁切窗：高度=拉出多少。面板贴它的【远端】(下抽=bottom:0 / 上抽=top:0)，所以露出来的永远是完整面板的一截，
+      // 而不是被硬切断的断面（贴近端就会变成"残疾"卷帘）。
+      '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-clip{position:absolute;left:0;right:0;top:0;height:var(--xy-hud-open-h);overflow:hidden;pointer-events:none;transition:height var(--xy-hud-drawer-ms,200ms) cubic-bezier(.22,.61,.36,1);}',
+      '#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"] .xy-hud-drawer-clip{top:auto;bottom:0;}',
+      '#' + STATUS_HUD_DRAWER_ID + '.xy-hud-dragging .xy-hud-drawer-clip,#' + STATUS_HUD_DRAWER_ID + '.xy-hud-anim .xy-hud-drawer-clip{transition:none;}',
+      '#' + STATUS_HUD_DRAWER_ID + '.xy-hud-spring .xy-hud-drawer-clip{transition-timing-function:cubic-bezier(.34,1.56,.64,1);}',
+      // 把手 = 抽屉把手：跟着拉出的边缘走（top/bottom = --xy-hud-open-h），不再压在面板顶上；
+      // 样式换成状态栏同款语言（切角 11px / HUD 边框色 / HUD 渐变底 / 等宽字），不再是圆角蓝按钮。
+      '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle{position:absolute;top:var(--xy-hud-open-h);left:var(--xy-hud-handle-x);transform:translateX(-50%);pointer-events:auto;min-width:0;height:30px;padding:0 12px;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;border:1px solid #2d6d86;border-top:none;border-radius:0;clip-path:polygon(0 0,100% 0,100% calc(100% - 11px),calc(100% - 11px) 100%,11px 100%,0 calc(100% - 11px));background:linear-gradient(180deg,rgba(18,49,74,.94),rgba(6,18,27,.96));color:#d9f4ff;font:12px/1 "Courier New",Consolas,monospace;letter-spacing:2px;box-shadow:0 6px 18px rgba(0,0,0,.45),0 0 12px rgba(107,199,242,.18);cursor:grab;touch-action:none;transition:top var(--xy-hud-drawer-ms,200ms) cubic-bezier(.22,.61,.36,1),left 220ms cubic-bezier(.22,.61,.36,1);}',
+      '#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"] .xy-hud-drawer-handle{top:auto;bottom:var(--xy-hud-open-h);border-top:1px solid #2d6d86;border-bottom:none;clip-path:polygon(0 11px,11px 0,calc(100% - 11px) 0,100% 11px,100% 100%,0 100%);background:linear-gradient(0deg,rgba(18,49,74,.94),rgba(6,18,27,.96));box-shadow:0 -6px 18px rgba(0,0,0,.45),0 0 12px rgba(107,199,242,.18);transition:bottom var(--xy-hud-drawer-ms,200ms) cubic-bezier(.22,.61,.36,1),left 220ms cubic-bezier(.22,.61,.36,1);}',
+      '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle:active{cursor:grabbing;}',
+      '#' + STATUS_HUD_DRAWER_ID + '.xy-hud-dragging .xy-hud-drawer-handle,#' + STATUS_HUD_DRAWER_ID + '.xy-hud-anim .xy-hud-drawer-handle{transition:none;}',
+      '#' + STATUS_HUD_DRAWER_ID + '.xy-hud-spring .xy-hud-drawer-handle{transition-timing-function:cubic-bezier(.34,1.56,.64,1);}',
       '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle::after{content:"";display:inline-block;margin-left:8px;border:5px solid transparent;border-top-color:currentColor;vertical-align:-3px;transition:transform .18s;}',
       '#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"] .xy-hud-drawer-handle::after{border-top-color:transparent;border-bottom-color:currentColor;vertical-align:2px;}',
       '#' + STATUS_HUD_DRAWER_ID + '[data-open="1"] .xy-hud-drawer-handle::after{transform:rotate(180deg) translateY(3px);}',
-      '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-panel{position:absolute;top:0;left:0;right:0;height:min(76dvh,680px,var(--xy-hud-drawer-max));max-height:var(--xy-hud-drawer-max);min-height:min(360px,var(--xy-hud-drawer-max));background:rgba(6,10,16,.66);backdrop-filter:blur(14px) saturate(1.12);-webkit-backdrop-filter:blur(14px) saturate(1.12);clip-path:polygon(12px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 12px);box-shadow:0 16px 46px rgba(0,0,0,.55),0 0 24px rgba(107,199,242,.22);opacity:0;transform:translateY(-16px);pointer-events:none;transition:opacity .18s ease,transform .2s cubic-bezier(.34,1.56,.64,1);}',
-      '#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"] .xy-hud-drawer-panel{top:auto;bottom:0;max-height:var(--xy-hud-drawer-max);transform:translateY(16px);box-shadow:0 -16px 46px rgba(0,0,0,.55),0 0 24px rgba(107,199,242,.22);clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,12px 100%,0 calc(100% - 12px));}',
-      '#' + STATUS_HUD_DRAWER_ID + '[data-open="1"] .xy-hud-drawer-panel{opacity:1;transform:translateY(0);pointer-events:auto;}',
-      '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-body{position:absolute;left:0;right:0;top:28px;bottom:0;}',
-      '#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"] .xy-hud-body{top:0;bottom:30px;}',
+      // 面板贴裁切窗的【远端】：下抽 → bottom:0（完整面板从上方滑入）；上抽 → top:0（从下方滑入）。
+      // 不再用 opacity/translateY 渐隐——那是"整块淡出来"，不是"被拉出来"。切角统一 14px，与真身 .hud-container 对齐。
+      '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-panel{position:absolute;left:0;right:0;bottom:0;top:auto;height:min(76dvh,680px,var(--xy-hud-drawer-max));max-height:var(--xy-hud-drawer-max);min-height:min(360px,var(--xy-hud-drawer-max));background:rgba(6,10,16,.66);backdrop-filter:blur(14px) saturate(1.12);-webkit-backdrop-filter:blur(14px) saturate(1.12);clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px);box-shadow:0 16px 46px rgba(0,0,0,.55),0 0 24px rgba(107,199,242,.22);pointer-events:auto;}',
+      '#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"] .xy-hud-drawer-panel{bottom:auto;top:0;box-shadow:0 -16px 46px rgba(0,0,0,.55),0 0 24px rgba(107,199,242,.22);clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px));}',
+      // #2：把手挪到拉出边缘之后，面板顶部不用再给它让位 → 那条 28px/42px 的整宽空带自然消失
+      '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-body{position:absolute;inset:0;}',
       '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-body iframe{position:absolute;inset:0;width:100%;height:100%;border:0;}',
-      '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6f9daf;font:12px/1.6 Consolas,monospace;letter-spacing:1px;background:rgba(4,8,14,.88);border:1px solid rgba(107,199,242,.3);}',
+      '#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-loading{position:absolute;inset:0;z-index:4;display:flex;align-items:center;justify-content:center;color:#6f9daf;font:12px/1.6 Consolas,monospace;letter-spacing:1px;background:rgba(4,8,14,.88);border:1px solid rgba(107,199,242,.3);}',
       '@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-panel{background:rgba(6,10,16,.94);}}',
       '@media(max-width:768px){#' + STATUS_HUD_DRAWER_ID + '{left:0;right:0;}#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-panel{height:min(82dvh,720px,var(--xy-hud-drawer-max));max-height:var(--xy-hud-drawer-max);min-height:min(420px,var(--xy-hud-drawer-max));clip-path:none;}#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"] .xy-hud-drawer-panel{max-height:var(--xy-hud-drawer-max);min-height:min(420px,var(--xy-hud-drawer-max));}}',
-      '@media(pointer:coarse){#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle{height:44px;min-height:44px;}#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-body{top:42px;}#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"] .xy-hud-body{top:0;bottom:44px;}}',
-      '@media(max-width:768px){#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle{height:44px;min-height:44px;}#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-body{top:42px;}#' + STATUS_HUD_DRAWER_ID + '[data-placement="bottom"] .xy-hud-body{top:0;bottom:44px;}}',
-      '@media(prefers-reduced-motion:reduce){#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-panel,#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle::after{transition:none !important;}}',
+      '@media(pointer:coarse){#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle{height:44px;min-height:44px;}}',
+      '@media(max-width:768px){#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle{height:44px;min-height:44px;}}',
+      '@media(prefers-reduced-motion:reduce){#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-clip,#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle,#' + STATUS_HUD_DRAWER_ID + ' .xy-hud-drawer-handle::after{transition:none !important;}}',
     ].join('');
     (doc.head || doc.body).appendChild(style);
   }
@@ -7214,34 +7304,193 @@
       drawer.style.setProperty('--xy-hud-drawer-max', Math.max(44, Math.round(available)) + 'px');
     } catch (_) {}
   }
+  // 3.4.9 #2：抽屉拉出物理。参数由校准沙盘拨定（总监 2026-07-14 定案），改这里前先过沙盘。
+  const HUD_DRAWER_TUNE = Object.freeze({
+    follow: 1.00,      // 跟手系数：拖多少露多少
+    closeAt: 32,       // 收起阈值(px)：停在这条线以下就归零，免得留个难看的小缝
+    settleMs: 200,     // 落位动画
+    friction: 0.94,    // 滑行摩擦：松手后按残余速度再滑一段
+    overMax: 40,       // 最大超冲(px)：快拖到底能"滑出去"多少
+    rubber: 0.32,      // 橡皮筋阻尼：手指拖过头时越拖越沉
+    springMs: 260,     // 回弹时长（走弹性过冲曲线）
+    snapPull: 12,      // 左右吸附吸力范围(%)
+    edges: [12, 88],   // 左右＝自由 + 边缘吸附
+  });
+  const HUD_HANDLE_X_KEY = 'xingyue:hud:handleX';
+  let hudDrawerRaf = 0;
+
+  function drawerPanelHeight(drawer) {
+    const h = drawer?.querySelector?.('.xy-hud-drawer-panel')?.offsetHeight || 0;
+    return h > 40 ? h : 360;
+  }
+  function drawerOpenH(drawer) {
+    const v = parseFloat(drawer?.style?.getPropertyValue('--xy-hud-open-h') || '0');
+    return Number.isFinite(v) ? v : 0;
+  }
+  function setDrawerOpenH(drawer, h, max, allowOver) {
+    const hi = allowOver ? max + HUD_DRAWER_TUNE.overMax : max;
+    const v = Math.max(0, Math.min(hi, h));
+    drawer.style.setProperty('--xy-hud-open-h', v + 'px');
+    const open = v > 2;
+    if ((drawer.dataset.open === '1') !== open) {       // 只在开合状态真的翻转时才通知，别每帧都喊
+      drawer.dataset.open = open ? '1' : '0';
+      drawer.querySelector('.xy-hud-drawer-panel')?.setAttribute('aria-hidden', open ? 'false' : 'true');
+      setHudVisibility(open);
+    }
+    return v;
+  }
+  function stopDrawerAnim(drawer) {
+    if (hudDrawerRaf) cancelAnimationFrame(hudDrawerRaf);
+    hudDrawerRaf = 0;
+    drawer.classList.remove('xy-hud-anim');
+  }
+  function ensureDrawerBodyLoading(drawer) {
+    const body = drawer.querySelector('.xy-hud-body');
+    if (body && !body.firstElementChild) {
+      body.innerHTML = '<div class="xy-hud-loading">〔 OMNI-NEXUS 〕状态栏加载中…</div>';
+    }
+    if (hudSession.phase === 'idle' || hudSession.phase === 'failed') fetchHudBody();
+  }
+  /* 落位：把控制权交回 CSS 过渡（springy＝走弹性过冲曲线） */
+  function landDrawer(drawer, target, ms, springy, max) {
+    stopDrawerAnim(drawer);
+    void drawer.offsetHeight;                                  // 强制回流，否则刚摘掉 .xy-hud-anim 的过渡不会跑
+    drawer.classList.toggle('xy-hud-spring', !!springy);
+    drawer.style.setProperty('--xy-hud-drawer-ms', ms + 'ms');
+    setDrawerOpenH(drawer, target, max, false);
+    setTimeout(() => drawer.classList.remove('xy-hud-spring'), ms + 60);
+    if (target > 2) ensureDrawerBodyLoading(drawer);
+  }
+  /* 松手后的物理：慢拖＝滑一小段停住(悬停)；快拖＝冲到底、滑出去一截、再被弹回来 */
+  function flingDrawer(drawer, v0, max) {
+    stopDrawerAnim(drawer);
+    drawer.classList.add('xy-hud-anim');
+    const T = HUD_DRAWER_TUNE;
+    let v = v0, h = drawerOpenH(drawer), last = performance.now();
+    const step = now => {
+      const dt = Math.min(34, now - last); last = now;
+      v *= Math.pow(T.friction, dt / 16.67);
+      h += v * dt;
+      if (h > max + 0.5) {                                     // 冲过头 → 先滑出去，下一帧拉回来
+        setDrawerOpenH(drawer, max + Math.min(T.overMax, (h - max) * T.rubber), max, true);
+        requestAnimationFrame(() => landDrawer(drawer, max, T.springMs, true, max));
+        return;
+      }
+      if (h <= 0) { landDrawer(drawer, 0, T.springMs, true, max); return; }
+      setDrawerOpenH(drawer, h, max, false);
+      if (Math.abs(v) < 0.015) {                               // 滑到停 → 纯悬停（低于收起阈值才归零）
+        landDrawer(drawer, h < T.closeAt ? 0 : Math.min(h, max), T.settleMs, false, max);
+        return;
+      }
+      hudDrawerRaf = requestAnimationFrame(step);
+    };
+    hudDrawerRaf = requestAnimationFrame(step);
+  }
+  function snapHandleX(drawer, pct) {
+    const T = HUD_DRAWER_TUNE;
+    let best = pct;
+    for (const e of T.edges) {                                 // 自由 + 边缘吸附
+      if (Math.abs(e - pct) <= T.snapPull) { best = e; break; }
+    }
+    drawer.style.setProperty('--xy-hud-handle-x', best + '%');
+    try { localStorage.setItem(HUD_HANDLE_X_KEY, String(best)); } catch (_) {}
+  }
+  function restoreHandleX(drawer) {
+    let x = 50;
+    try {
+      const saved = parseFloat(localStorage.getItem(HUD_HANDLE_X_KEY));
+      if (Number.isFinite(saved) && saved >= 6 && saved <= 94) x = saved;
+    } catch (_) {}
+    drawer.style.setProperty('--xy-hud-handle-x', x + '%');
+  }
+
   function bindStatusDrawerHandle(handle) {
     if (!handle || handle.dataset.xyHudGestureBound === '1') return;
     handle.dataset.xyHudGestureBound = '1';
-    let startY = null;
-    let swiped = false;
+    const T = HUD_DRAWER_TUNE;
+    let drag = null;
+
     handle.addEventListener('pointerdown', event => {
-      startY = event.clientY;
-      swiped = false;
+      const drawer = prepareDrawerMode();     // 从浮窗态直接拖把手时，前置也要走到
+      if (!drawer) return;
+      stopDrawerAnim(drawer);
+      drawer.classList.remove('xy-hud-spring');
+      drag = {
+        drawer,
+        placement: effectiveStatusHudDrawerPlacement(),
+        x0: event.clientX, y0: event.clientY,
+        startH: drawerOpenH(drawer),
+        startX: parseFloat(drawer.style.getPropertyValue('--xy-hud-handle-x')) || 50,
+        max: drawerPanelHeight(drawer),
+        w: Math.max(1, drawer.getBoundingClientRect().width),
+        axis: null, moved: false,
+        track: [{ y: event.clientY, t: performance.now() }],
+      };
+      drawer.classList.add('xy-hud-dragging');
       try { handle.setPointerCapture(event.pointerId); } catch (_) {}
     });
-    handle.addEventListener('pointerup', event => {
-      if (startY == null) return;
-      const dy = event.clientY - startY;
-      startY = null;
-      if (Math.abs(dy) < 34) return;
-      swiped = true;
-      event.preventDefault();
-      event.stopPropagation();
-      const placement = effectiveStatusHudDrawerPlacement();
-      if ((placement === 'bottom' && dy < 0) || (placement !== 'bottom' && dy > 0)) openStatusDrawer(true);
-      else closeStatusDrawer();
+
+    handle.addEventListener('pointermove', event => {
+      if (!drag) return;
+      const dx = event.clientX - drag.x0;
+      const dyRaw = event.clientY - drag.y0;
+      const dy = drag.placement === 'bottom' ? -dyRaw : dyRaw;   // 上抽屉：往上拖才是"拉出"
+      if (Math.abs(dx) > 3 || Math.abs(dyRaw) > 3) drag.moved = true;
+      if (!drag.axis && (Math.abs(dx) > 6 || Math.abs(dyRaw) > 6)) {
+        drag.axis = Math.abs(dyRaw) >= Math.abs(dx) ? 'y' : 'x';
+      }
+      if (drag.axis === 'y') {
+        drag.track.push({ y: event.clientY, t: performance.now() });
+        if (drag.track.length > 6) drag.track.shift();
+        let h = drag.startH + dy * T.follow;
+        if (h > drag.max) h = drag.max + Math.min(T.overMax, (h - drag.max) * T.rubber);   // 过头变沉
+        setDrawerOpenH(drag.drawer, h, drag.max, true);
+        event.preventDefault();
+      } else if (drag.axis === 'x') {
+        const pct = Math.max(6, Math.min(94, drag.startX + (dx / drag.w) * 100));
+        drag.drawer.style.setProperty('--xy-hud-handle-x', pct + '%');
+        event.preventDefault();
+      }
     });
-    handle.addEventListener('pointercancel', () => { startY = null; });
-    handle.addEventListener('click', event => {
+
+    handle.addEventListener('pointerup', event => {
+      if (!drag) return;
+      const d = drag; drag = null;
+      d.drawer.classList.remove('xy-hud-dragging');
+
+      if (d.axis === 'y') {
+        event.preventDefault();
+        event.stopPropagation();
+        let v = 0;                                            // 松手速度 px/ms（取最近几帧）
+        if (d.track.length >= 2) {
+          const a = d.track[0], b = d.track[d.track.length - 1];
+          const dt = b.t - a.t;
+          if (dt > 4) {
+            v = (b.y - a.y) / dt * T.follow;
+            if (d.placement === 'bottom') v = -v;
+          }
+        }
+        flingDrawer(d.drawer, v, d.max);
+      } else if (d.axis === 'x') {
+        event.preventDefault();
+        event.stopPropagation();
+        snapHandleX(d.drawer, parseFloat(d.drawer.style.getPropertyValue('--xy-hud-handle-x')) || 50);
+      } else if (!d.moved) {
+        const cur = drawerOpenH(d.drawer);                     // 点一下＝全开 / 收起
+        landDrawer(d.drawer, cur > 2 ? 0 : d.max, T.settleMs, false, d.max);
+      }
+    });
+
+    handle.addEventListener('pointercancel', () => {
+      if (!drag) return;
+      const d = drag; drag = null;
+      d.drawer.classList.remove('xy-hud-dragging');
+      landDrawer(d.drawer, d.startH, T.settleMs, false, d.max);
+    });
+
+    handle.addEventListener('click', event => {                // 开合走 pointerup，click 只负责别冒泡出去
       event.preventDefault();
       event.stopPropagation();
-      if (swiped) { swiped = false; return; }
-      openStatusHud('drawer');
     });
   }
   function ensureStatusDrawerHandle() {
@@ -7257,9 +7506,11 @@
       hudDrawer = doc.createElement('div');
       hudDrawer.id = STATUS_HUD_DRAWER_ID;
       hudDrawer.dataset.open = '0';
-      hudDrawer.innerHTML = '<button type="button" class="xy-hud-drawer-handle" title="状态栏">状态栏</button><section class="xy-hud-drawer-panel" aria-hidden="true"><div class="xy-hud-body"></div></section>';
+      // #2：裁切窗包住面板；把手放在裁切窗【之后】（DOM 序靠后＝压在上层），并跟着拉出的边缘走
+      hudDrawer.innerHTML = '<div class="xy-hud-drawer-clip"><section class="xy-hud-drawer-panel" aria-hidden="true"><div class="xy-hud-body"></div></section></div><button type="button" class="xy-hud-drawer-handle" title="状态栏（上下拖动拉出 / 左右拖动移位）">状态栏</button>';
       doc.body.appendChild(hudDrawer);
     }
+    restoreHandleX(hudDrawer);      // #2：记住上次把手拖到的水平位置
     bindStatusDrawerHandle(hudDrawer.querySelector('.xy-hud-drawer-handle'));
     syncStatusDrawerPosition();
     return hudDrawer;
@@ -7268,12 +7519,11 @@
     const drawer = hudDrawer || hostDocument().getElementById(STATUS_HUD_DRAWER_ID);
     if (!drawer) return;
     hudDrawer = drawer;
-    drawer.dataset.open = '0';
-    const panel = drawer.querySelector('.xy-hud-drawer-panel');
-    if (panel) panel.setAttribute('aria-hidden', 'true');
-    setHudVisibility(false);
+    landDrawer(drawer, 0, HUD_DRAWER_TUNE.settleMs, false, drawerPanelHeight(drawer));
   }
-  function openStatusDrawer(forceOpen) {
+  // #2：抽屉模式前置（销毁浮窗 / 切 mode / 绑 host）。拖拽起手也要走一遍——
+  // 否则从浮窗态直接拖把手会绕过这些前置。
+  function prepareDrawerMode() {
     const oldPanel = hudPanel || hostDocument().getElementById('xingyue-hud-panel');
     if (oldPanel || hudSession.mode === 'orb') {
       resetHudLoad();
@@ -7282,19 +7532,18 @@
     hudSession.mode = 'drawer';
     const drawer = ensureStatusDrawerHandle();
     hudSession.host = drawer;
+    return drawer;
+  }
+  function openStatusDrawer(forceOpen) {
+    const drawer = prepareDrawerMode();
     const isOpen = drawer.dataset.open === '1';
     if (isOpen) {
       if (forceOpen === true) { setHudVisibility(true); return; }
       closeStatusDrawer();
       return;
     }
-    drawer.dataset.open = '1';
-    const panel = drawer.querySelector('.xy-hud-drawer-panel');
-    if (panel) panel.setAttribute('aria-hidden', 'false');
-    const body = drawer.querySelector('.xy-hud-body');
-    if (body && !body.firstElementChild) body.innerHTML = '<div class="xy-hud-loading">〔 OMNI-NEXUS 〕状态栏加载中…</div>';
-    setHudVisibility(true);
-    if (hudSession.phase === 'idle' || hudSession.phase === 'failed') fetchHudBody();
+    const max = drawerPanelHeight(drawer);
+    landDrawer(drawer, max, HUD_DRAWER_TUNE.settleMs, false, max);   // 内含 loading 占位 + fetchHudBody
   }
   function destroyFloatingHudPanel() {
     const oldPanel = hudPanel || hostDocument().getElementById('xingyue-hud-panel');
