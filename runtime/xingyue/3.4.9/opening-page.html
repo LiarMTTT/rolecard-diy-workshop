@@ -724,6 +724,17 @@
 @container (max-width:980px){.xy-opening-page .identity-pane .xy-identity-media-grid{grid-column:1!important;grid-row:auto!important}}
 .xy-opening-page .xy-view[data-xy-view="wizard"] [data-xy-enabled-preview][data-xy-empty="1"]{flex:0 0 auto;min-height:0;place-items:start;text-align:left}
 @container (max-width:700px){.xy-opening-page .xy-view[data-xy-view="wizard"]>.xy-steps{max-width:calc(100% - 92px)!important;margin-left:0}}
+/* ===== 3.4.9 #3 响应式横排（空间够横排、不足才换行；抄状态栏横向瀑布流自适应） ===== */
+/* 1) 当前 Persona：导入/同步按钮排到 copy 右侧，空间不足才换到下一行 */
+.xy-opening-page .xy-persona-sync-card{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.xy-opening-page .xy-persona-sync-copy{flex:1 1 240px;min-width:0}
+.xy-opening-page .xy-persona-sync-card .xy-actions.compact-actions{grid-column:auto;flex:0 0 auto;margin:0}
+/* 2) 核心属性：滑条列表 + 六维图同排自适应，窄了才换行 */
+.xy-opening-page .identity-pane .xy-attribute-grid{display:flex!important;flex-wrap:wrap;align-items:flex-start;gap:12px;grid-template-columns:none!important}
+.xy-opening-page .identity-pane .xy-attribute-list{flex:1 1 300px;min-width:0}
+.xy-opening-page .identity-pane .xy-radar-card{flex:0 1 210px;max-width:none;width:auto}
+/* 3) 开局确认 rail：横向瀑布流 auto-fit（空间够多列、不足自动减列到单列） */
+.xy-opening-page .xy-preview-rail{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))!important}
 </style>
 
 <div class="xy-opening-loading" data-xy-loading><div class="xy-loading-core"><span class="xy-loading-ring"></span><span class="xy-loading-text">星月学园 · 载入中</span></div></div>
