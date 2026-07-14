@@ -735,6 +735,8 @@
 .xy-opening-page .identity-pane .xy-radar-card{flex:0 1 210px;max-width:none;width:auto}
 /* 3) 开局确认 rail：横向瀑布流 auto-fit（空间够多列、不足自动减列到单列） */
 .xy-opening-page .xy-preview-rail{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))!important}
+/* 4) 头像/立绘：auto-fit 自适应，够宽就并排（原 680px 断点太高、有空间也换行） */
+.xy-opening-page .xy-identity-media-grid{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))!important}
 </style>
 
 <div class="xy-opening-loading" data-xy-loading><div class="xy-loading-core"><span class="xy-loading-ring"></span><span class="xy-loading-text">星月学园 · 载入中</span></div></div>

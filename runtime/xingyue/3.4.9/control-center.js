@@ -10712,7 +10712,7 @@
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
   const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
-  const OPENING_PAGE_SHA256 = 'bbaa7399244181441dcd56fb89866498720a6da2c7cc4b171b9cb65ea0341eab';
+  const OPENING_PAGE_SHA256 = '335cb1cf875523039f26c1362af9716c48bb142b2e23cea834a45c3368a8de8d';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.9/opening-page.html?v=' + OPENING_PAGE_REVISION,
