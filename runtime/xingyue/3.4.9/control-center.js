@@ -1793,7 +1793,10 @@
     const identity = Object.prototype.hasOwnProperty.call(options, 'identity')
       ? String(options.identity ?? '').trim()
       : String(identityContent(sourceDraft) || '').trim();
-    return [story, identity].filter(Boolean).join('\n\n');
+    // 3.4.9 #4a：世界因子发送到输入（像身份一样进玩家开局发言，让被选因子真正生效，非污染正文）
+    const wf = String(worldFactorContent(sourceDraft) || '').trim();
+    const worldFactorSection = wf ? '【世界因子】\n' + wf : '';
+    return [story, identity, worldFactorSection].filter(Boolean).join('\n\n');
   }
   function openingDraftStorage() {
     try { return hostWindow()?.localStorage || window.localStorage; } catch (_) {
@@ -9364,10 +9367,14 @@
     root.querySelectorAll('[data-xy-enabled-preview]').forEach(node => {
       const group = node.dataset.xyEnabledPreview;
       const items = enabledPackages(group);
+      const parts = [];
+      // 3.4.9 #4b：世界因子把勾选的预设 + 自定义因子也映射进「因子影响预览」（此前只显示已启用的包）
+      if (group === 'world_factor') { const wf = worldFactorContent(draft); if (wf) parts.push(wf); }
       // 3.4.9：空态标薄样式（data-xy-empty），避免大块虚线空框
-      if (items.length) {
+      if (items.length) parts.push(items.map(pkg => '[' + packageTypeLabel(pkg.type) + '] ' + pkg.title + '\n' + (pkg.summary || '')).join('\n\n'));
+      if (parts.length) {
         delete node.dataset.xyEmpty;
-        node.textContent = items.map(pkg => '[' + packageTypeLabel(pkg.type) + '] ' + pkg.title + '\n' + (pkg.summary || '')).join('\n\n');
+        node.textContent = parts.join('\n\n');
       } else {
         node.dataset.xyEmpty = '1';
         node.textContent = '暂无启用内容；上方列表勾选「启用」后在这里预览。';
