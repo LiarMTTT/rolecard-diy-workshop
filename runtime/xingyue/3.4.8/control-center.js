@@ -951,6 +951,8 @@
     if (!base) throw new Error('创意工坊登录地址未就绪');
     const popup = hostWindow().open('about:blank', 'xy-workshop-login', 'width=520,height=720');
     if (!popup) throw new Error('浏览器阻止了登录窗口，请允许弹窗后重试');
+    // 3.4.8 #4：弹窗开出即写加载占位页，消除 about:blank 在「挑战+login-handoff/start 握手」期间的白屏（移动端网络慢时尤明显）；随后 popup.location.replace 到真实登录页会覆盖它。
+    try { popup.document.write('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>正在连接创意工坊…</title></head><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0d0a07;color:#e4d6c3;font-family:system-ui,\'Microsoft YaHei\',sans-serif"><div style="text-align:center;padding:24px"><div style="width:34px;height:34px;margin:0 auto 14px;border:3px solid rgba(224,178,123,.3);border-top-color:#e0b27b;border-radius:50%;animation:xyspin .8s linear infinite"></div><div>正在连接创意工坊…</div><div style="font-size:12px;color:#8a7d6a;margin-top:8px">正在准备 Discord 登录，请稍候</div></div><style>@keyframes xyspin{to{transform:rotate(360deg)}}</style></body></html>'); } catch (_) {}
     const { handoffId, secret } = createWorkshopHandoffCredentials();
     const poll = { handoffId, secret, popup, generation, deadlineAt:0, timer:null, inFlight:false, wakePending:false, run:null };
     workshopLoginPoll = poll;
@@ -8598,6 +8600,32 @@
     };
   }
 
+  // 3.4.8 #3：包→角色草稿（characterDraftAsPackage 的反向），供「我的发布」编辑回填。字段一一对应，别复杂化。
+  function draftFromPackage(pkg) {
+    const p = (pkg && pkg.payload && typeof pkg.payload === 'object') ? pkg.payload : {};
+    const profile = p.profile || {};
+    const behavior = p.behavior || {};
+    const media = p.media || {};
+    const portraits = media.portraits || {};
+    const relationships = Array.isArray(p.relationships)
+      ? p.relationships.map(r => String((r && r.note) || '')).filter(Boolean).join('\n') : '';
+    return {
+      name: String(p.name || (pkg && pkg.title) || ''),
+      profile_identity: String(profile['身份'] || ''),
+      profile_relation: String(profile['与user的关系'] || ''),
+      appearance: String((p.appearance && p.appearance['描述']) || ''),
+      personality: String(p.personality || ''),
+      dialogue_style: String(p.dialogueStyle || ''),
+      behavior_style: String(behavior['行事风格'] || ''),
+      behavior_response: String(behavior['行为应对'] || ''),
+      relationships: relationships,
+      avatar: String(media.avatar || ''),
+      portrait_normal: String(portraits.normal || ''),
+      portrait_nude: String(portraits.nude || ''),
+      portrait_aftermath: String(portraits.aftermath || ''),
+    };
+  }
+
   let openingScrollSaveTimer = null;
   function openingScrollSnapshot() {
     const previous = openingDraftService.readUi().scroll || { root: 0, workshop: 0, panes: {} };
@@ -9599,7 +9627,8 @@
       const ownerActions = state.workshopTab === 'mine'
         ? (reviewStatus === 'withdrawn'
           ? '<button type="button" data-xy-opening-action="copy-package-draft" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '">复制为本地草稿</button>'
-          : '<button type="button" data-xy-opening-action="select-publish-package" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '">' + (reviewStatus === 'rejected' ? '选择修改后重提' : '选择更新') + '</button>'
+          : (pkg.type === 'character' ? '<button type="button" data-xy-opening-action="edit-my-package" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '">编辑</button>' : '')
+            + '<button type="button" data-xy-opening-action="select-publish-package" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '">' + (reviewStatus === 'rejected' ? '选择修改后重提' : '选择更新') + '</button>'
             + (['pending','approved'].includes(reviewStatus) ? '<button type="button" data-xy-opening-action="withdraw-package" data-id="' + escapeHtml(pkg.id) + '" data-revision="' + escapeHtml(pkg.revision || '') + '"' + withdrawUi.attrs + '>' + withdrawUi.label + '</button>' : ''))
         : '';
       const votes = pkg.votes || { up: 0, down: 0 };
@@ -10023,7 +10052,7 @@
     if (!button || !root.contains(button)) return;
     const action = button.dataset.xyOpeningAction;
     openingModalTrigger = button;
-    const ASYNC_OPENING_ACTIONS = new Set(['refresh-workshop','publish-current-package','publish-character-package','publish-identity-template','vote-package','download-package','show-package-detail','withdraw-package','install-selected-package','uninstall-selected-package','apply-selected-opening-package','import-avatar-local','use-avatar-url','import-char-media','start-recall','export-character-package','avatar-manager-add','avatar-manager-import']);
+    const ASYNC_OPENING_ACTIONS = new Set(['refresh-workshop','publish-current-package','publish-character-package','publish-identity-template','vote-package','download-package','show-package-detail','withdraw-package','edit-my-package','install-selected-package','uninstall-selected-package','apply-selected-opening-package','import-avatar-local','use-avatar-url','import-char-media','start-recall','export-character-package','avatar-manager-add','avatar-manager-import']);
     const pendingKey = openingActionPendingKey(button, action);
     let ownsPending = false;
     if (ASYNC_OPENING_ACTIONS.has(action)) {
@@ -10419,6 +10448,25 @@
         const detail = await getPackageDetailFromCatalog(button.dataset.id, button.dataset.type);
         assertOpeningActionContext(actionContext);
         await importPackageObject(detail, [detail.type]);
+      }
+      if (action === 'edit-my-package') {
+        // 3.4.8 #3：拉全包→回填进同一个角色编辑器（非空白），改完点「发送到创意工坊」按同名 id 覆盖更新（网关 revision +1）。
+        const actionContext = captureOpeningActionContext(root);
+        const detail = await getPackageDetailFromCatalog(button.dataset.id, button.dataset.type);
+        assertOpeningActionContext(actionContext);
+        writeCharacterDraft(draftFromPackage(detail));
+        const tEl = root.querySelector('[data-xy-charpub-title]'); if (tEl) tEl.value = detail.title || '';
+        const sEl = root.querySelector('[data-xy-charpub-summary]'); if (sEl) sEl.value = detail.summary || '';
+        const rEl = root.querySelector('[data-xy-charpub-rating]'); if (rEl) rEl.value = detail.rating || 'general';
+        const modal = root.querySelector('[data-xy-character-editor-modal]');
+        if (modal) {
+          const cd = readCharacterDraft();
+          modal.querySelectorAll('[data-xy-char-field]').forEach(input => { input.value = cd[input.dataset.xyCharField] != null ? cd[input.dataset.xyCharField] : ''; });
+          modal.hidden = false;
+          updateCharacterMediaPreviews();
+          characterEditorBaseline = characterEditorSnapshot(modal);
+        }
+        toast('info', '已载入「' + (detail.title || '角色') + '」，改完点「发送到创意工坊」即更新发布');
       }
       if (action === 'withdraw-package') {
         const cc = controlCenter();
