@@ -389,8 +389,11 @@
 .xy-opening-page .xy-panel,.xy-opening-page .xy-boot-status,.xy-opening-page .xy-agreement,.xy-opening-page .xy-workshop-main,.xy-opening-page .xy-workshop-hero,.xy-opening-page .xy-workshop-tabs,.xy-opening-page .xy-attribute-grid,.xy-opening-page .xy-radar-card,.xy-opening-page .xy-avatar-control,.xy-opening-page .xy-empty-state,.xy-opening-page .xy-package,.xy-opening-page .xy-callout,.xy-opening-page .xy-entry-card,.xy-opening-page .xy-enable-card,.xy-opening-page .xy-preview-card,.xy-opening-page .xy-draft-item,.xy-opening-page .xy-cover-focus{border-radius:7px!important}
 .xy-opening-page .xy-btn,.xy-opening-page button,.xy-opening-page .xy-choice,.xy-opening-page .xy-fields input,.xy-opening-page .xy-fields textarea,.xy-opening-page .xy-fields select,.xy-opening-page .xy-publish-bar input,.xy-opening-page .xy-publish-bar select,.xy-opening-page .xy-workshop-toolbar input,.xy-opening-page .xy-workshop-toolbar select,.xy-opening-page .xy-workshop-tab{border-radius:5px!important}
 .xy-opening-page .xy-steps,.xy-opening-page .xy-step,.xy-opening-page .xy-step em,.xy-opening-page .xy-pill,.xy-opening-page .xy-dep-item,.xy-opening-page .xy-progress,.xy-opening-page .xy-progress i,.xy-opening-page .xy-meter-bar,.xy-opening-page .xy-meter-bar i{border-radius:4px!important}
-.xy-opening-page .xy-steps{display:inline-flex!important;flex-wrap:wrap;grid-template-columns:none!important;width:auto!important;max-width:100%;margin:0 0 12px!important;justify-content:flex-start;gap:5px}
-.xy-opening-page .xy-step{flex:0 0 auto!important;width:auto;min-width:0;padding:5px 12px}
+.xy-opening-page .xy-steps{display:inline-flex!important;flex-wrap:wrap;grid-template-columns:none!important;width:auto!important;max-width:100%;margin:0 0 6px!important;justify-content:flex-start;gap:3px;padding:3px!important}
+.xy-opening-page .xy-step{flex:0 0 auto!important;width:auto;min-width:0;padding:2px 8px!important;gap:3px}
+/* 3.4.9 #3③：向导步骤条通盘收紧，不给几个字浪费大片空间 */
+.xy-opening-page .xy-step em{width:14px!important;height:14px!important;font-size:9px!important}
+.xy-opening-page .xy-step strong{font-size:10px!important;max-width:68px}
 .xy-opening-page .xy-step strong{max-width:none!important}
 .xy-opening-page .xy-progress{margin:0 0 14px!important}
 .xy-boot .xy-compact-checks .xy-dep-list{display:flex!important;flex-wrap:wrap!important;grid-template-columns:none!important;gap:6px;width:auto}
@@ -668,9 +671,12 @@
 .xy-opening-page[data-xy-opening-view="workshop"]{overflow:hidden!important}
 .xy-opening-page:not([data-xy-opening-view="boot"]) [data-xy-opening-story-editor]{display:none!important}
 .xy-focus-toggle{position:absolute;top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right));z-index:2200;min-width:76px;padding:7px 12px!important;background:rgba(18,13,9,.86)!important;backdrop-filter:blur(10px);box-shadow:0 6px 20px rgba(0,0,0,.3)}
-/* 3.4.9 #6：全屏浮钮正下方加「创意工坊」入口 */
-.xy-workshop-entry{position:absolute;top:calc(max(8px,env(safe-area-inset-top)) + 42px);right:max(8px,env(safe-area-inset-right));z-index:2200;min-width:76px;padding:7px 12px!important;background:rgba(18,13,9,.86)!important;backdrop-filter:blur(10px);box-shadow:0 6px 20px rgba(0,0,0,.3);border:1px solid rgba(224,178,123,.34);color:var(--xy-text);cursor:pointer;font:inherit}
+/* 3.4.9 #6：全屏浮钮正下方加「创意工坊」入口（拉开间距，进工坊时藏浮钮防遮挡） */
+.xy-workshop-entry{position:absolute;top:calc(max(8px,env(safe-area-inset-top)) + 50px);right:max(8px,env(safe-area-inset-right));z-index:2200;min-width:76px;padding:7px 12px!important;background:rgba(18,13,9,.86)!important;backdrop-filter:blur(10px);box-shadow:0 6px 20px rgba(0,0,0,.3);border:1px solid rgba(224,178,123,.34);color:var(--xy-text);cursor:pointer;font:inherit}
 .xy-workshop-entry:hover{border-color:rgba(224,178,123,.6)}
+/* 进入创意工坊视图后，工坊面板自带关闭/操作栏，浮钮在此多余且遮挡 → 藏掉两颗浮钮 */
+.xy-opening-page[data-xy-opening-view="workshop"] .xy-workshop-entry,
+.xy-opening-page[data-xy-opening-view="workshop"] .xy-focus-toggle{display:none}
 [data-xy-opening-focus-dialog]{position:fixed;inset:auto;left:0;top:0;right:auto;bottom:auto;width:100dvw;max-width:100dvw;height:100dvh;max-height:100dvh;margin:0;padding:0;border:0;background:#0c0a08;color:#f6ede1;overflow:hidden;box-sizing:border-box}
 [data-xy-opening-focus-dialog]::backdrop{background:rgba(0,0,0,.78)}
 .xy-opening-page[data-xy-focus-mode="1"]{width:100%!important;max-width:none!important;height:100%!important;max-height:none!important;margin:0!important;padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;background:#0c0a08;box-sizing:border-box}
