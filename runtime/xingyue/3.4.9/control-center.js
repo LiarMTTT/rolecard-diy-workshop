@@ -106,7 +106,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.4.9-stability-r40-20260714';
+  const GIT_RUNTIME_REVISION = '3.4.9-stability-r41-20260715';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
