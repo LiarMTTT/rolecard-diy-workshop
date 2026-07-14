@@ -4532,7 +4532,7 @@
   }
   async function openWorldbookManager() { return ensureWorldbookManagerUi().open(); }
   function closeWorldbookManager() { worldbookManagerUi?.close(); }
-  const WORLDBOOK_EDITOR_SOURCE_SHA256 = 'c4e22c2761f4c848bb38d25493820dec91cca1960e7a2f6734124a15873b0195';
+  const WORLDBOOK_EDITOR_SOURCE_SHA256 = '77eebc7faf136fc5b25c7b202319f69663d7d6a0e9b95c2312ca9902d5ba89be';
   const WORLDBOOK_EDITOR_URLS = [
     RUNTIME_BASE_URL + '/worldbook-editor.js?v=p7-r1',
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.9/worldbook-editor.js?v=p7-r1',
@@ -10712,7 +10712,7 @@
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
   const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
-  const OPENING_PAGE_SHA256 = 'add898d10a7ab0cfbe55bd7841465a5a9777cf5cc88695ef0efa20cbfd30ca1a';
+  const OPENING_PAGE_SHA256 = '372ff94c5e210eae19e3ee5c560a2571ca333a551844f0f3a8d0ad4e6c800874';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.9/opening-page.html?v=' + OPENING_PAGE_REVISION,
