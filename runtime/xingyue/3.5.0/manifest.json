@@ -2,8 +2,8 @@
   "schemaVersion": "1",
   "cardScope": "xingyue",
   "runtimeVersion": "3.5.0",
-  "runtimeRevision": "3.5.0-stability-r53-20260716",
-  "publishedAt": "2026-07-15T16:01:36.122Z",
+  "runtimeRevision": "3.5.0-stability-r54-20260716",
+  "publishedAt": "2026-07-15T16:11:39.067Z",
   "modules": [
     {
       "id": "bubble-css",
@@ -15,7 +15,7 @@
       "id": "control-center",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.5.0/control-center.js",
       "bytes": 703626,
-      "sha256": "cb5d394cb000da40dafd2e8f6d1f063ba3e32aaecce8b326f6ea173ae1c6845c"
+      "sha256": "0ccda213779283d6618876daf9cd8966857cd003c6295c39cf838e0c800f4016"
     },
     {
       "id": "omni-analysis",
@@ -59,5 +59,6 @@
       "bytes": 173473,
       "sha256": "968c2861450590d29b0c938e2f35feeded6f44bd17e5d0212e592c40510654cc"
     }
-  ]
+  ],
+  "pinnedCommit": ""
 }
