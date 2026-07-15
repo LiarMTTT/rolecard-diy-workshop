@@ -148,7 +148,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.5.0-stability-r48-20260715';
+  const GIT_RUNTIME_REVISION = '3.5.0-stability-r49-20260715';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -2627,7 +2627,7 @@
     if (/^https?:\/\//i.test(reference)) return reference;
     try {
       const lib = mediaLibrary();
-      const exact = lib?.listManagedAssets?.().find(item => String(item?.key || '') === reference);
+      const exact = lib?.getAssetByKey?.(reference) || lib?.listManagedAssets?.().find(item => String(item?.key || '') === reference);
       if (exact) return exact.dataUrl || exact.url || exact.src || '';
       const fallback = lib?.getExactAsset?.({ type:'bond', slot:'avatar', name:'{{user}}', variant:'normal' });
       return fallback?.dataUrl || fallback?.url || fallback?.src || '';
@@ -8657,8 +8657,16 @@
   }
   function packageIdentity(pkg) { return String(pkg?.id || '') + '::' + String(pkg?.type || ''); }
   function safeSlug(value, fallback) {
-    const slug = String(value || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
-    return slug || fallback;
+    const raw = String(value || '');
+    const slug = raw.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+    if (slug) return slug;
+    if (!raw.trim()) return fallback;
+    // 纯中文等非 ASCII 名字转不出 slug 时用 fnv-1a 短哈希兜底：不同名字必得不同 id。
+    // 修复：此前全部中文名角色/身份包共享 fallback 单一 id（character-role / identity-template），
+    // 第一个发布者永久占用 id，其他玩家发布 409 package-exists，且同一玩家的不同角色互相覆盖。
+    let h = 0x811c9dc5;
+    for (let i = 0; i < raw.length; i++) { h ^= raw.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return fallback + '-' + h.toString(16).padStart(8, '0');
   }
   function downloadJson(filename, data) {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -9580,7 +9588,7 @@
     if (/^https?:\/\//i.test(normalized)) return { key:normalized, src:normalized, displayName:normalized, external:true };
     try {
       const lib = mediaLibrary();
-      const exact = lib?.listManagedAssets?.().find(item => String(item?.key || '') === normalized);
+      const exact = lib?.getAssetByKey?.(normalized) || lib?.listManagedAssets?.().find(item => String(item?.key || '') === normalized);
       if (exact) return { ...exact, src: exact.dataUrl || exact.url || exact.src || '' };
       const fallback = lib?.getExactAsset?.(identityMediaMeta(slot));
       if (fallback && String(fallback.key || '') === normalized) return { ...fallback, src:fallback.dataUrl || fallback.url || fallback.src || '' };
@@ -10025,7 +10033,7 @@
     if (/^https?:\/\//i.test(key)) return { key, src:key };
     try {
       const lib = mediaLibrary();
-      const exact = lib?.listManagedAssets?.().find(item => String(item?.key || '') === key);
+      const exact = lib?.getAssetByKey?.(key) || lib?.listManagedAssets?.().find(item => String(item?.key || '') === key);
       const src = String(exact?.dataUrl || exact?.url || exact?.src || '');
       if (/^(https?:\/\/|blob:|data:image\/(?:png|jpeg|webp|gif);base64,)/i.test(src)) return { key, src };
     } catch (_) {}

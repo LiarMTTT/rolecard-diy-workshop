@@ -77,28 +77,30 @@ function loginHandoffRetryAfterSeconds() {
   return Math.max(1, Math.ceil(deficit / LOGIN_HANDOFF_RATE_PER_SEC));
 }
 
-function corsHeaders(req, headers = {}) {
+function corsHeaders(req, headers = {}, options = {}) {
   const requestOrigin = String(req?.headers?.origin || '');
+  const hasRequestCredentials = Boolean(req?.headers?.authorization || req?.headers?.cookie);
+  const publicAnonymousRead = options.publicRead && !hasRequestCredentials;
   const configured = String(CORS_ORIGIN || '*').split(',').map(item => item.trim()).filter(Boolean);
-  let allowOrigin = configured[0] || '*';
-  if (configured.includes('*')) allowOrigin = '*';
+  let allowOrigin = '';
+  if (publicAnonymousRead) allowOrigin = '*';
   else if (requestOrigin && configured.includes(requestOrigin)) allowOrigin = requestOrigin;
   const result = {
-    'access-control-allow-origin': allowOrigin,
-    'access-control-allow-headers': 'authorization,content-type,if-match,x-package-revision',
-    'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
+    'access-control-allow-headers': publicAnonymousRead ? 'accept' : 'authorization,content-type,if-match,x-package-revision',
+    'access-control-allow-methods': publicAnonymousRead ? 'GET,OPTIONS' : 'GET,POST,PUT,DELETE,OPTIONS',
     vary: 'Origin',
     ...headers,
   };
-  if (allowOrigin !== '*') result['access-control-allow-credentials'] = 'true';
+  if (allowOrigin) result['access-control-allow-origin'] = allowOrigin;
+  if (allowOrigin && allowOrigin !== '*') result['access-control-allow-credentials'] = 'true';
   return result;
 }
 
-function json(req, res, status, body, headers = {}) {
+function json(req, res, status, body, headers = {}, corsOptions = {}) {
   const text = JSON.stringify(body);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
-    ...corsHeaders(req, headers),
+    ...corsHeaders(req, headers, corsOptions),
   });
   res.end(text);
 }
@@ -664,7 +666,7 @@ async function createCharacterUpload(input, publisherId) {
   const rawPackage = input?.package && typeof input.package === 'object' ? structuredClone(input.package) : null;
   if (!rawPackage || rawPackage.type !== 'character') throw new Error('invalid-character-upload-package');
   const rawMedia = rawPackage.payload?.media && typeof rawPackage.payload.media === 'object' ? rawPackage.payload.media : {};
-  rawPackage.payload = { ...rawPackage.payload, media:{ avatar:String(rawMedia.avatar || ''), portraits:{ normal:String(rawMedia.portraits?.normal || ''), nude:String(rawMedia.portraits?.nude || '') } } };
+  rawPackage.payload = { ...rawPackage.payload, media:{ avatar:String(rawMedia.avatar || ''), portraits:{ normal:String(rawMedia.portraits?.normal || ''), nude:String(rawMedia.portraits?.nude || ''), aftermath:String(rawMedia.portraits?.aftermath || '') } } };
   const canonical = validatePackage(rawPackage);
   const uploadId = randomId('xyu');
   const dir = characterUploadDir(uploadId);
@@ -1424,15 +1426,22 @@ async function route(req, res) {
     const session = sessionFromRequest(req);
     const packages = applyPackageFilters(index.packages || [], url.searchParams)
       .map(pkg => ({ ...publicPackageMeta(pkg, publicBaseUrl), votes: voteTally(votes, pkg.id), myVote: myVoteOf(votes, pkg.id, session?.publisherId) }));
-    return json(req, res, 200, { ...index, packages });
+    return json(req, res, 200, { ...index, packages }, {}, { publicRead:true });
   }
   if (url.pathname.startsWith('/api/workshop/packages/') && !url.pathname.endsWith('/vote') && req.method === 'GET') {
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
-    const pkg = await getPackage(id);
+    let pkg = null;
+    try {
+      pkg = await getPackage(id);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
     const session = sessionFromRequest(req);
-    if (!isPublicPackage(pkg) && (!session || session.publisherId !== pkg.ownerPublisherId)) return json(req, res, 404, { error: 'not-found' });
+    if (!pkg || (!isPublicPackage(pkg) && (!session || session.publisherId !== pkg.ownerPublisherId))) {
+      return json(req, res, 404, { error: 'not-found' }, {}, { publicRead:true });
+    }
     const votes = await readVotes();
-    return json(req, res, 200, { ...publicPackageDetail(pkg, publicBaseUrl), votes: voteTally(votes, id), myVote: myVoteOf(votes, id, session?.publisherId) });
+    return json(req, res, 200, { ...publicPackageDetail(pkg, publicBaseUrl), votes: voteTally(votes, id), myVote: myVoteOf(votes, id, session?.publisherId) }, {}, { publicRead:true });
   }
   if (url.pathname === '/api/workshop/login-handoff/start' && req.method === 'POST') {
     const body = JSON.parse(await readBody(req, 4 * 1024) || '{}');
