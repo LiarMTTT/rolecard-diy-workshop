@@ -148,7 +148,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.5.0-stability-r46-20260715';
+  const GIT_RUNTIME_REVISION = '3.5.0-stability-r47-20260715';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -2554,7 +2554,6 @@
       if (title && content) lines.push('- ' + title + '：' + content);
       else if (title || content) lines.push('- ' + (title || content));
     });
-    if (draft.custom_world_factor) String(draft.custom_world_factor).split(/\r?\n/).map(s => s.trim()).filter(Boolean).forEach(item => lines.push('- ' + item));
     return lines.join('\n').trim();
   }
   // 3.4.9 功能拓展：勾选的预设板块（短标签→完整 shop 内容）+ 自定义拓展 → 合并成 [功能拓展]当前设定 的注入内容
@@ -8373,7 +8372,11 @@
       state.workshopLoginStatus = String(detail.status || '');
       state.workshopLoginDeadlineAt = Number(detail.deadlineAt) || 0;
       if (detail.status === 'error' || detail.status === 'timeout') state.lastWorkshopError = String(detail.message || 'Discord 登录失败');
-      if (detail.status === 'ready') state.lastWorkshopError = '';
+      if (detail.status === 'ready') {
+        state.lastWorkshopError = '';
+        // 登录门下目录在登录前不拉取，登录完成后立即补拉一次
+        refreshWorkshop().catch(() => {});
+      }
       if (detail.status === 'cancelled' || detail.status === 'timeout') {
         state.workshopAuthGeneration += 1;
         state.workshopRefreshGeneration += 1;
@@ -9456,7 +9459,8 @@
     });
     root.querySelectorAll('[data-xy-check-group]').forEach(group => {
       const key = group.dataset.xyCheckGroup;
-      const values = Array.isArray(draft[key]) ? draft[key] : [];
+      // selected_extensions 默认全选：草稿从未设置该字段（非数组）时按预设全 3 条勾选，避免 hydrate 清掉预置勾选态后被 collect 固化成空数组；空数组=用户明确全取消，尊重
+      const values = Array.isArray(draft[key]) ? draft[key] : (key === 'selected_extensions' ? EXTENSION_PRESET_KEYS.slice() : []);
       group.querySelectorAll('.xy-choice').forEach(button => button.classList.toggle('selected', values.includes(button.dataset.xyCheckValue)));
     });
     renderAttributes(draft);
@@ -9788,13 +9792,11 @@
       const content = String((f && f.content) || '').trim();
       if (title || content) lines.push('自定义世界因子：' + (title ? title + '：' : '') + content);
     });
-    if (draft.custom_world_factor) lines.push('自定义世界因子：\n' + draft.custom_world_factor);
     (Array.isArray(draft.selected_extensions) ? draft.selected_extensions : EXTENSION_PRESET_KEYS).forEach(item => lines.push('功能拓展：' + item));
     (Array.isArray(draft.custom_extensions) ? draft.custom_extensions : []).forEach(f => {
       const title = String((f && f.title) || '').trim();
       if (title) lines.push('自定义拓展：' + title);
     });
-    if (draft.extension_notes) lines.push('扩展备注：' + draft.extension_notes);
     const enabled = enabledPackages();
     if (enabled.length) lines.push('已启用工坊包：' + enabled.map(pkg => '[' + packageTypeLabel(pkg.type) + ']' + pkg.title).join('、'));
     return lines.join('\n');
@@ -9802,7 +9804,7 @@
 
   function writePreview(draft) {
     const cc = controlCenter();
-    const preview = cc?.previewOpeningWrites ? cc.previewOpeningWrites(draft) : { identity: '', worldFactor: draft.custom_world_factor || '', workshopEntries: [] };
+    const preview = cc?.previewOpeningWrites ? cc.previewOpeningWrites(draft) : { identity: '', worldFactor: '', workshopEntries: [] };
     const lines = [
       '写入目标：角色卡绑定世界书',
       '写入边界：--/星月工坊开始 与 --/星月工坊结束 之间',
@@ -9886,7 +9888,6 @@
     const pkgCount = enabledPackages().length;
     // 任务4.6：世界因子计数补 custom_world_factors 结构化数组
     const worldFactorCount = (draft.selected_world_factors || []).length
-      + String(draft.custom_world_factor || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean).length
       + (Array.isArray(draft.custom_world_factors) ? draft.custom_world_factors.length : 0);
     const extensionCount = enabledPackages('extension').length;
     rail.innerHTML = [
@@ -9922,13 +9923,15 @@
     const auth = state.workshopAuth || {};
     const reason = state.lastWorkshopError
       ? '创意工坊连接失败，请稍后重试。'
-      : (sourceLength ? '当前筛选没有匹配内容。' : '当前分区暂无可展示内容——登录后发布你的创作，就是这里的第一个包。');
-    const title = isMine
-      ? (auth.loggedIn ? '我的发布暂无内容' : '登录后查看我的发布')
-      : (state.lastWorkshopError ? '创意工坊连接失败' : tab.label + '暂无在线内容');
-    const copy = isMine
-      ? (auth.loggedIn ? '这里仅管理你自己发布过的内容。' : '“我的发布”需登录并通过服务器成员确认后查看。你仍可浏览其他公开分区或使用本地 JSON。')
-      : reason;
+      : (sourceLength ? '当前筛选没有匹配内容。' : '当前分区暂无可展示内容——发布你的创作，就是这里的第一个包。');
+    const title = !auth.loggedIn
+      ? '登录后浏览创意工坊'
+      : (isMine
+        ? '我的发布暂无内容'
+        : (state.lastWorkshopError ? '创意工坊连接失败' : tab.label + '暂无在线内容'));
+    const copy = !auth.loggedIn
+      ? '创意工坊内容需 Discord 登录并确认服务器成员后查看。未登录时仍可用「本地 JSON」导入内容。'
+      : (isMine ? '这里仅管理你自己发布过的内容。' : reason);
     const empty = '<div class="xy-empty-state"><h4>' + escapeHtml(title) + '</h4>' +
       '<p>' + escapeHtml(copy) + '</p>' +
       '<div class="xy-empty-actions"><button type="button" data-xy-opening-action="login-discord" data-xy-login-button>Discord 登录</button><button type="button" data-xy-opening-action="import-local-package">本地 JSON</button><button type="button" data-xy-opening-action="refresh-workshop">刷新</button></div></div>';
@@ -9954,14 +9957,14 @@
       if (state.lastWorkshopError) errorNode.textContent = '最近一次操作失败：' + state.lastWorkshopError + '。可刷新重试，或返回编辑后再次执行。';
     }
     tabs.innerHTML = WORKSHOP_TABS.map(tab => '<button type="button" role="tab" aria-selected="' + String(tab.id === state.workshopTab) + '" class="xy-workshop-tab ' + (tab.id === state.workshopTab ? 'active' : '') + '" data-xy-opening-action="switch-workshop-tab" data-tab="' + escapeHtml(tab.id) + '"><strong>' + escapeHtml(tab.label) + '</strong><span>' + escapeHtml(tab.desc || '') + '</span></button>').join('');
-    // 公开分区未登录也能浏览缓存目录；仅“我的发布”需要登录态
-    const source = isMineTab ? (auth.loggedIn ? state.myPackages : []) : state.workshopCatalog;
+    // 前端登录门：所有分区内容一律登录后可见（2026-07-15 总监裁定，替换旧「公开浏览」设计）
+    const source = auth.loggedIn ? (isMineTab ? state.myPackages : state.workshopCatalog) : [];
     const items = source.filter(pkg => packageMatchesTab(pkg)).filter(packageMatchesFilters);
     // 3.4.9 #2：有内容时不再渲染冗余的分区标签 pill（左侧导航已显示当前分区）；仅空态保留作定位提示。
     status.innerHTML = [
       items.length ? '' : '<span class="xy-pill">' + escapeHtml(activeTab().label) + '</span>',
       '<span class="xy-pill ' + (auth.loggedIn ? 'ok' : 'warn') + '" data-xy-workshop-identity-pill></span>',
-      '<span class="xy-pill ' + (state.lastWorkshopError ? 'warn' : 'ok') + '">' + (state.lastWorkshopError ? '连接失败' : (auth.loggedIn ? '工坊已连接' : '公开浏览')) + '</span>',
+      '<span class="xy-pill ' + (state.lastWorkshopError ? 'warn' : (auth.loggedIn ? 'ok' : 'warn')) + '">' + (state.lastWorkshopError ? '连接失败' : (auth.loggedIn ? '工坊已连接' : '未登录')) + '</span>',
       '<span class="xy-pill">当前 ' + items.length + ' / 缓存 ' + source.length + '</span>',
       state.workshopLoginStatus === 'waiting' ? '<span class="xy-pill warn">等待 Discord 确认</span>' : '',
     ].join('');
@@ -10153,6 +10156,12 @@
     try {
       await refreshWorkshopAuth();
       if (generation !== state.workshopRefreshGeneration || runtimeDestroyed || root.isConnected === false) return state.workshopCatalog;
+      // 前端登录门：工坊内容需 Discord 登录后可见，未登录不拉公开目录（本地 JSON 导入不受影响）
+      if (!state.workshopAuth.loggedIn) {
+        state.workshopCatalog = [];
+        state.myPackages = [];
+        return state.workshopCatalog;
+      }
       const items = await cc.refreshWorkshop({ skipAuthCheck:true });
       if (generation !== state.workshopRefreshGeneration || runtimeDestroyed || root.isConnected === false) return state.workshopCatalog;
       state.workshopCatalog = Array.isArray(items) ? items : [];
@@ -11150,7 +11159,7 @@
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
   const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
-  const OPENING_PAGE_SHA256 = '9e50ada18123e3e553c77bbb7f3bf8689c541eb39c80378f0f18dddbc79e0673';
+  const OPENING_PAGE_SHA256 = 'c83eb14195c9d0ebcf59fed1edcd36036bdc4cd5a82a6ae8cf019745b4b8a088';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.5.0/opening-page.html?v=' + OPENING_PAGE_REVISION,
