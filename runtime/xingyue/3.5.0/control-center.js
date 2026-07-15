@@ -148,7 +148,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.5.0-stability-r50-20260716';
+  const GIT_RUNTIME_REVISION = '3.5.0-stability-r51-20260716';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -11236,11 +11236,21 @@
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
   const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
   const OPENING_PAGE_SHA256 = 'e2b26917e32f17855deaea415dfb12652ed6943e503ce11a5f5a09cbedcec52a';
-  const OPENING_PAGE_SOURCES = [
-    RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
-    'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.5.0/opening-page.html?v=' + OPENING_PAGE_REVISION,
-    'https://raw.githubusercontent.com/LiarMTTT/rolecard-diy-workshop/main/runtime/xingyue/3.5.0/opening-page.html?v=' + OPENING_PAGE_REVISION,
-  ];
+  const OPENING_PAGE_SOURCES = (() => {
+    const list = [];
+    // r51 根治：loader 在 import 本文件前把所用基址（通常为 @commit 固定 pin）写入 window.__xyRuntimeBase——
+    // 首选它拉 opening-page 可保证与 control-center 同 commit（SHA 必配），不再受 @main 缓存滞后影响（jsDelivr 忽略 ?v= 参数）。
+    try {
+      const base = String(window.__xyRuntimeBase || '');
+      if (/^https:\/\//.test(base)) list.push(base + '/opening-page.html?v=' + OPENING_PAGE_REVISION);
+    } catch (_) {}
+    list.push(
+      RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
+      'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.5.0/opening-page.html?v=' + OPENING_PAGE_REVISION,
+      'https://raw.githubusercontent.com/LiarMTTT/rolecard-diy-workshop/main/runtime/xingyue/3.5.0/opening-page.html?v=' + OPENING_PAGE_REVISION,
+    );
+    return list;
+  })();
   const OPENING_PAGE_SOURCE_TIMEOUT_MS = 6500;
   const openingRemoteAttempts = new Map();
   const openingRemoteRetryBindings = new Map();
