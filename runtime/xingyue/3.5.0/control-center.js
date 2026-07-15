@@ -148,7 +148,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.5.0-stability-r51-20260716';
+  const GIT_RUNTIME_REVISION = '3.5.0-stability-r52-20260716';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -10825,19 +10825,52 @@
         updateCharacterMediaPreviews();
       }
       if (action === 'paste-char-media-url') {
-        // r50：编辑器媒体改 2×2 预览卡后无输入框，外链 URL 改由剪贴板一键粘贴
+        // r52：外链 URL 改浮窗输入（r50 的剪贴板方案被总监否——交互不直观）
         const field = button.dataset.field;
-        let text = '';
-        try { text = String(await (navigator.clipboard?.readText?.() ?? hostWindow().navigator?.clipboard?.readText?.() ?? '')).trim(); } catch (_) {}
-        if (!/^https?:\/\//i.test(text)) { toast('info', '请先复制图片直链（https:// 开头）到剪贴板，再点「粘贴 URL」。'); return; }
-        const modal = root.querySelector('[data-xy-character-editor-modal]');
-        const input = modal?.querySelector('[data-xy-char-field="' + field + '"]');
-        if (input) {
-          input.value = text;
-          collectCharacterFields();
-          updateCharacterMediaPreviews();
-          toast('success', '已使用剪贴板中的图片链接');
-        }
+        const doc = root.ownerDocument;
+        const overlay = doc.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;';
+        const panel = doc.createElement('div');
+        panel.style.cssText = 'background:#171310;border:1px solid rgba(224,178,123,.45);padding:14px;max-width:min(480px,94vw);width:100%;display:grid;gap:10px;color:#e6d7c3;font-size:13px;';
+        const heading = doc.createElement('strong');
+        heading.textContent = '输入图片外链 URL';
+        const urlInput = doc.createElement('input');
+        urlInput.type = 'url';
+        urlInput.placeholder = 'https://…/image.png';
+        urlInput.style.cssText = 'width:100%;box-sizing:border-box;padding:8px;background:rgba(0,0,0,.42);border:1px solid rgba(224,178,123,.3);color:inherit;';
+        const row = doc.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+        const okBtn = doc.createElement('button');
+        okBtn.type = 'button'; okBtn.textContent = '确认';
+        okBtn.style.cssText = 'cursor:pointer;padding:6px 14px;border:1px solid rgba(224,178,123,.5);background:rgba(224,178,123,.85);color:#241a0d;font-weight:bold;';
+        const cancelBtn = doc.createElement('button');
+        cancelBtn.type = 'button'; cancelBtn.textContent = '取消';
+        cancelBtn.style.cssText = 'cursor:pointer;padding:6px 14px;border:1px solid rgba(224,178,123,.4);background:rgba(224,178,123,.1);color:inherit;';
+        row.append(okBtn, cancelBtn);
+        panel.append(heading, urlInput, row);
+        overlay.appendChild(panel);
+        doc.body.appendChild(overlay);
+        urlInput.focus();
+        const done = value => {
+          try { doc.body.removeChild(overlay); } catch (_) {}
+          if (value == null || value === '') return;
+          if (!/^https?:\/\//i.test(value)) { toast('info', '需要 https:// 开头的图片直链。'); return; }
+          const modal = root.querySelector('[data-xy-character-editor-modal]');
+          const input = modal?.querySelector('[data-xy-char-field="' + field + '"]');
+          if (input) {
+            input.value = value;
+            collectCharacterFields();
+            updateCharacterMediaPreviews();
+            toast('success', '已使用图片链接');
+          }
+        };
+        okBtn.onclick = () => done(urlInput.value.trim());
+        cancelBtn.onclick = () => done(null);
+        overlay.addEventListener('click', event => { if (event.target === overlay) done(null); });
+        urlInput.addEventListener('keydown', event => {
+          if (event.key === 'Enter') { event.preventDefault(); done(urlInput.value.trim()); }
+          if (event.key === 'Escape') { event.preventDefault(); done(null); }
+        });
         return;
       }
       if (action === 'open-world-factor-editor') {
@@ -11235,7 +11268,7 @@
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
   const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
-  const OPENING_PAGE_SHA256 = 'e2b26917e32f17855deaea415dfb12652ed6943e503ce11a5f5a09cbedcec52a';
+  const OPENING_PAGE_SHA256 = 'd7f96d799576397ce3a62f025d84bb02bef94b785e06f3aecea57ba56a6ee7cd';
   const OPENING_PAGE_SOURCES = (() => {
     const list = [];
     // r51 根治：loader 在 import 本文件前把所用基址（通常为 @commit 固定 pin）写入 window.__xyRuntimeBase——
