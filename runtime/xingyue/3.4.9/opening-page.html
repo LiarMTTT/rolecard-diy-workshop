@@ -112,6 +112,12 @@
 .xy-fields textarea{min-height:78px;resize:vertical}
 .xy-note{color:var(--xy-muted);font-size:12px;margin-top:8px}
 .xy-summary,.xy-preview,.xy-empty{white-space:pre-wrap;color:var(--xy-muted);border:1px dashed rgba(224,178,123,.3);padding:9px;min-height:52px;background:rgba(11,8,5,.5);overflow-wrap:anywhere}
+/* 3.4.9 影响预览：横向自适应瀑布流（世界因子/功能拓展共用）——空间够横排、不足换行，去大块留白 */
+.xy-preview.xy-impact-flow{display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start;align-items:flex-start;align-self:start;white-space:normal;min-height:0;text-align:left}
+.xy-impact-chip{display:flex;flex-direction:column;gap:2px;flex:1 1 180px;min-width:150px;max-width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid rgba(239,199,133,.28);border-left:2px solid rgba(239,199,133,.7);border-radius:7px;background:rgba(239,199,133,.06)}
+.xy-impact-chip em{font-style:normal;font-size:10px;letter-spacing:.5px;color:#efc785;opacity:.85}
+.xy-impact-chip strong{color:#fff;font-size:13px;line-height:1.35}
+.xy-impact-chip>span{color:var(--xy-muted);font-size:11.5px}
 .xy-preview-rail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:9px 0}
 .xy-preview-card{border:1px solid rgba(224,178,123,.2);background:rgba(255,255,255,.03);padding:8px;min-width:0}
 .xy-preview-card strong{display:block;color:#fff;font-size:12px}

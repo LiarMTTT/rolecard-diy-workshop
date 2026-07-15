@@ -106,7 +106,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.4.9-stability-r42-20260715';
+  const GIT_RUNTIME_REVISION = '3.4.9-stability-r43-20260715';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -9616,16 +9616,29 @@
     root.querySelectorAll('[data-xy-enabled-preview]').forEach(node => {
       const group = node.dataset.xyEnabledPreview;
       const items = enabledPackages(group);
-      const parts = [];
-      // 3.4.9 #4b：世界因子把勾选的预设 + 自定义因子也映射进「因子影响预览」（此前只显示已启用的包）
-      if (group === 'world_factor') { const wf = worldFactorContent(draft); if (wf) parts.push(wf); }
-      // 3.4.9：空态标薄样式（data-xy-empty），避免大块虚线空框
-      if (items.length) parts.push(items.map(pkg => '[' + packageTypeLabel(pkg.type) + '] ' + pkg.title + '\n' + (pkg.summary || '')).join('\n\n'));
-      if (parts.length) {
+      const chips = [];
+      // 3.4.9 #4b：世界因子/功能拓展勾选的预设+自定义 → 每条一个卡片
+      if (group === 'world_factor') {
+        String(worldFactorContent(draft) || '').split(/\r?\n/)
+          .map(s => s.replace(/^\s*[-•]\s*/, '').trim()).filter(Boolean)
+          .forEach(label => chips.push({ label }));
+      }
+      // 已启用的包 → 每个一个卡片
+      items.forEach(pkg => chips.push({ tag: packageTypeLabel(pkg.type), label: pkg.title, sub: pkg.summary || '' }));
+      // 3.4.9：影响预览改横向自适应瀑布流（每条一卡、flex-wrap，空间够横排/不足换行，去大块留白）
+      if (chips.length) {
         delete node.dataset.xyEmpty;
-        node.textContent = parts.join('\n\n');
+        node.classList.add('xy-impact-flow');
+        node.innerHTML = chips.map(c =>
+          '<span class="xy-impact-chip">'
+          + (c.tag ? '<em>' + escapeHtml(c.tag) + '</em>' : '')
+          + '<strong>' + escapeHtml(c.label) + '</strong>'
+          + (c.sub ? '<span>' + escapeHtml(c.sub) + '</span>' : '')
+          + '</span>'
+        ).join('');
       } else {
         node.dataset.xyEmpty = '1';
+        node.classList.remove('xy-impact-flow');
         node.textContent = '暂无启用内容；上方列表勾选「启用」后在这里预览。';
       }
     });
@@ -10988,7 +11001,7 @@
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
   const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
-  const OPENING_PAGE_SHA256 = '7f433b80b175dfb6a758aba6304c92242ad108ba55d5ff30ae06797be60820ea';
+  const OPENING_PAGE_SHA256 = '506267dea6f356cda5d960bd58840b81643251da2a01183f245a572c59604217';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.9/opening-page.html?v=' + OPENING_PAGE_REVISION,
