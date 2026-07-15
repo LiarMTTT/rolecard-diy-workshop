@@ -1050,7 +1050,6 @@
               <option value="mature">成人</option>
               <option value="restricted">限制级</option>
             </select>
-            <button type="button" data-xy-opening-action="refresh-workshop">刷新</button>
             <button type="button" data-xy-opening-action="import-local-package">本地 JSON</button>
             <button type="button" data-xy-opening-action="export-current-package" data-xy-publish-action hidden>导出当前包</button>
             <button type="button" class="primary" data-xy-opening-action="publish-current-package" data-xy-publish-action hidden>发布当前包</button>
@@ -1089,7 +1088,7 @@
         <button type="button" data-xy-opening-action="restore-opening-official">恢复 3.5.0 出厂版</button>
         <button type="button" data-xy-opening-action="use-grade-compatible-story" hidden>套用通用到访模板</button>
         <button type="button" data-xy-opening-action="export-opening-package">导出正文模板包</button>
-        <button type="button" class="lilith" data-xy-opening-action="prepare-opening-package">准备发布到工坊</button>
+        <button type="button" class="lilith" data-xy-opening-action="prepare-opening-package" aria-disabled="true" style="opacity:.45;cursor:not-allowed">准备发布到工坊</button>
       </div>
     </div>
   </details>
@@ -1539,7 +1538,7 @@
     }
     if (grid) {
       grid.classList.add('single');
-      grid.innerHTML = '<div class="xy-empty-state"><h4>正在连接创意工坊</h4><p>控制中心就绪后展示在线内容；未登录也可浏览公开分区，登录后可发布与点赞。你仍可使用本地 JSON 继续创建。</p><div class="xy-empty-actions"><button type="button" data-xy-opening-action="login-discord" data-xy-login-button>Discord 登录</button><button type="button" data-xy-opening-action="import-local-package">本地 JSON</button></div></div>';
+      grid.innerHTML = '<div class="xy-empty-state"><h4>正在连接创意工坊</h4><p>控制中心就绪后展示在线内容；内容需 Discord 登录后查看，未登录时可用「本地 JSON」导入。</p></div>';
     }
     all('[data-xy-publish-bar],[data-xy-publish-action]').forEach(node => { node.hidden = active !== 'mine'; });
   }

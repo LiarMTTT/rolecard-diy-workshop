@@ -148,7 +148,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.5.0-stability-r47-20260715';
+  const GIT_RUNTIME_REVISION = '3.5.0-stability-r48-20260715';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -1205,6 +1205,10 @@
     if (!workshopAuth.loggedIn) throw new Error('请先完成 Discord 登录');
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
     let pkg = validatePackage(input);
+    // 发布署名：默认登记发布者 Discord 显示名（自愿公开的包元数据；gateway 不存原始 Discord ID 的隐私铁律不变）
+    if ((!pkg.authorName || pkg.authorName === '未署名') && workshopIdentity?.name) {
+      pkg = { ...pkg, authorName: String(workshopIdentity.name).slice(0, 80) };
+    }
     if (!Number.isInteger(Number(pkg.revision)) || Number(pkg.revision) < 1) {
       const owned = await fetchJson(gatewayBaseUrl() + '/api/workshop/me/packages');
       const existing = (owned.packages || []).find(item => String(item.id) === String(pkg.id) && String(item.type) === String(pkg.type));
@@ -8703,7 +8707,7 @@
       packageVersion:'1.0.0',
       id:String(source.id || ('opening-' + openingDay.bodyHash.slice(0, 16))),
       type:'world_factor', cardScope:OPENING_PACKAGE_SCOPE, title,
-      summary:'由 3.4.9 入学日正文编辑器生成的纯文本模板。', authorName:'未署名',
+      summary:'由 3.4.9 入学日正文编辑器生成的纯文本模板。', authorName:(controlCenter()?.getWorkshopIdentity?.()?.name || '未署名'),
       tags:['开局正文'], rating:'general', language:'zh-CN',
       payload:{
         target:OPENING_PACKAGE_TARGET, schemaVersion:1, compatibility:{ minRuntimeVersion:'3.4.1' },
@@ -8724,7 +8728,7 @@
       id: 'identity-' + safeSlug(title, 'template'),
       title,
       summary: payload.background.slice(0, 120) || payload.appearance.slice(0, 120) || ('身份模板 · ' + title),
-      authorName: '未署名',
+      authorName: (controlCenter()?.getWorkshopIdentity?.()?.name || '未署名'),
       tags: ['身份模板'],
       payload,
     };
@@ -8906,7 +8910,7 @@
       id: 'character-' + safeSlug(name, 'role'),
       title: name,
       summary: (textOf(cd.appearance, '') || textOf(cd.personality, '')).slice(0, 120) || ('角色范本 · ' + name),
-      authorName: '未署名',
+      authorName: (controlCenter()?.getWorkshopIdentity?.()?.name || '未署名'),
       tags: ['角色范本'],
       payload: payload,
     };
@@ -9934,7 +9938,7 @@
       : (isMine ? '这里仅管理你自己发布过的内容。' : reason);
     const empty = '<div class="xy-empty-state"><h4>' + escapeHtml(title) + '</h4>' +
       '<p>' + escapeHtml(copy) + '</p>' +
-      '<div class="xy-empty-actions"><button type="button" data-xy-opening-action="login-discord" data-xy-login-button>Discord 登录</button><button type="button" data-xy-opening-action="import-local-package">本地 JSON</button><button type="button" data-xy-opening-action="refresh-workshop">刷新</button></div></div>';
+      '</div>';
     return empty;
   }
   function renderWorkshop() {
@@ -9964,7 +9968,7 @@
     status.innerHTML = [
       items.length ? '' : '<span class="xy-pill">' + escapeHtml(activeTab().label) + '</span>',
       '<span class="xy-pill ' + (auth.loggedIn ? 'ok' : 'warn') + '" data-xy-workshop-identity-pill></span>',
-      '<span class="xy-pill ' + (state.lastWorkshopError ? 'warn' : (auth.loggedIn ? 'ok' : 'warn')) + '">' + (state.lastWorkshopError ? '连接失败' : (auth.loggedIn ? '工坊已连接' : '未登录')) + '</span>',
+      state.lastWorkshopError ? '<span class="xy-pill warn">连接失败</span>' : (auth.loggedIn ? '<span class="xy-pill ok">工坊已连接</span>' : ''),
       '<span class="xy-pill">当前 ' + items.length + ' / 缓存 ' + source.length + '</span>',
       state.workshopLoginStatus === 'waiting' ? '<span class="xy-pill warn">等待 Discord 确认</span>' : '',
     ].join('');
@@ -10007,7 +10011,7 @@
       const downloadUi = pendingActionUi('download-package', pkg.id, '加入当前开局', '加入中…');
       const voteBar = voteUi.attrs
         ? '<div class="xy-vote-bar"><button type="button" class="xy-vote" disabled aria-busy="true">' + voteUi.label + '</button></div>'
-        : '<div class="xy-vote-bar"><button type="button" class="xy-vote' + (myVote === 'up' ? ' on' : '') + '" data-xy-opening-action="vote-package" data-id="' + escapeHtml(pkg.id) + '" data-vote="up" aria-label="点赞">▲ ' + (votes.up || 0) + '</button><button type="button" class="xy-vote' + (myVote === 'down' ? ' on' : '') + '" data-xy-opening-action="vote-package" data-id="' + escapeHtml(pkg.id) + '" data-vote="down" aria-label="点踩">▼ ' + (votes.down || 0) + '</button></div>';
+        : '<div class="xy-vote-bar"><button type="button" class="xy-vote' + (myVote === 'up' ? ' on' : '') + '" data-xy-opening-action="vote-package" data-id="' + escapeHtml(pkg.id) + '" data-vote="up" aria-label="点赞">👍 ' + (votes.up || 0) + '</button><button type="button" class="xy-vote' + (myVote === 'down' ? ' on' : '') + '" data-xy-opening-action="vote-package" data-id="' + escapeHtml(pkg.id) + '" data-vote="down" aria-label="点踩">👎 ' + (votes.down || 0) + '</button></div>';
       const previewAvatar = /^https?:\/\//i.test(String(pkg.previewMedia?.avatar || '')) ? String(pkg.previewMedia.avatar) : '';
       const avatarHtml = previewAvatar ? '<img class="xy-package-preview-avatar" src="' + escapeHtml(previewAvatar) + '" alt="' + escapeHtml((pkg.title || pkg.id) + ' 头像') + '" loading="lazy" referrerpolicy="no-referrer">' : '';
       return '<article class="xy-package">' + avatarHtml + '<h4>' + escapeHtml(pkg.title || pkg.id) + '</h4><p>' + escapeHtml(pkg.summary || '暂无摘要') + '</p><div class="xy-package-meta"><span class="xy-pill">' + escapeHtml(meta) + '</span>' + tags + reviewMeta + '</div>' + rejection + withdrawnMeta + '<p>作者：' + escapeHtml(pkg.authorName || '未署名') + ' · 更新：' + escapeHtml(pkg.updatedAt || pkg.createdAt || '未知') + '</p>' + voteBar + '<div class="xy-package-actions"><button type="button" data-xy-opening-action="show-package-detail" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '"' + detailUi.attrs + '>' + detailUi.label + '</button><button type="button" data-xy-opening-action="download-package" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '"' + downloadUi.attrs + '>' + downloadUi.label + '</button>' + ownerActions + '</div></article>';
@@ -10568,6 +10572,10 @@
         toast('success', '已导出开局正文模板包');
       }
       if (action === 'prepare-opening-package') {
+        // 2026-07-15 总监裁定：创意工坊的开局正文分区未实装，发布入口临时置为不可用（保留本地 DIY 编辑），实装后恢复下方原逻辑
+        toast('info', '开局正文发布到创意工坊还未实装，敬请期待；本地编辑不受影响。');
+        return;
+        /* eslint-disable no-unreachable */
         if (!state.previewMode) captureOpeningDayField({ immediate:true });
         const pkg = openingDraftAsPackage();
         state.selectedPackage = pkg;
@@ -11159,7 +11167,7 @@
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
   const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
-  const OPENING_PAGE_SHA256 = 'c83eb14195c9d0ebcf59fed1edcd36036bdc4cd5a82a6ae8cf019745b4b8a088';
+  const OPENING_PAGE_SHA256 = '39af8f7e01254578b93926186e93d041c210e4c9cd79af904656633295602622';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.5.0/opening-page.html?v=' + OPENING_PAGE_REVISION,
