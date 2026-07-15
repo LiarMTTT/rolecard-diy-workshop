@@ -148,7 +148,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.5.0-stability-r52-20260716';
+  const GIT_RUNTIME_REVISION = '3.5.0-stability-r53-20260716';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -7166,7 +7166,17 @@
     setHudPhase('loading');
     const host = hostWindow();
     const override = host.XY_HUD_BASE_OVERRIDE || window.XY_HUD_BASE_OVERRIDE || null; // 仿真/调试可指本地
-    const urls = override ? [override + '/status-bar.html'] : [HUD_RT_BASE + '/status-bar.html', HUD_RT_BASE_CF + '/status-bar.html'];
+    // r53：与 opening 同款版本原子化——首选 loader 交付的 @commit 基址拉 status-bar，根治 @main 缓存滞后
+    // 致云端玩家拿到旧版状态栏（总监实机报浮窗缺事后立绘入口，即旧缓存 status-bar 所致）。
+    const urls = override ? [override + '/status-bar.html'] : (() => {
+      const list = [];
+      try {
+        const pinnedBase = String(window.__xyRuntimeBase || host.__xyRuntimeBase || '');
+        if (/^https:\/\//.test(pinnedBase)) list.push(pinnedBase + '/status-bar.html');
+      } catch (_) {}
+      list.push(HUD_RT_BASE + '/status-bar.html', HUD_RT_BASE_CF + '/status-bar.html');
+      return list;
+    })();
     for (const url of urls) {
       if (controller.signal.aborted || generation !== hudSession.generation || currentHudHost() !== hostEl) return;
       try {
