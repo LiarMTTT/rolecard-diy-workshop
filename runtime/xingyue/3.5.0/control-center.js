@@ -148,7 +148,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.5.0-stability-r49-20260715';
+  const GIT_RUNTIME_REVISION = '3.5.0-stability-r50-20260716';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -853,12 +853,28 @@
     if (res.status === 428) throw new Error(action + '缺少 revision，请先刷新包状态');
     throw new Error(action + '失败：' + code);
   }
+  function workshopFetchSignal(ms = 15000) {
+    // r50 防御：部分 WebView 环境（TauriTavern 等）fetch 可能永挂不回调，UI loading 永不结束呈「卡死」观感——统一加超时转成可重试的连接失败
+    try { if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) return AbortSignal.timeout(ms); } catch (_) {}
+    try {
+      const controller = new AbortController();
+      setTimeout(() => { try { controller.abort(); } catch (_) {} }, ms);
+      return controller.signal;
+    } catch (_) { return undefined; }
+  }
   async function fetchJson(url, options) {
     const opt = options || {};
     const requestToken = getWorkshopToken();
     const headers = { ...(opt.headers || {}) };
     if (requestToken) headers.authorization = 'Bearer ' + requestToken;
-    const res = await fetch(url, { credentials:'omit', ...opt, headers });
+    let res;
+    try {
+      res = await fetch(url, { credentials:'omit', signal: workshopFetchSignal(), ...opt, headers });
+    } catch (error) {
+      const name = String(error?.name || '');
+      if (name === 'TimeoutError' || name === 'AbortError') throw new Error('工坊连接超时（15 秒无响应），请稍后重试');
+      throw error;
+    }
     return workshopResponse(res, '读取工坊', requestToken);
   }
   async function checkWorkshopAuth() {
@@ -8870,6 +8886,8 @@
     CHARACTER_MEDIA_SPECS.forEach(spec => {
       const img = modal.querySelector('[data-xy-char-media-preview="' + spec.field + '"]');
       if (!img) return;
+      const empty = modal.querySelector('[data-xy-char-media-empty="' + spec.field + '"]');
+      const setEmpty = text => { if (empty) { empty.hidden = false; empty.textContent = text; } };
       const val = textOf(cd[spec.field], '');
       let src = '';
       if (/^(https?:\/\/|data:)/i.test(val)) src = val;
@@ -8877,8 +8895,9 @@
         const asset = lib.getAssetByKey?.(val) || lib.listManagedAssets?.().find(item => String(item?.key || '') === val);
         src = String(asset?.dataUrl || asset?.url || asset?.src || '');
       }
-      if (src) { img.src = src; img.hidden = false; }
-      else { img.removeAttribute('src'); img.hidden = true; }
+      img.onerror = () => { img.hidden = true; setEmpty('图片无法加载：数据可能已损坏，或格式不受当前设备支持。可「清除」后重新导入。'); };
+      if (src) { img.src = src; img.hidden = false; if (empty) empty.hidden = true; }
+      else { img.removeAttribute('src'); img.hidden = true; setEmpty(val ? '媒体引用暂不可预览：' + val : '未设置'); }
     });
   }
   function characterPublishForm() {
@@ -10131,10 +10150,35 @@
     if (pkg.tags?.length) lines.push('标签：' + pkg.tags.join('、'));
     lines.push('');
     lines.push('payload 预览：');
-    try { lines.push(JSON.stringify(pkg.payload || {}, null, 2).slice(0, 3600)); } catch (_) { lines.push('payload 无法序列化'); }
+    // r50：不再用 raw JSON.stringify（\n 字面量刷屏），改人读格式：键值缩进展开、字符串内换行渲染为真实换行
+    try { lines.push(formatPayloadForHumans(pkg.payload || {}).slice(0, 3600)); } catch (_) { lines.push('payload 无法序列化'); }
     return lines.join('\n');
   }
 
+  function formatPayloadForHumans(value, indent = '') {
+    if (value == null || value === '') return '';
+    if (typeof value === 'string') return value.split(/\r?\n/).map(line => indent + line).join('\n');
+    if (Array.isArray(value)) {
+      return value.map(item => (item && typeof item === 'object')
+        ? formatPayloadForHumans(item, indent + '  ')
+        : indent + '- ' + String(item)).filter(Boolean).join('\n');
+    }
+    if (typeof value === 'object') {
+      const lines = [];
+      for (const [key, val] of Object.entries(value)) {
+        if (val == null || val === '' || (Array.isArray(val) && !val.length)) continue;
+        if (typeof val === 'object' || (typeof val === 'string' && val.includes('\n'))) {
+          lines.push(indent + key + '：');
+          const body = formatPayloadForHumans(val, indent + '  ');
+          if (body) lines.push(body);
+        } else {
+          lines.push(indent + key + '：' + String(val));
+        }
+      }
+      return lines.join('\n');
+    }
+    return indent + String(value);
+  }
   async function getPackageDetailFromCatalog(id, type) {
     const source = state.workshopTab === 'mine' ? state.myPackages : state.workshopCatalog;
     const item = source.find(pkg => String(pkg.id) === String(id) && (!type || String(pkg.type || '') === String(type)));
@@ -10780,6 +10824,22 @@
         collectCharacterFields();
         updateCharacterMediaPreviews();
       }
+      if (action === 'paste-char-media-url') {
+        // r50：编辑器媒体改 2×2 预览卡后无输入框，外链 URL 改由剪贴板一键粘贴
+        const field = button.dataset.field;
+        let text = '';
+        try { text = String(await (navigator.clipboard?.readText?.() ?? hostWindow().navigator?.clipboard?.readText?.() ?? '')).trim(); } catch (_) {}
+        if (!/^https?:\/\//i.test(text)) { toast('info', '请先复制图片直链（https:// 开头）到剪贴板，再点「粘贴 URL」。'); return; }
+        const modal = root.querySelector('[data-xy-character-editor-modal]');
+        const input = modal?.querySelector('[data-xy-char-field="' + field + '"]');
+        if (input) {
+          input.value = text;
+          collectCharacterFields();
+          updateCharacterMediaPreviews();
+          toast('success', '已使用剪贴板中的图片链接');
+        }
+        return;
+      }
       if (action === 'open-world-factor-editor') {
         openWorldFactorEditor();
       }
@@ -11175,7 +11235,7 @@
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
   const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
-  const OPENING_PAGE_SHA256 = '39af8f7e01254578b93926186e93d041c210e4c9cd79af904656633295602622';
+  const OPENING_PAGE_SHA256 = 'e2b26917e32f17855deaea415dfb12652ed6943e503ce11a5f5a09cbedcec52a';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.5.0/opening-page.html?v=' + OPENING_PAGE_REVISION,
