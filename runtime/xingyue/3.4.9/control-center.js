@@ -106,7 +106,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.4.9-stability-r41-20260715';
+  const GIT_RUNTIME_REVISION = '3.4.9-stability-r42-20260715';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -10284,10 +10284,24 @@
     });
   }
 
+  // 3.4.9 #4c/#4d：世界因子编辑浮窗（可预填：从预设因子点开时带入名称+内容，编辑后经「添加因子」另存为自定义）
+  function openWorldFactorEditor(prefill) {
+    const modal = root.querySelector('[data-xy-world-factor-modal]');
+    if (!modal) return;
+    const t = modal.querySelector('[data-xy-wf-field="title"]');
+    const c = modal.querySelector('[data-xy-wf-field="content"]');
+    if (t) t.value = prefill?.title || '';
+    if (c) c.value = prefill?.content || '';
+    modal.hidden = false;
+    try { (t || c)?.focus(); } catch (_) {}
+  }
+
   root.addEventListener('click', async event => {
     const choice = event.target.closest('.xy-choice');
     if (choice && root.contains(choice)) {
       if (state.previewMode) { toast('info', '预览模式不保存选项修改'); return; }
+      // 3.4.9 #4d：世界因子"+"新建槽 → 打开空白编辑浮窗
+      if (choice.hasAttribute('data-xy-wf-add')) { openWorldFactorEditor(); return; }
       const group = choice.closest('[data-xy-choice-group]');
       const checkGroup = choice.closest('[data-xy-check-group]');
       if (group) {
@@ -10299,7 +10313,17 @@
           setAttributes(IDENTITY_ATTRIBUTE_PRESETS[choice.dataset.xyChoiceValue]);
         }
       }
-      if (checkGroup) choice.classList.toggle('selected');
+      if (checkGroup) {
+        // 3.4.9 #4c/#4d：世界因子 = 点勾选框切换选中 / 点其他区域开编辑浮窗（预填该因子内容，编辑后另存为自定义）
+        if (choice.classList.contains('xy-wf-choice') && !event.target.closest('.xy-wf-check')) {
+          openWorldFactorEditor({
+            title: choice.dataset.xyCheckValue || '',
+            content: choice.querySelector('.xy-wf-body > span')?.textContent || '',
+          });
+          return;
+        }
+        choice.classList.toggle('selected');
+      }
       renderWizard();
       return;
     }
@@ -10602,11 +10626,7 @@
         updateCharacterMediaPreviews();
       }
       if (action === 'open-world-factor-editor') {
-        const modal = root.querySelector('[data-xy-world-factor-modal]');
-        if (modal) {
-          modal.querySelectorAll('[data-xy-wf-field]').forEach(i => { i.value = ''; });
-          modal.hidden = false;
-        }
+        openWorldFactorEditor();
       }
       if (action === 'close-world-factor-editor') {
         const modal = root.querySelector('[data-xy-world-factor-modal]');
@@ -10968,7 +10988,7 @@
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
   const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
-  const OPENING_PAGE_SHA256 = '38c8c50759090247f8d40f34214063e0050c0fb433689dc1b546f59fbd0a53c4';
+  const OPENING_PAGE_SHA256 = '7f433b80b175dfb6a758aba6304c92242ad108ba55d5ff30ae06797be60820ea';
   const OPENING_PAGE_SOURCES = [
     RUNTIME_BASE_URL + '/opening-page.html?v=' + OPENING_PAGE_REVISION,
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.9/opening-page.html?v=' + OPENING_PAGE_REVISION,

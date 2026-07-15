@@ -97,6 +97,15 @@
 .xy-choice strong{color:#fff}
 .xy-choice span{color:var(--xy-muted);font-size:12px}
 .xy-choice small{color:var(--xy-warn);font-size:11px}
+/* 3.4.9 #4c/#4d 世界因子：真勾选框 + 点击区分区 + 新建槽 */
+.xy-wf-choice{display:flex!important;align-items:flex-start;gap:8px;text-align:left}
+.xy-wf-choice .xy-wf-body{display:grid;gap:2px;min-width:0}
+.xy-wf-check{flex:0 0 auto;width:16px;height:16px;margin-top:1px;border:1px solid rgba(224,178,123,.55);border-radius:4px;position:relative;transition:background .15s,border-color .15s;cursor:pointer}
+.xy-wf-check:hover{border-color:rgba(239,199,133,.9)}
+.xy-wf-choice.selected .xy-wf-check{background:rgba(239,199,133,.92);border-color:rgba(239,199,133,.95)}
+.xy-wf-choice.selected .xy-wf-check::after{content:"";position:absolute;left:5px;top:1px;width:4px;height:9px;border:solid #2a1c08;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.xy-wf-add{border-style:dashed!important;opacity:.9}
+.xy-wf-add .xy-wf-body strong{color:#efc785}
 .xy-fields{display:grid;gap:8px;margin-top:10px}
 .xy-fields label{display:grid;gap:4px;color:var(--xy-muted);font-size:12px}
 .xy-fields input,.xy-fields textarea,.xy-fields select,.xy-workshop-toolbar input,.xy-workshop-toolbar select{width:100%;min-width:0;background:rgba(11,8,5,.82);border:1px solid rgba(224,178,123,.28);color:var(--xy-text);padding:7px;font:inherit}
@@ -900,10 +909,12 @@
     <section class="xy-pane" data-xy-opening-pane="3" hidden>
       <article class="xy-panel">
         <h3>世界因子</h3>
+        <!-- 3.4.9 #4c/#4d：真勾选框（点框=切换选中）+ 点因子其他区域=开编辑浮窗；末尾"+"槽=新建自定义因子 -->
         <div class="xy-choice-grid" data-xy-check-group="selected_world_factors" style="margin-top:10px">
-          <button type="button" class="xy-choice" data-xy-check-value="单性世界"><strong>单性世界</strong><span>这个世界只有女性。</span></button>
-          <button type="button" class="xy-choice" data-xy-check-value="无自然生育"><strong>无自然生育</strong><span>人类没有自然生育能力。</span></button>
-          <button type="button" class="xy-choice" data-xy-check-value="30天后丧尸病毒爆发"><strong>30天后丧尸病毒爆发</strong><span>开局第30天病毒全面爆发，校园沦为末日孤岛。</span></button>
+          <button type="button" class="xy-choice xy-wf-choice" data-xy-check-value="单性世界"><i class="xy-wf-check" aria-hidden="true"></i><span class="xy-wf-body"><strong>单性世界</strong><span>这个世界只有女性。</span></span></button>
+          <button type="button" class="xy-choice xy-wf-choice" data-xy-check-value="无自然生育"><i class="xy-wf-check" aria-hidden="true"></i><span class="xy-wf-body"><strong>无自然生育</strong><span>人类没有自然生育能力。</span></span></button>
+          <button type="button" class="xy-choice xy-wf-choice" data-xy-check-value="30天后丧尸病毒爆发"><i class="xy-wf-check" aria-hidden="true"></i><span class="xy-wf-body"><strong>30天后丧尸病毒爆发</strong><span>开局第30天病毒全面爆发，校园沦为末日孤岛。</span></span></button>
+          <button type="button" class="xy-choice xy-wf-choice xy-wf-add" data-xy-wf-add><span class="xy-wf-body"><strong>+ 自定义因子</strong><span>点此新建一条</span></span></button>
         </div>
         <div class="xy-fields">
           <label>自定义世界因子<textarea data-xy-opening-field="custom_world_factor" placeholder="每行一条，会随预设世界因子一起写入。"></textarea></label>
