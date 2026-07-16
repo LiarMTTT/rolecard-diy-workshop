@@ -149,7 +149,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.7.0-stability-r58-20260717';
+  const GIT_RUNTIME_REVISION = '3.7.0-stability-r59-20260717';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -11460,7 +11460,7 @@
   const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
   // 3.7.0 #3：随 opening-page.html 的容器查询修复同步更新（改了远程 HTML 必须重算此 pin，
   // 否则 verifyOpeningPageHtml 会抛「远程开局页完整性校验失败」→ 玩家的开局页直接加载不出来）。
-  const OPENING_PAGE_SHA256 = '6da39b2b9be8e6323950801f43fde135c8171b84f83cef5886e04dfaae4ec0f5';
+  const OPENING_PAGE_SHA256 = '6d6966cc793d43a3acfdb7734d956630bbbf9008b385c16a7f2172d21226b903';
   const OPENING_PAGE_SOURCES = (() => {
     const list = [];
     // r51 根治：loader 在 import 本文件前把所用基址（通常为 @commit 固定 pin）写入 window.__xyRuntimeBase——

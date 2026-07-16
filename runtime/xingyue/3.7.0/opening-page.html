@@ -558,11 +558,24 @@
   .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero .xy-hero-status{flex:1 1 100%!important;width:100%!important;order:3;margin-top:2px}
 }
 
-/* ===== 2.9.9 工坊 header 工具条 + wizard 留白 ===== */
-.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero{display:flex!important;grid-template-columns:none!important;align-items:center;justify-content:space-between;gap:12px;border:0!important;border-bottom:1px solid rgba(224,178,123,.18)!important;border-radius:0!important;background:linear-gradient(90deg,rgba(224,178,123,.14),rgba(224,150,138,.05))!important;padding:12px 16px!important}
+/* ===== 2.9.9 工坊 header 工具条 + wizard 留白 =====
+   3.7.1 工坊头部遮挡根治（真机反馈：另一台设备上「关闭」按钮与「工坊已连接」pill 叠在一起、
+   「创意工坊」被压成竖排）：
+   病灶 = 下面这条基础规则只写了 display:flex，**没写 flex-wrap → 默认 nowrap**；唯一把它改成 wrap 的
+   是 ~L555 那块 3.5.x 热修，而那块挂在 @container 上 —— **容器查询是较新特性（Chrome 105+/Safari 16+），
+   旧内核 WebView 整块不认 → 直接跳过 → 退回 nowrap → 三个子项硬挤一行 → 挤压重叠**。
+   这正是「同版本、你没事、别人中招」的原因（与该设备连 webp 都解不了是同一类：新特性缺失）。
+   处置：**基础规则自身就正确，不靠任何断点**——wrap 让放不下时自然换行；按钮组 flex:0 0 auto
+   拿到最高优先级（永不被压缩、永不被遮挡，总监拍板「退出按钮优先」）；标题可收缩但不竖排。
+   ~L555 的 @container 块保留作渐进增强（新浏览器上做更彻底的三段堆叠），失效也不再有害。 */
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero{display:flex!important;grid-template-columns:none!important;flex-wrap:wrap!important;align-items:center;justify-content:space-between;gap:8px 12px;border:0!important;border-bottom:1px solid rgba(224,178,123,.18)!important;border-radius:0!important;background:linear-gradient(90deg,rgba(224,178,123,.14),rgba(224,150,138,.05))!important;padding:12px 16px!important}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero>div:first-child p{display:none}
-.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero h3{font-size:16px!important;margin:0}
-.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero .xy-actions{margin:0!important;flex-wrap:nowrap;gap:7px}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero h3{font-size:16px!important;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 标题可让位（0 1 auto = 空间紧张时先压它），但 h3 上的 nowrap 保证「创意工坊」不会被压成竖排 */
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero>div:first-child{flex:0 1 auto;min-width:0}
+/* 状态 pill 最后让位：可收缩、放不下就整条换到下一行，绝不去压按钮 */
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero .xy-hero-status{flex:0 1 auto;min-width:0;margin-top:0}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero .xy-actions{margin:0!important;flex:0 0 auto!important;flex-wrap:nowrap;gap:7px}
 .xy-opening-page .xy-view[data-xy-view="wizard"] .xy-panel:has(>[data-xy-enabled-preview]){display:flex;flex-direction:column}
 .xy-opening-page .xy-view[data-xy-view="wizard"] [data-xy-enabled-preview]{flex:1 1 auto;display:grid;place-items:center;text-align:center;min-height:120px}
 
