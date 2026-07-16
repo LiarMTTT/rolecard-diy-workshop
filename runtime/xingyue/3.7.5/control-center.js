@@ -149,7 +149,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.7.5-stability-r61-20260717';
+  const GIT_RUNTIME_REVISION = '3.7.5-stability-r62-20260717';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -1174,12 +1174,14 @@
       source = String(asset?.dataUrl || asset?.url || asset?.src || '');
     }
     if (/^https?:\/\//i.test(source)) return { portableUrl:source, dataUrl:'' };
-    if (/^data:image\/(?:png|jpeg|webp);base64,/i.test(source)) return { portableUrl:'', dataUrl:source };
+    // 四种格式一视同仁：导入侧 accept 与 normalizeImageSource 都认 gif，上传侧漏了它
+    // → 玩家导入 GIF 立绘后一发布就报「找不到角色媒体库文件」。
+    if (/^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(source)) return { portableUrl:'', dataUrl:source };
     if (/^blob:/i.test(source)) {
       const response = await fetch(source);
       if (!response.ok) throw new Error('无法读取本地角色图片');
       const dataUrl = await blobAsDataUrl(await response.blob());
-      if (!/^data:image\/(?:png|jpeg|webp);base64,/i.test(dataUrl)) throw new Error('角色图片仅支持 PNG、JPEG 或 WebP');
+      if (!/^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(dataUrl)) throw new Error('角色图片仅支持 PNG、JPEG、WebP 或 GIF');
       return { portableUrl:'', dataUrl };
     }
     throw new Error('找不到角色媒体库文件：' + key);

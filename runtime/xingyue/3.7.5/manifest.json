@@ -2,8 +2,8 @@
   "schemaVersion": "1",
   "cardScope": "xingyue",
   "runtimeVersion": "3.7.5",
-  "runtimeRevision": "3.7.5-stability-r61-20260717",
-  "publishedAt": "2026-07-16T15:59:14.733Z",
+  "runtimeRevision": "3.7.5-stability-r62-20260717",
+  "publishedAt": "2026-07-16T16:31:26.085Z",
   "modules": [
     {
       "id": "bubble-css",
@@ -14,8 +14,8 @@
     {
       "id": "control-center",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.7.5/control-center.js",
-      "bytes": 723503,
-      "sha256": "3f11b0ea3bbe2eb32c3a53cdfec7dd91c70d864279b00ec8c70bbf19086b8e05"
+      "bytes": 723717,
+      "sha256": "371a117e96c17e63d0ff73bbf93c8ec23caf0513c22ccb01174e066e79fe5014"
     },
     {
       "id": "omni-analysis",
