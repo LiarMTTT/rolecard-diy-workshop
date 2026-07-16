@@ -149,7 +149,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.7.0-stability-r57-20260716';
+  const GIT_RUNTIME_REVISION = '3.7.0-stability-r58-20260717';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -1867,7 +1867,10 @@
   function resolveOpeningStory(draft, options = {}) {
     const sourceDraft = normalizeOpeningDraftData(draft);
     const compatibility = openingStoryCompatibility(sourceDraft, options);
-    if (!compatibility.compatible) throw new Error(compatibility.message);
+    // 3.7.1：年级不匹配不再阻断（总监拍板）。这里是发送前的正文组装器（composeOpeningMessage → 本函数），
+    // 与 start-recall 里那处是同一道拦截的两个点 —— 只去掉 handler 那处没用，发送时照样在这里被 throw。
+    // 不匹配时仍照常组装正文，grade 取解析结果（未选年级时 resolveEffectiveGrade 有默认兜底），
+    // 仅由调用方给一次提示。openingStoryCompatibility 保留，UI 仍据它显示「套用通用到访模板」的入口。
     const grade = compatibility.grade.value;
     const validated = validateOpeningStory(sourceDraft.openingDay.body, { grade });
     const playerName = String(options.playerName ?? resolveCurrentPlayerName()).trim() || '玩家';
@@ -11352,11 +11355,28 @@
         // 不在开局页内执行、不写世界书、不直接 generate —— 走真实玩家输入链路。
         collectFields();
         const draft = captureOpeningDayField({ immediate: true });
+        // 3.7.1：年级不再拦开局（总监拍板「不再限制年级选择，没选就用默认」）。
+        // 病灶：玩家选「大学一年级」等 band，若正文 openingDay.gradeScope 不含该 band 就直接 throw
+        // 「当前正文不适用于…请先套用通用到访模板」→ **完全无法开局**；且这个 throw 与工坊注入无关，
+        // 所以玩家先点「注入创意工坊内容」再点「开始回忆」照样被拦（真机反馈实证）。
+        // 改为：不匹配只提示、不阻断，按玩家的选择照常开局；未选年级时 resolveEffectiveGrade 本就有默认兜底。
         const compatibility = openingStoryCompatibility(draft);
-        if (!compatibility.compatible) throw new Error(compatibility.message);
+        if (!compatibility.compatible) toast('info', compatibility.message.replace(/请先套用通用到访模板，再按需编辑后发送。?/, '已按你的选择继续开局；如需更贴合的正文，可用「套用通用到访模板」。'));
         validateOpeningStory(draft.openingDay?.body, { grade:compatibility.grade.value });
         if (!confirm('开始回忆：将把「入学日正文 + 身份设定」填入聊天输入框并自动发送，形成你的开局发言（AI 据此撰写正文并初始化开局变量）。确定？')) return;
         const sendContext = openingChatContextSnapshot();
+        // 3.7.1：开始回忆前自动注入工坊内容（总监拍板「点击开始回忆的时候先进行注入」）。
+        // 玩家此前必须先点「注入创意工坊内容」再点「开始回忆」两步；漏了第一步，开局就少了工坊包。
+        // 顺序讲究：先 workshop+content（工坊包 + 世界因子 + 功能拓展），再 identity。
+        // 反过来会出事 —— identity 的 deleteScopes 是 ['opening']，会把先写的世界因子/功能拓展删掉；
+        // 而 identity 不碰 workshop 域，所以工坊包不会被后一步误删。content 被两步各写一次，
+        // 最终以 identity 那次为准（内容相同，幂等）。
+        // 工坊是可选内容：注入失败只提示、不阻断开局（真正必须常驻的是身份，由下面的 persist 把关）。
+        try {
+          await controlCenter()?.writeOpeningWorldbookEntries?.(draft, { scope: 'workshop+content', expectedContext: sendContext });
+        } catch (error) {
+          toast('warn', '创意工坊内容注入失败，将继续开局（可稍后在开局页单独重试）：' + (error?.message || error));
+        }
         // 身份常驻失败时默认停止；只有当前聊天内显式选择“仅本次继续”才允许进入发送链。
         const identityWrite = await persistIdentityBeforeSend(draft, sendContext);
         const wbResult = identityWrite.result;
