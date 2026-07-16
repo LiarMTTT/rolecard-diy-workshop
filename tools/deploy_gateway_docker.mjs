@@ -24,7 +24,7 @@ const port = args.port || '8787';
 const dataDir = args.dataDir || '/var/lib/rolecard-diy-workshop';
 const publicDir = args.publicDir || secretConfig?.storage?.publicPackageDir || '/usr/local/lighthouse/softwares/cloudreve/workshop-public/xingyue';
 const healthUrl = args.healthUrl || (secretConfig?.gateway?.publicBaseUrl ? `${String(secretConfig.gateway.publicBaseUrl).replace(/\/+$/, '')}/api/workshop/health` : '') || 'https://43-132-171-157.sslip.io/api/workshop/health';
-const corsOrigins = collectOrigins(args);
+const corsOriginDefault = String(args.corsOrigin || args.corsorigin || process.env.WORKSHOP_CORS_ORIGINS || '*').trim() || '*';
 let temporaryIdentityDir = '';
 
 function parseArgs(items) {
@@ -44,20 +44,6 @@ function parseArgs(items) {
     }
   }
   return out;
-}
-
-function collectOrigins(parsed) {
-  const values = [];
-  if (parsed.corsOrigin) values.push(...String(parsed.corsOrigin).split(','));
-  if (process.env.WORKSHOP_CORS_ORIGINS) values.push(...String(process.env.WORKSHOP_CORS_ORIGINS).split(','));
-  if (secretConfig?.gateway?.corsOrigin) values.push(...String(secretConfig.gateway.corsOrigin).split(','));
-  values.push(
-    'http://127.0.0.1:8000',
-    'http://localhost:8000',
-    'http://127.0.0.1:8766',
-    'http://localhost:8766',
-  );
-  return [...new Set(values.map(item => item.trim()).filter(Boolean))];
 }
 
 function loadSecretConfig(filename) {
@@ -98,7 +84,7 @@ function resolveIdentityFile() {
 
 function sshOptions() {
   const identity = resolveIdentityFile();
-  return identity ? ['-i', identity, '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=accept-new'] : [];
+  return identity ? ['-i', identity, '-o', 'IdentitiesOnly=yes', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=45', '-o', 'StrictHostKeyChecking=accept-new'] : [];
 }
 
 function cleanupTemporaryIdentity() {
@@ -128,18 +114,11 @@ test -f "$APP_DIR/server.js"
 test -f "$APP_DIR/shared/workshop-package-contract.js"
 STAMP=$(date +%Y%m%d%H%M%S)
 cp .env ".env.bak.$STAMP"
-CORS=$(grep '^CORS_ORIGIN=' .env | cut -d= -f2- | tr -d '\\r' || true)
-for ORIGIN in ${corsOrigins.map(shQuote).join(' ')}; do
-  ORIGIN=$(printf '%s' "$ORIGIN" | tr -d '\\r')
-  case ",$CORS," in
-    *",$ORIGIN,"*) ;;
-    *) CORS="$CORS,$ORIGIN" ;;
-  esac
-done
-CORS=$(printf '%s' "$CORS" | tr ',' '\\n' | tr -d '\\r' | awk 'NF && !seen[$0]++' | paste -sd, -)
-TMP=$(mktemp)
-awk -v cors="$CORS" 'BEGIN{done=0} /^CORS_ORIGIN=/{print "CORS_ORIGIN=" cors; done=1; next} {print} END{if(!done) print "CORS_ORIGIN=" cors}' .env > "$TMP"
-mv "$TMP" .env
+# CORS_ORIGIN 是既定架构决策（默认 * 全放：玩家酒馆 origin 不可枚举，精确白名单会锁死全体玩家登录）。
+# deploy 不改写 .env 里已有的值，只在该键缺失时补默认。勿再加「剔除 *」或「自动追加白名单」逻辑（见 E18）。
+if ! grep -q '^CORS_ORIGIN=' .env; then
+  printf 'CORS_ORIGIN=%s\\n' ${shQuote(corsOriginDefault)} >> .env
+fi
 TMP=$(mktemp)
 awk '
 BEGIN {

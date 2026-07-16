@@ -42,7 +42,11 @@ npm start
 
 Use a reverse proxy such as Nginx/Caddy to provide HTTPS and your public domain.
 
-Cross-origin card clients use `Authorization: Bearer`; Cookie fallback is accepted only for same-origin Gateway pages. `CORS_ORIGIN=*` never enables credentialed CORS.
+Cross-origin card clients use `Authorization: Bearer`; Cookie fallback is accepted only for same-origin Gateway pages.
+
+`CORS_ORIGIN` defaults to `*`, and that wildcard is a deliberate architecture decision — do not narrow it to an allow-list. Player SillyTavern origins are not enumerable (loopback, custom ports, LAN addresses, self-hosted cloud taverns all differ), so an exact allow-list locks every player out of login. The wildcard stays safe because card clients send `Authorization: Bearer` explicitly with `credentials:'omit'`: a bearer token is not an automatic credential, so it is unaffected by the wildcard restriction, and a request without a valid token is still rejected with 401. The only path that genuinely needs an exact origin is the Cookie path, which serves the same-origin admin page and therefore does not go through CORS at all. Setting `CORS_ORIGIN` to an explicit comma-separated list is still honoured for private deployments, but it must never become the default: 3.5.0 r49 made exactly that change and broke login for every player until it was reverted (see E18 in the card-workflow skill).
+
+Anonymous `GET /api/workshop/packages` and package-detail reads additionally carry credential-free wildcard CORS via `publicRead`, so the static Pages portal can browse approved packages even under an explicit allow-list. Note that the global `OPTIONS` short-circuit does **not** pass `publicRead` — and must not, since a preflight never carries `Authorization`, so it would always take the anonymous branch and collapse `access-control-allow-headers` to `accept`, rejecting every authenticated POST/PUT/DELETE preflight.
 
 ## API
 

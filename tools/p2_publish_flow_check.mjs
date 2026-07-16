@@ -68,7 +68,7 @@ async function startGateway() {
       DEV_LOGIN_ENABLED: 'true',
       REQUIRE_REVIEW: 'true',
       COOKIE_SAME_SITE: 'Lax',
-      CORS_ORIGIN: 'http://127.0.0.1:8000,http://localhost:8000',
+      CORS_ORIGIN: '*,http://127.0.0.1:8000,http://localhost:8000',
       PACKAGE_STORE_DIR: packageStoreDir,
       INDEX_FILE: indexFile,
       PUBLISHER_FILE: publisherFile,
@@ -145,6 +145,48 @@ async function waitForHealth() {
 }
 
 async function runFlow() {
+  const publicRead = await request('/api/workshop/packages', {
+    headers: { origin: 'https://liarmttt.github.io' },
+  });
+  assert(publicRead.headers.get('access-control-allow-origin') === '*', 'anonymous public package reads allow static portals', 'credential-free wildcard');
+  assert(!publicRead.headers.get('access-control-allow-credentials'), 'anonymous public package reads do not enable credentials', 'credentials omitted');
+  assert(publicRead.headers.get('access-control-allow-methods') === 'GET,OPTIONS', 'anonymous public package reads advertise read-only methods', 'GET and OPTIONS only');
+  const missingPublicDetail = await request('/api/workshop/packages/missing-public-package', {
+    headers: { origin: 'http://127.0.0.1:4173' },
+    expected: 404,
+  });
+  assert(missingPublicDetail.headers.get('access-control-allow-origin') === '*', 'anonymous missing package detail keeps readable 404 CORS', 'wildcard 404');
+  // CORS_ORIGIN=* 是既定架构决策（E18）：玩家酒馆 origin 不可枚举，任意 origin 都必须拿得到 ACAO，
+  // 否则全体玩家登录崩。安全边界不由 CORS 把守——由「无有效 token 一律 401」+「* 时绝不发
+  // allow-credentials（Cookie 跨源因此拿不到响应）」把守。勿把断言改回「陌生 origin 拿不到 ACAO」。
+  const protectedMe = await request('/api/workshop/me', {
+    headers: { origin: 'http://127.0.0.1:4173' },
+    expected: 401,
+  });
+  assert(protectedMe.headers.get('access-control-allow-origin') === '*', 'any origin can reach protected endpoints under wildcard', 'wildcard');
+  assert(!protectedMe.headers.get('access-control-allow-credentials'), 'wildcard never enables credentialed CORS', 'no allow-credentials');
+  const protectedPreflight = await request('/api/workshop/packages', {
+    method: 'OPTIONS',
+    headers: {
+      origin: 'http://127.0.0.1:4173',
+      'access-control-request-method': 'POST',
+      'access-control-request-headers': 'authorization,content-type',
+    },
+    expected: 204,
+  });
+  assert(protectedPreflight.headers.get('access-control-allow-origin') === '*', 'any origin can preflight package writes under wildcard', 'wildcard');
+  assert(String(protectedPreflight.headers.get('access-control-allow-headers')).includes('authorization'), 'preflight keeps advertising the authorization header', 'authorization allowed');
+  const credentialedAnonymousRead = await request('/api/workshop/packages', {
+    headers: { origin: 'http://127.0.0.1:4173', authorization: 'Bearer invalid-token' },
+  });
+  assert(credentialedAnonymousRead.headers.get('access-control-allow-origin') === '*', 'bearer-carrying reads stay reachable under wildcard', 'wildcard');
+  assert(!credentialedAnonymousRead.headers.get('access-control-allow-credentials'), 'bearer-carrying reads never enable credentialed CORS', 'no allow-credentials');
+  const cookieTaggedAnonymousRead = await request('/api/workshop/packages', {
+    cookie: 'untrusted_probe=1',
+    headers: { origin: 'http://127.0.0.1:4173' },
+  });
+  assert(!cookieTaggedAnonymousRead.headers.get('access-control-allow-credentials'), 'cookie-tagged cross-origin reads never enable credentialed CORS', 'no allow-credentials');
+
   await assertLoginHandoffFlow();
   const blocked = await request('/api/workshop/packages', {
     method: 'POST',
@@ -155,6 +197,12 @@ async function runFlow() {
   assert(String(blocked.body.error || '').includes('blocked-package-type'), 'blocked type rejected', blocked.body.error);
 
   const cookie = await devLoginCookie('owner');
+  const credentialedPublicRead = await request('/api/workshop/packages', {
+    cookie,
+    headers: { origin: 'http://127.0.0.1:8000' },
+  });
+  assert(credentialedPublicRead.headers.get('access-control-allow-origin') === 'http://127.0.0.1:8000', 'credentialed package reads retain exact configured origin', 'ST origin');
+  assert(credentialedPublicRead.headers.get('access-control-allow-credentials') === 'true', 'credentialed package reads keep credentialed CORS', 'credentials enabled');
   const me = await request('/api/workshop/me', { cookie, expected: 200 });
   assert(me.body.loggedIn === true && me.body.publisherId, 'owner login', 'dev ownership key accepted');
   const sameIdentityCookies = await Promise.all([devLoginCookie('same-discord-hash'), devLoginCookie('same-discord-hash')]);
@@ -262,8 +310,12 @@ async function runFlow() {
   });
   assert(duplicate.body.error === 'package-exists', 'duplicate POST rejected', '409 package-exists');
 
-  const pendingPublic = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, { expected: 404 });
+  const pendingPublic = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, {
+    headers: { origin: 'http://127.0.0.1:4173' },
+    expected: 404,
+  });
   assert(pendingPublic.status === 404, 'pending hidden from public detail', 'HTTP 404');
+  assert(pendingPublic.headers.get('access-control-allow-origin') === '*', 'pending public detail returns readable anonymous 404', 'wildcard 404');
   await assertPublicIndex(false, 'pending hidden from public index');
   await assertPublicFile(false, 'pending not synced to public dir');
 
@@ -282,8 +334,12 @@ async function runFlow() {
   assert(approved.body.reviewStatus === 'approved' && approved.body.revision === 2, 'admin approve advances CAS revision', 'approved revision 2');
   await assertPublicIndex(true, 'approved appears in public index');
 
-  const publicDetail = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, { expected: 200 });
+  const publicDetail = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, {
+    headers: { origin: 'https://liarmttt.github.io' },
+    expected: 200,
+  });
   assert(publicDetail.body.payload && !Object.hasOwn(publicDetail.body, 'ownerPublisherId'), 'public detail sanitized', 'payload present, owner hidden');
+  assert(publicDetail.headers.get('access-control-allow-origin') === '*', 'anonymous approved detail allows static portals', 'credential-free wildcard');
   await assertPublicFile(true, 'approved synced to public dir');
 
   const stale = await request(`/api/workshop/packages/${encodeURIComponent(packageId)}`, {

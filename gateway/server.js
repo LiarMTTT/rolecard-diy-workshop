@@ -51,7 +51,9 @@ const REVIEW_STATES = new Set(['pending', 'approved', 'rejected', 'withdrawn']);
 const ADMIN_PAGE_FILE = path.join(GATEWAY_ROOT, 'public', 'admin.html');
 const LOGIN_SUCCESS_PAGE_FILE = path.join(GATEWAY_ROOT, 'public', 'login-success.html');
 const SESSION_TTL_MS = Number(env.SESSION_TTL_MS) || 30 * 24 * 60 * 60 * 1000; // 会话 token 有效期，默认 30 天
-const LOGIN_HANDOFF_TTL_MS = Math.max(60_000, Math.min(Number(env.LOGIN_HANDOFF_TTL_MS) || 3 * 60 * 1000, 10 * 60 * 1000));
+// 默认 8 分钟：首次 Discord 授权要先登录再勾权限，3 分钟常不够；超时后 completeLoginHandoff 返 false，
+// 卡侧只会轮询到「等待已超时」且无法诊断。上限 10 分钟须与卡内 control-center 的 expiresInMs 校验对齐，勿超。
+const LOGIN_HANDOFF_TTL_MS = Math.max(60_000, Math.min(Number(env.LOGIN_HANDOFF_TTL_MS) || 8 * 60 * 1000, 10 * 60 * 1000));
 const LOGIN_HANDOFF_ID_RE = /^xyh_[A-Za-z0-9_-]{24,120}$/;
 const LOGIN_HANDOFF_CHALLENGE_RE = /^[a-f0-9]{64}$/;
 const LOGIN_HANDOFF_MAX = Math.max(128, Math.min(Number(env.LOGIN_HANDOFF_MAX) || 4096, 16_384));
@@ -79,11 +81,20 @@ function loginHandoffRetryAfterSeconds() {
 
 function corsHeaders(req, headers = {}, options = {}) {
   const requestOrigin = String(req?.headers?.origin || '');
-  const hasRequestCredentials = Boolean(req?.headers?.authorization || req?.headers?.cookie);
+  const hasCookie = Boolean(req?.headers?.cookie);
+  const hasRequestCredentials = Boolean(req?.headers?.authorization) || hasCookie;
   const publicAnonymousRead = options.publicRead && !hasRequestCredentials;
   const configured = String(CORS_ORIGIN || '*').split(',').map(item => item.trim()).filter(Boolean);
   let allowOrigin = '';
+  // CORS_ORIGIN=* 是既定架构决策（2026-07-15 总监拍板）：玩家酒馆 origin 不可枚举
+  // （本地/改端口/LAN/自建云酒馆各不相同），精确白名单必然锁死全体玩家登录（E18）。
+  // 判据是「有无 Cookie」而非「有无 Authorization」：Bearer 由 JS 显式携带且卡内一律
+  // credentials:'omit'，不是自动凭据，故不受 * 限制——无 Cookie 时放 * 合法且安全
+  // （没有有效 token 照样 401）。只有 Cookie 是浏览器自动带的，必须精确 origin +
+  // allow-credentials 才放行，这条路径服务同源 admin 页（同源本就不走 CORS）。
   if (publicAnonymousRead) allowOrigin = '*';
+  else if (hasCookie) { if (requestOrigin && configured.includes(requestOrigin)) allowOrigin = requestOrigin; }
+  else if (configured.includes('*')) allowOrigin = '*';
   else if (requestOrigin && configured.includes(requestOrigin)) allowOrigin = requestOrigin;
   const result = {
     'access-control-allow-headers': publicAnonymousRead ? 'accept' : 'authorization,content-type,if-match,x-package-revision',
