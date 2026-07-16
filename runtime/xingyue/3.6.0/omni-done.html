@@ -1,0 +1,40 @@
+<div style="width:95%;margin:12px auto;">
+<details class="omni-sync-done" open style="background:linear-gradient(180deg,#0a1422 0%,#050912 100%);border:1px solid #2a4858;border-left:3px solid #4fd97a;box-shadow:0 0 12px rgba(80,217,122,.15),inset 0 0 20px rgba(0,0,0,.5);overflow:hidden;clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);">
+  <summary class="xy-omni-summary">
+    <span class="xy-omni-led">●</span>
+    <span class="xy-omni-title">〔 OMNI-NEXUS // VARIABLE STREAM 〕</span>
+    <span class="xy-omni-complete">COMPLETE</span>
+    <span class="xy-omni-tools">
+      <button type="button" data-xy-analysis-edit title="查看或编辑本楼预分析">预分析</button>
+      <button type="button" data-xy-var-tune title="微调本楼变量">微调</button>
+    </span>
+  </summary>
+  <div class="xy-omni-body">{{CONTENT}}</div>
+</details>
+</div>
+<style>
+.omni-sync-done summary::marker{display:none}
+.omni-sync-done summary::-webkit-details-marker{display:none}
+.xy-omni-summary{padding:10px 14px;color:#d4dde2;cursor:pointer;list-style:none;font-weight:bold;display:flex;align-items:center;gap:8px;background:linear-gradient(90deg,rgba(80,217,122,.06),transparent);font-family:Consolas,monospace;letter-spacing:0}
+.xy-omni-led{color:#4fd97a;font-size:.9em;text-shadow:0 0 8px #4fd97a}
+.xy-omni-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xy-omni-complete{font-size:.7em;color:#4fd97a;letter-spacing:0}
+.xy-omni-tools{display:flex;gap:6px;flex:0 0 auto}
+.xy-omni-tools button{min-height:32px;padding:4px 10px;border-radius:3px;font:inherit;font-size:12px;letter-spacing:0;cursor:pointer;background:rgba(80,217,122,.08);color:#d4f5e0;border:1px solid rgba(80,217,122,.5)}
+.xy-omni-tools button[data-xy-analysis-edit]{color:#cdeef7;background:rgba(79,208,230,.08);border-color:rgba(79,208,230,.55)}
+.xy-omni-tools button:hover{background:rgba(80,217,122,.18)}
+.xy-omni-tools button[data-xy-analysis-edit]:hover{background:rgba(79,208,230,.18)}
+.xy-omni-body{padding:10px 12px;font-family:Consolas,monospace;color:#8b9aac}
+.xy-omni-result{min-width:0}
+.xy-omni-result.is-ok{color:#4fd97a}
+.xy-omni-result.is-error{color:#e07b7b}
+.xy-omni-stream{min-width:0;max-height:360px;overflow:auto}
+.xy-omni-analysis-text,.xy-omni-patch{margin:0;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:12px/1.55 Consolas,monospace}
+.xy-omni-analysis-text{margin-bottom:14px;color:#a9c0cd}
+.xy-omni-patch{color:inherit}
+.xy-omni-validation{display:block;margin-top:12px;font-size:11px;line-height:1.2;color:inherit}
+.xy-omni-errors{margin-top:8px;font-size:12px;color:inherit}
+.xy-omni-errors ul{margin:0;padding-left:18px;display:grid;gap:4px}
+@media(max-width:620px){.xy-omni-summary{flex-wrap:wrap}.xy-omni-title{flex-basis:calc(100% - 90px)}.xy-omni-tools{width:100%}.xy-omni-tools button{flex:1}.xy-omni-stream{max-height:260px}}
+@media(pointer:coarse){.xy-omni-tools button{min-height:44px}}
+</style>
