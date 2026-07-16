@@ -4721,7 +4721,7 @@
   }
   async function openWorldbookManager() { return ensureWorldbookManagerUi().open(); }
   function closeWorldbookManager() { worldbookManagerUi?.close(); }
-  const WORLDBOOK_EDITOR_SOURCE_SHA256 = '77eebc7faf136fc5b25c7b202319f69663d7d6a0e9b95c2312ca9902d5ba89be';
+  const WORLDBOOK_EDITOR_SOURCE_SHA256 = 'aa7b617f4f8a0a556cd00648e403f1ad3d46715f3eb7a35ffb88357226d9e93b';
   const WORLDBOOK_EDITOR_URLS = [
     RUNTIME_BASE_URL + '/worldbook-editor.js?v=p7-r1',
     'https://testingcf.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.0/worldbook-editor.js?v=p7-r1',
@@ -11476,10 +11476,10 @@
   // first_mes 仅放 [data-xy-opening-remote] 短标记；控制中心 fetch 远程开局页 + 注入 + 绑定（display-only，绝不进 LLM）。
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
-  const OPENING_PAGE_REVISION = '20260714-349-stability-r40';
+  const OPENING_PAGE_REVISION = '20260717-390-stability-r63';
   // 3.7.5 #3：随 opening-page.html 的容器查询修复同步更新（改了远程 HTML 必须重算此 pin，
   // 否则 verifyOpeningPageHtml 会抛「远程开局页完整性校验失败」→ 玩家的开局页直接加载不出来）。
-  const OPENING_PAGE_SHA256 = 'e3b581a0aeec1b4755d86fd1f6aab5007aec6ee6a37e865b3120c172b4253bc3';
+  const OPENING_PAGE_SHA256 = '74ab7dd4d9606528fa8218c048b83a3c47e2a4a9657bc9c36b557b437f1a3ca4';
   const OPENING_PAGE_SOURCES = (() => {
     const list = [];
     // r51 根治：loader 在 import 本文件前把所用基址（通常为 @commit 固定 pin）写入 window.__xyRuntimeBase——
