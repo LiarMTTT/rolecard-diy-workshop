@@ -59,5 +59,6 @@
       "bytes": 173473,
       "sha256": "6b73532664f05c2946c198897710bf74935952d2b1656f15b2fefb3e8d9f03cd"
     }
-  ]
+  ],
+  "pinnedCommit": "4aa942c465c459b6c5fedb26a3247c11b5f88a0f"
 }
