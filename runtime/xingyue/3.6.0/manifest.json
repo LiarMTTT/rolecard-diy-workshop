@@ -57,8 +57,8 @@
       "id": "worldbook-factory-baseline",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.6.0/worldbook-factory-baseline.json",
       "bytes": 173473,
-      "sha256": "968c2861450590d29b0c938e2f35feeded6f44bd17e5d0212e592c40510654cc"
+      "sha256": "6b73532664f05c2946c198897710bf74935952d2b1656f15b2fefb3e8d9f03cd"
     }
   ],
-  "pinnedCommit": "f5fa0ff26903d34f5b5aa15f6eed5e9c37ece3ee"
+  "pinnedCommit": ""
 }
