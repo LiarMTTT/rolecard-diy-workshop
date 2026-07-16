@@ -149,7 +149,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.7.0-stability-r59-20260717';
+  const GIT_RUNTIME_REVISION = '3.7.0-stability-r60-20260717';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -837,7 +837,18 @@
   // P8：无状态 Bearer 客户端。昵称与头像只保存在内存；跨域 API 不依赖第三方 Cookie。
   function getWorkshopToken() { try { return localStorage.getItem('xingyue-workshop-token') || ''; } catch (_) { return ''; } }
   function setWorkshopToken(token) { try { if (token) localStorage.setItem('xingyue-workshop-token', String(token)); else localStorage.removeItem('xingyue-workshop-token'); } catch (_) {} }
-  function getWorkshopIdentity() { return workshopIdentity ? { ...workshopIdentity } : null; }
+  // 3.7.1 署名加固（真机反馈：改过两轮仍恒为「未署名」）：
+  // workshopIdentity 是**内存变量**，只在 acceptWorkshopLogin 时赋值、靠 checkWorkshopAuth 从 sessionStorage 恢复。
+  // 只要取值那一刻它还是 null（页面恢复/面板重挂载后尚未走过 checkWorkshopAuth），本函数就返回 null →
+  // 5 个发布入口（身份模板 8859 / 角色 9045 / 世界因子 11029 / 功能拓展 11084 / 正文模板 8838）
+  // 一致回落 '未署名'，且**静默无报错**——这正是「登录了、头部也显示着 Discord 名，发出去却是未署名」的原因。
+  // 回落 sessionStorage 的会话级显示名：一处兜底，5 个入口与 publishPackage 全部受益。
+  // 隐私铁律不变：显示名只驻留当前会话，不写 localStorage、不入 gateway 的 Discord 身份存储。
+  function getWorkshopIdentity() {
+    if (workshopIdentity) return { ...workshopIdentity };
+    const saved = restoreWorkshopIdentityName();
+    return saved ? { name: saved, avatar: '' } : null;
+  }
   // 3.7.0 #4：Discord 显示名做「会话级」持久化（sessionStorage：关标签即清、不入 localStorage、不发 gateway，隐私铁律不破），
   // 供页面刷新/会话恢复后仍能给发布包补署名（/api/workshop/me 只回 loggedIn+publisherId，不回昵称）。
   function workshopSessionStore() { try { return hostWindow()?.sessionStorage || window.sessionStorage || null; } catch (_) { return null; } }
@@ -1233,8 +1244,14 @@
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
     let pkg = validatePackage(input);
     // 发布署名：默认登记发布者 Discord 显示名（自愿公开的包元数据；gateway 不存原始 Discord ID 的隐私铁律不变）
-    if ((!pkg.authorName || pkg.authorName === '未署名' || pkg.authorName === 'anonymous') && workshopIdentity?.name) {
-      pkg = { ...pkg, authorName: String(workshopIdentity.name).slice(0, 80) };
+    // 3.7.1 加固（真机反馈：署名改过两轮仍恒为「未署名」）：
+    // 原实现只认内存变量 workshopIdentity —— 它仅在 acceptWorkshopLogin 时赋值、靠 checkWorkshopAuth 从
+    // sessionStorage 恢复。只要发布那一刻它是 null（页面恢复/重挂载后尚未走过 checkWorkshopAuth、
+    // 或恢复分支未命中），`&& workshopIdentity?.name` 直接短路 → 整个兜底静默跳过 → authorName 停在「未署名」，
+    // 且不留任何报错。改为多源取值：内存 → sessionStorage 会话级显示名，任一有值即可署名。
+    const identityName = String(workshopIdentity?.name || restoreWorkshopIdentityName() || '').trim();
+    if ((!pkg.authorName || pkg.authorName === '未署名' || pkg.authorName === 'anonymous') && identityName) {
+      pkg = { ...pkg, authorName: identityName.slice(0, 80) };
     }
     if (!Number.isInteger(Number(pkg.revision)) || Number(pkg.revision) < 1) {
       const owned = await fetchJson(gatewayBaseUrl() + '/api/workshop/me/packages');
