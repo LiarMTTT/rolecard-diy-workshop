@@ -1305,6 +1305,28 @@ async function deletePackage(id, publisherId, options = {}) {
   return withPackageMutationLock(id, () => deletePackageUnlocked(id, publisherId, options));
 }
 
+// 3.6.0 #6：作者永久删除自己的包（区别于 delete=withdraw 仅打标记）。物理删除包 JSON + 角色资产 bundle + 投票记录，
+// 再刷新公共输出把它从索引清掉。owner-only（比对 ownerPublisherId），隐私铁律不破（只碰 salted hash + publisherId）。
+async function purgePackageUnlocked(id, publisherId, options = {}) {
+  let existing;
+  try { existing = await getPackage(id); } catch { throw new Error('not-found'); }
+  if (existing.ownerPublisherId !== publisherId) throw new Error('not-package-owner');
+  assertRevisionMatch(existing, options.expectedRevision ?? null);
+  await fs.rm(packageFilePath(id), { force: true });
+  if (existing.assetBundle) await removeCharacterBundle(id, existing.assetBundle).catch(() => {});
+  await withVoteMutationLock(async () => {
+    const data = await readVotesUnlocked();
+    if (data.votes && Object.hasOwn(data.votes, id)) { delete data.votes[id]; await writeVotes(data); }
+  });
+  await appendAuditLog({ action: 'package.purged', packageId: id, publisherId }).catch(() => {});
+  await refreshPublicOutputs(options.baseUrl);
+  return { ok: true, id };
+}
+
+async function purgePackage(id, publisherId, options = {}) {
+  return withPackageMutationLock(id, () => purgePackageUnlocked(id, publisherId, options));
+}
+
 async function listPackagesForPublisher(publisherId, baseUrl = PUBLIC_BASE_URL) {
   await ensureStore();
   const names = await fs.readdir(PACKAGE_STORE_DIR).catch(() => []);
@@ -1548,6 +1570,13 @@ async function route(req, res) {
     if (pkg.id !== id) return json(req, res, 400, { error: 'package-id-mismatch' });
     const meta = await savePackage(pkg, session.publisherId, { updateOnly: true, expectedRevision: requiredExpectedRevision(req, input), baseUrl: publicBaseUrl, uploadRecord });
     return json(req, res, 200, meta);
+  }
+  if (/^\/api\/workshop\/packages\/[^/]+\/purge$/.test(url.pathname) && req.method === 'POST') {
+    const session = sessionFromRequest(req);
+    if (!session) return json(req, res, 401, { error: 'login-required' });
+    const id = decodeURIComponent(url.pathname.split('/')[4] || '');
+    const result = await purgePackage(id, session.publisherId, { expectedRevision: requiredExpectedRevision(req), baseUrl: publicBaseUrl });
+    return json(req, res, 200, result);
   }
   if (url.pathname.startsWith('/api/workshop/packages/') && req.method === 'DELETE') {
     const session = sessionFromRequest(req);
