@@ -22,34 +22,41 @@ const removed = [];
 const copiedAssets = [];
 const removedAssets = [];
 
+// 单包失败只记入 errors、不中止整批：曾因一个文件名校验异常让后续所有包都不再同步
+const assetErrors = [];
 for (const pkg of approved) {
   if (!pkg.assetBundle?.uploadId) continue;
-  const id = assertPackageId(pkg.id);
-  const uploadId = assertUploadId(pkg.assetBundle.uploadId);
-  const source = safeChildPath(safeChildPath(characterAssetStoreDir, id), uploadId);
-  const target = safeChildPath(publicAssetDir, id);
-  const nonce = crypto.randomBytes(8).toString('hex');
-  const staging = `${target}.staging-${nonce}`;
-  const backup = `${target}.backup-${nonce}`;
-  await fs.mkdir(staging, { recursive:true });
-  for (const item of Object.values(pkg.assetBundle.files || {})) {
-    const filename = assertAssetFilename(item?.filename);
-    await fs.copyFile(path.join(source, filename), path.join(staging, filename));
-  }
-  let backedUp = false;
   try {
-    try { await fs.rename(target, backup); backedUp = true; } catch (error) { if (error?.code !== 'ENOENT') throw error; }
-    await fs.rename(staging, target);
-    if (backedUp) await fs.rm(backup, { recursive:true, force:true });
-  } catch (error) {
-    await fs.rm(staging, { recursive:true, force:true }).catch(() => {});
-    if (backedUp) {
-      await fs.rm(target, { recursive:true, force:true }).catch(() => {});
-      await fs.rename(backup, target).catch(() => {});
+    const id = assertPackageId(pkg.id);
+    const uploadId = assertUploadId(pkg.assetBundle.uploadId);
+    const source = safeChildPath(safeChildPath(characterAssetStoreDir, id), uploadId);
+    const target = safeChildPath(publicAssetDir, id);
+    const nonce = crypto.randomBytes(8).toString('hex');
+    const staging = `${target}.staging-${nonce}`;
+    const backup = `${target}.backup-${nonce}`;
+    await fs.mkdir(staging, { recursive:true });
+    let backedUp = false;
+    try {
+      for (const item of Object.values(pkg.assetBundle.files || {})) {
+        const filename = assertAssetFilename(item?.filename);
+        await fs.copyFile(path.join(source, filename), path.join(staging, filename));
+      }
+      try { await fs.rename(target, backup); backedUp = true; } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+      await fs.rename(staging, target);
+      if (backedUp) await fs.rm(backup, { recursive:true, force:true });
+    } catch (error) {
+      await fs.rm(staging, { recursive:true, force:true }).catch(() => {});
+      if (backedUp) {
+        await fs.rm(target, { recursive:true, force:true }).catch(() => {});
+        await fs.rename(backup, target).catch(() => {});
+      }
+      throw error;
     }
-    throw error;
+    copiedAssets.push(pkg.id);
+  } catch (error) {
+    console.warn(`asset sync failed for ${pkg.id}: ${error.message}`);
+    assetErrors.push({ id: String(pkg.id || ''), message: error.message });
   }
-  copiedAssets.push(id);
 }
 
 for (const name of await fs.readdir(publicAssetDir).catch(() => [])) {
@@ -85,10 +92,12 @@ const report = {
   removed,
   copiedAssets,
   removedAssets,
+  assetErrors,
 };
 
 await atomicWriteFile(reportFile, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(report, null, 2));
+if (assetErrors.length) process.exitCode = 1;
 
 async function readPackages(dir) {
   const names = await fs.readdir(dir).catch(() => []);
@@ -119,7 +128,8 @@ function assertUploadId(value) {
 
 function assertAssetFilename(value) {
   const filename = String(value || '');
-  if (!/^(?:avatar|portrait-normal|portrait-nude)-[a-f0-9]{16}\.(?:png|jpg|webp)$/.test(filename)) throw new Error(`invalid asset filename: ${value}`);
+  // 词干集须与 gateway/server.js CHARACTER_ASSET_SPECS 保持一致（曾手抄漏 portrait-aftermath 导致整批同步中止）
+  if (!/^(?:avatar|portrait-normal|portrait-nude|portrait-aftermath)-[a-f0-9]{16}\.(?:png|jpg|webp)$/.test(filename)) throw new Error(`invalid asset filename: ${value}`);
   return filename;
 }
 

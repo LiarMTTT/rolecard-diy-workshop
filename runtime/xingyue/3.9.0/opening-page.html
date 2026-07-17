@@ -191,6 +191,13 @@
 .xy-modal-close{margin-left:auto}
 [data-xy-workshop-login-pill],[data-xy-workshop-identity-pill]{display:inline-flex;align-items:center;gap:3px}
 [data-xy-discord-avatar]{width:18px;height:18px;border-radius:50%;object-fit:cover;flex:0 0 auto}
+/* 3.9.0 r64 #3：工坊署名行（紧凑单行，窄屏自动换行） */
+.xy-workshop-signature-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0 0}
+.xy-workshop-signature-row label{color:#efc785;font-weight:600;white-space:nowrap}
+.xy-workshop-signature-row input{flex:1 1 220px;min-width:170px}
+.xy-workshop-signature-row .xy-note{margin:0}
+/* 3.9.0 r64 #1/#4b：角色卡片编辑/删除行（紧凑，不撑高卡片；容器加权重压过后置的 .xy-actions 基础 margin） */
+.xy-enable-card .xy-enable-actions{margin-top:8px;gap:6px}
 .xy-package-media{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:0 0 10px;align-items:start}
 [data-xy-package-media-card="avatar"]{max-width:190px}
 [data-xy-package-media-image="avatar"]{height:150px!important}
@@ -943,8 +950,12 @@
         <h3>角色拓展</h3>
         <p class="xy-note">这里展示已经导入或缓存的 `character` 包。启用后才会进入最后的世界书写入预览；同人角色、原创角色、关系拓展只作为包标签显示。</p>
         <div class="xy-package-enable-list" data-xy-enable-list="character"></div>
+        <!-- 3.9.0 r64 #1：世界因子同款“+”新建气泡（data-xy-char-add → 显式空白编辑器），取代旧「新建角色」按钮
+             （旧按钮无条件回填持久草稿，新建必弹上一个已保存角色） -->
+        <div class="xy-choice-grid" style="margin-top:10px">
+          <button type="button" class="xy-choice xy-wf-choice xy-wf-add" data-xy-char-add><span class="xy-wf-body"><strong>+ 新建角色</strong><span>点此创建一个新角色</span></span></button>
+        </div>
         <div class="xy-actions">
-          <button type="button" class="lilith" data-xy-opening-action="open-character-editor">新建角色</button>
           <button type="button" data-xy-opening-action="open-workshop" data-xy-workshop-tab="character">打开角色工坊</button>
           <button type="button" data-xy-opening-action="import-local-package" data-xy-workshop-types="character">本地导入</button>
           <button type="button" data-xy-opening-action="open-avatar-manager">头像气泡管理</button>
@@ -1077,6 +1088,12 @@
         </div>
         <div class="xy-actions"><button type="button" data-xy-opening-action="refresh-workshop">刷新</button><button type="button" data-xy-opening-action="login-discord" data-xy-login-button>Discord 登录</button><button type="button" data-xy-opening-action="cancel-discord-login" data-xy-login-cancel hidden>取消等待</button><button type="button" data-xy-opening-action="return-from-workshop">关闭</button></div>
         <div class="xy-status-strip xy-hero-status" data-xy-workshop-status></div>
+      </div>
+      <!-- 3.9.0 r64 #3：署名可见可改。值持久化在玩家浏览器（localStorage），登录自动填 Discord 显示名；清空=匿名发布 -->
+      <div class="xy-workshop-signature-row">
+        <label for="xy-workshop-signature-input">发布署名</label>
+        <input type="text" id="xy-workshop-signature-input" data-xy-workshop-signature maxlength="80" placeholder="登录后自动填 Discord 名，可修改；留空=匿名发布">
+        <span class="xy-note">署名只存你自己的浏览器，随发布的包公开显示</span>
       </div>
       <div class="xy-workshop-callouts">
         <div class="xy-callout"><strong>导入方式</strong>先进入草稿与启用列表，最终页统一确认</div>

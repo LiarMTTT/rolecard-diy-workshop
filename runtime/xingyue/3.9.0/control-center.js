@@ -106,7 +106,9 @@
   let lastVariableFix = null; // B17：当前楼变量重算/定点修正的最近一次结果（预览→写回）
   let workshopAuth = { checked: false, loggedIn: false, publisherId: '', error: '' };
   let workshopIdentity = null; // Discord 昵称/头像仅驻留当前 runtime 内存；不写 localStorage、不入库
-  let workshopEditingPackageId = null; // 3.7.5 #4：正在「编辑更新」的工坊包 id（edit-my-package 设置、新建角色清空），锚定 id 使更新覆盖原包而非按名字现算 fork
+  // 3.7.5 #4 只锚角色 → 3.9.0 r64 #4 泛化为 {type,id}：世界因子/功能拓展浮窗发布此前每次按标题现算 id，
+  // 改标题重发即静默新建（云端包体增殖）。规则统一：编辑入口设锚、任何编辑器的「新建」路径清锚、有锚改名不 fork。
+  let workshopEditingAnchor = null; // { type, id } | null
   let workshopLoginPoll = null;
   let workshopLoginGeneration = 0;
   let workshopAuthEpoch = 0;
@@ -149,7 +151,7 @@
     };
     return { ...workshopAuth };
   }
-  const GIT_RUNTIME_REVISION = '3.9.0-stability-r63-20260717';
+  const GIT_RUNTIME_REVISION = '3.9.0-stability-r64-20260717';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -837,23 +839,58 @@
   // P8：无状态 Bearer 客户端。昵称与头像只保存在内存；跨域 API 不依赖第三方 Cookie。
   function getWorkshopToken() { try { return localStorage.getItem('xingyue-workshop-token') || ''; } catch (_) { return ''; } }
   function setWorkshopToken(token) { try { if (token) localStorage.setItem('xingyue-workshop-token', String(token)); else localStorage.removeItem('xingyue-workshop-token'); } catch (_) {} }
-  // 3.7.1 署名加固（真机反馈：改过两轮仍恒为「未署名」）：
-  // workshopIdentity 是**内存变量**，只在 acceptWorkshopLogin 时赋值、靠 checkWorkshopAuth 从 sessionStorage 恢复。
-  // 只要取值那一刻它还是 null（页面恢复/面板重挂载后尚未走过 checkWorkshopAuth），本函数就返回 null →
-  // 5 个发布入口（身份模板 8859 / 角色 9045 / 世界因子 11029 / 功能拓展 11084 / 正文模板 8838）
-  // 一致回落 '未署名'，且**静默无报错**——这正是「登录了、头部也显示着 Discord 名，发出去却是未署名」的原因。
-  // 回落 sessionStorage 的会话级显示名：一处兜底，5 个入口与 publishPackage 全部受益。
-  // 隐私铁律不变：显示名只驻留当前会话，不写 localStorage、不入 gateway 的 Discord 身份存储。
+  // 署名链路演进：3.7.1 多源取值兜底 → 3.7.5 #4 会话级 sessionStorage（当时裁定「不写 localStorage」）→
+  // 3.9.0 r64 #3 总监裁定（2026-07-17）**显式推翻**会话级限制：登录 token 本就以 30 天期存 localStorage，
+  // 而署名只活一个浏览器会话——隔天回来免登录直接发布，署名必掉「未署名」，这就是「署名时有时无」的全部机理。
+  // 现改为 {name,avatar} 一并持久化到 localStorage（与 token 同生命周期、登出同清、发布前可在工坊页改）。
+  // 隐私边界不变的部分：显示名/头像 URL 只驻留玩家自己浏览器；gateway 依旧只存 salted hash，/me 不回昵称；
+  // authorName 是玩家自愿公开的包元数据，头像**不进发布包**（Discord 头像 URL 含原始用户 ID，公开即泄露）。
   function getWorkshopIdentity() {
     if (workshopIdentity) return { ...workshopIdentity };
-    const saved = restoreWorkshopIdentityName();
-    return saved ? { name: saved, avatar: '' } : null;
+    const saved = restoreWorkshopIdentity();
+    return saved ? { ...saved } : null;
   }
-  // 3.7.5 #4：Discord 显示名做「会话级」持久化（sessionStorage：关标签即清、不入 localStorage、不发 gateway，隐私铁律不破），
-  // 供页面刷新/会话恢复后仍能给发布包补署名（/api/workshop/me 只回 loggedIn+publisherId，不回昵称）。
-  function workshopSessionStore() { try { return hostWindow()?.sessionStorage || window.sessionStorage || null; } catch (_) { return null; } }
-  function persistWorkshopIdentityName(name) { try { const s = workshopSessionStore(); if (!s) return; if (name) s.setItem('xy-workshop-identity-name', String(name).slice(0, 80)); else s.removeItem('xy-workshop-identity-name'); } catch (_) {} }
-  function restoreWorkshopIdentityName() { try { return workshopSessionStore()?.getItem('xy-workshop-identity-name') || ''; } catch (_) { return ''; } }
+  function persistWorkshopIdentity(identity) {
+    try {
+      if (identity) {
+        // 空 name 也照存：记录的存在本身就是「用户意图已知」的哨兵（空名=主动匿名，见 setWorkshopIdentityName / publishPackage 继承分支）
+        localStorage.setItem('xy-workshop-identity', JSON.stringify({ name: String(identity.name || '').slice(0, 80), avatar: String(identity.avatar || '').slice(0, 512) }));
+      } else {
+        localStorage.removeItem('xy-workshop-identity');
+        // 登出/清身份时连 3.7.5 遗留的会话级键一并清：否则下次 restore 会把旧署名复活（对抗审查 C-2）
+        try { (hostWindow()?.sessionStorage || window.sessionStorage)?.removeItem('xy-workshop-identity-name'); } catch (_) {}
+      }
+    } catch (_) {}
+  }
+  function restoreWorkshopIdentity() {
+    try {
+      const raw = localStorage.getItem('xy-workshop-identity');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return { name: String(parsed?.name || '').slice(0, 80), avatar: String(parsed?.avatar || '').slice(0, 512) };
+      }
+    } catch (_) {}
+    // 3.7.5 会话级旧存量迁移：升级当刻还开着的标签页不丢署名；迁移后即删旧键（防登出/清空后旧名复活，对抗审查 C-2）
+    try {
+      const store = hostWindow()?.sessionStorage || window.sessionStorage;
+      const legacy = store?.getItem('xy-workshop-identity-name') || '';
+      if (legacy) {
+        const identity = { name: String(legacy).slice(0, 80), avatar: '' };
+        persistWorkshopIdentity(identity);
+        try { store.removeItem('xy-workshop-identity-name'); } catch (_) {}
+        return identity;
+      }
+    } catch (_) {}
+    return null;
+  }
+  // 3.9.0 r64 #3：署名可见可改（工坊页署名输入框写这里）；清空=主动匿名发布——
+  // 记录保留（名字置空）而非删除，让「主动匿名」与「本机不知情」可区分（对抗审查 C-1）
+  function setWorkshopIdentityName(name) {
+    const next = { name: String(name || '').trim().slice(0, 80), avatar: String(workshopIdentity?.avatar || restoreWorkshopIdentity()?.avatar || '') };
+    workshopIdentity = next;
+    persistWorkshopIdentity(next);
+    return getWorkshopIdentity();
+  }
   function authHeaders(extra) {
     const headers = { ...(extra || {}) };
     const token = getWorkshopToken();
@@ -903,8 +940,8 @@
       const body = await res.json().catch(() => ({}));
       if (epoch !== workshopAuthEpoch) return { ...workshopAuth };
       const loggedIn = Boolean(res.ok && body.loggedIn);
-      // 3.7.5 #4：已登录但内存无 identity（页面刷新/会话恢复后）→ 从会话级存储补回显示名，供发布署名
-      if (loggedIn && !workshopIdentity) { const savedName = restoreWorkshopIdentityName(); if (savedName) workshopIdentity = { name:savedName, avatar:'' }; }
+      // 3.7.5 #4 / 3.9.0 r64 #3：已登录但内存无 identity（页面刷新/跨会话回来）→ 从持久化存储补回显示名+头像，供发布署名与身份 pill
+      if (loggedIn && !workshopIdentity) { const saved = restoreWorkshopIdentity(); if (saved) workshopIdentity = saved; }
       return commitWorkshopAuth({ checked:true, loggedIn:loggedIn, publisherId:String(body.publisherId || ''), error:res.ok || res.status === 401 ? '' : 'HTTP ' + res.status });
     } catch (error) {
       if (epoch !== workshopAuthEpoch) return { ...workshopAuth };
@@ -993,7 +1030,7 @@
     const acceptedToken = String(data.token);
     setWorkshopToken(acceptedToken);
     workshopIdentity = data.name || data.avatar ? { name:String(data.name || ''), avatar:String(data.avatar || '') } : null;
-    persistWorkshopIdentityName(workshopIdentity?.name || ''); // 3.7.5 #4：会话级存显示名，供刷新/会话恢复后补署名
+    persistWorkshopIdentity(workshopIdentity); // 3.9.0 r64 #3：{name,avatar} 持久化，跨浏览器会话保署名与头像
     let auth = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       auth = await checkWorkshopAuth();
@@ -1131,7 +1168,7 @@
     setWorkshopToken('');
     commitWorkshopAuth({ checked:true, loggedIn:false, publisherId:'', error:'' });
     workshopIdentity = null;
-    persistWorkshopIdentityName(''); // 3.7.5 #4：登出清会话级署名
+    persistWorkshopIdentity(null); // 登出清持久化署名/头像（与 token 同清）
     return { ...workshopAuth };
   }
   async function fetchWorkshopCatalog(options = {}) {
@@ -1246,12 +1283,9 @@
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
     let pkg = validatePackage(input);
     // 发布署名：默认登记发布者 Discord 显示名（自愿公开的包元数据；gateway 不存原始 Discord ID 的隐私铁律不变）
-    // 3.7.1 加固（真机反馈：署名改过两轮仍恒为「未署名」）：
-    // 原实现只认内存变量 workshopIdentity —— 它仅在 acceptWorkshopLogin 时赋值、靠 checkWorkshopAuth 从
-    // sessionStorage 恢复。只要发布那一刻它是 null（页面恢复/重挂载后尚未走过 checkWorkshopAuth、
-    // 或恢复分支未命中），`&& workshopIdentity?.name` 直接短路 → 整个兜底静默跳过 → authorName 停在「未署名」，
-    // 且不留任何报错。改为多源取值：内存 → sessionStorage 会话级显示名，任一有值即可署名。
-    const identityName = String(workshopIdentity?.name || restoreWorkshopIdentityName() || '').trim();
+    // 3.7.1 多源取值 → 3.9.0 r64 #3 持久化：内存 → localStorage（跨会话），任一有值即可署名。
+    const knownIdentity = workshopIdentity ? { ...workshopIdentity } : restoreWorkshopIdentity();
+    const identityName = String(knownIdentity?.name || '').trim();
     if ((!pkg.authorName || pkg.authorName === '未署名' || pkg.authorName === 'anonymous') && identityName) {
       pkg = { ...pkg, authorName: identityName.slice(0, 80) };
     }
@@ -1259,6 +1293,11 @@
       const owned = await fetchJson(gatewayBaseUrl() + '/api/workshop/me/packages');
       const existing = (owned.packages || []).find(item => String(item.id) === String(pkg.id) && String(item.type) === String(pkg.type));
       if (existing && Number.isInteger(Number(existing.revision)) && Number(existing.revision) >= 1) pkg = { ...pkg, revision:Number(existing.revision) };
+      // r64 #3：仅当「本机对署名意图一无所知」（无内存值、无持久化记录）才继承云端原包署名，防老会话更新把已有署名抹掉；
+      // 有记录但名为空 = 用户主动清空要匿名（对抗审查 C-1），必须尊重，不得把旧署名复活到这次更新上
+      if (!knownIdentity && existing && (!pkg.authorName || pkg.authorName === '未署名' || pkg.authorName === 'anonymous') && existing.authorName && existing.authorName !== 'anonymous' && existing.authorName !== '未署名') {
+        pkg = { ...pkg, authorName: String(existing.authorName).slice(0, 80) };
+      }
     }
     const updating = Number.isInteger(Number(pkg.revision)) && Number(pkg.revision) >= 1;
     const upload = pkg.type === 'character' ? await uploadCharacterPackage(pkg, { onProgress }) : null;
@@ -9051,8 +9090,8 @@
     };
     return {
       type: 'character',
-      // 3.7.5 #4：编辑更新时锚定原包 id（含改名也不 fork）；新建角色 workshopEditingPackageId=null → 按名字派生
-      id: workshopEditingPackageId || ('character-' + safeSlug(name, 'role')),
+      // 3.7.5 #4 / r64 #4：编辑入口锚定原包 id（含改名也不 fork）；新建入口清锚 → 按名字派生
+      id: (workshopEditingAnchor?.type === 'character' && workshopEditingAnchor.id) || ('character-' + safeSlug(name, 'role')),
       title: name,
       summary: (textOf(cd.appearance, '') || textOf(cd.personality, '')).slice(0, 120) || ('角色范本 · ' + name),
       authorName: (controlCenter()?.getWorkshopIdentity?.()?.name || '未署名'),
@@ -9362,6 +9401,11 @@
       button.disabled = waiting;
     });
     root.querySelectorAll('[data-xy-login-cancel]').forEach(button => { button.hidden = state.workshopLoginStatus !== 'waiting'; });
+    // 3.9.0 r64 #3：署名输入框回填持久化值（正在输入时不覆盖）
+    const signature = root.querySelector('[data-xy-workshop-signature]');
+    if (signature && (root.ownerDocument || document).activeElement !== signature) {
+      signature.value = controlCenter()?.getWorkshopIdentity?.()?.name || '';
+    }
   }
   async function refreshWorkshopAuth() {
     const generation = ++state.workshopAuthGeneration;
@@ -9837,7 +9881,12 @@
             + (inspected.dirty ? '<span class="xy-pill warn">本地已修改</span>' : '')
           : '<span class="xy-pill">安装状态待检查</span>';
         const cloudRevision = Number.isInteger(Number(pkg.revision)) ? '<span class="xy-pill">云端 revision ' + escapeHtml(pkg.revision) + '</span>' : '';
-        return '<article class="xy-enable-card"><div class="xy-enable-head"><div><strong>' + escapeHtml(pkg.title || pkg.id) + '</strong><p>' + escapeHtml(pkg.summary || '暂无摘要') + '</p></div><label class="xy-toggle"><input type="checkbox" data-xy-toggle-package="' + escapeHtml(key) + '"' + (on ? ' checked' : '') + '>启用</label></div><div class="xy-package-meta"><span class="xy-pill">' + escapeHtml(packageTypeLabel(pkg.type)) + '</span><span class="xy-pill">来源：' + source + '</span>' + cloudRevision + installBadges + tags + '</div></article>';
+        // 3.9.0 r64 #1/#4b：角色卡片补「编辑/删除」（真机反馈「角色怎么删」——此前只有启用勾选；
+        // 编辑入口同时是新建泄漏修复后本地角色唯一的再编辑通道）。删除只动本地列表，云端发布不受影响。
+        const localActions = group === 'character'
+          ? '<div class="xy-actions xy-enable-actions"><button type="button" data-xy-opening-action="edit-local-character" data-key="' + escapeHtml(key) + '">编辑</button><button type="button" class="xy-danger" data-xy-opening-action="remove-enable-package" data-key="' + escapeHtml(key) + '">删除</button></div>'
+          : '';
+        return '<article class="xy-enable-card"><div class="xy-enable-head"><div><strong>' + escapeHtml(pkg.title || pkg.id) + '</strong><p>' + escapeHtml(pkg.summary || '暂无摘要') + '</p></div><label class="xy-toggle"><input type="checkbox" data-xy-toggle-package="' + escapeHtml(key) + '"' + (on ? ' checked' : '') + '>启用</label></div><div class="xy-package-meta"><span class="xy-pill">' + escapeHtml(packageTypeLabel(pkg.type)) + '</span><span class="xy-pill">来源：' + source + '</span>' + cloudRevision + installBadges + tags + '</div>' + localActions + '</article>';
       }).join('');
     });
     root.querySelectorAll('[data-xy-enabled-preview]').forEach(node => {
@@ -10156,7 +10205,7 @@
       const ownerActions = state.workshopTab === 'mine'
         ? ((reviewStatus === 'withdrawn'
           ? '<button type="button" data-xy-opening-action="copy-package-draft" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '">复制为本地草稿</button>'
-          : (pkg.type === 'character' ? '<button type="button" data-xy-opening-action="edit-my-package" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '">编辑</button>' : '')
+          : ((pkg.type === 'character' || (pkg.type === 'world_factor' && pkg.cardScope !== OPENING_PACKAGE_SCOPE) || EXTENSION_TYPES.includes(pkg.type)) ? '<button type="button" data-xy-opening-action="edit-my-package" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '">编辑</button>' : '')
             + '<button type="button" data-xy-opening-action="select-publish-package" data-id="' + escapeHtml(pkg.id) + '" data-type="' + escapeHtml(pkg.type || '') + '">' + (reviewStatus === 'rejected' ? '选择修改后重提' : '选择更新') + '</button>'
             + (['pending','approved'].includes(reviewStatus) ? '<button type="button" data-xy-opening-action="withdraw-package" data-id="' + escapeHtml(pkg.id) + '" data-revision="' + escapeHtml(pkg.revision || '') + '"' + withdrawUi.attrs + '>' + withdrawUi.label + '</button>' : '')) + purgeBtn)
         : '';
@@ -10485,6 +10534,11 @@
       renderOpeningDayEditor(readDraft());
       return;
     }
+    // 3.9.0 r64 #3：署名输入框逐键持久化（不等 blur——用户改完直接点发布也生效）
+    if (event.target.matches('[data-xy-workshop-signature]')) {
+      controlCenter()?.setWorkshopIdentityName?.(event.target.value || '');
+      return;
+    }
     if (event.target.matches('[data-xy-identity-media-filter]')) { renderIdentityMediaPicker(); return; }
     if (event.target.matches('[data-xy-opening-field]')) renderWizard();
     if (event.target.matches('[data-xy-attribute]')) {
@@ -10590,7 +10644,9 @@
   }
 
   // 3.4.9 #4c/#4d：世界因子编辑浮窗（可预填：从预设因子点开时带入名称+内容，编辑后经「添加因子」另存为自定义）
+  // r64 #4 锚定不变式：打开任何编辑器先清锚；「编辑已发布包」的入口在调用后自行重设锚。
   function openWorldFactorEditor(prefill) {
+    workshopEditingAnchor = null;
     const modal = root.querySelector('[data-xy-world-factor-modal]');
     if (!modal) return;
     const t = modal.querySelector('[data-xy-wf-field="title"]');
@@ -10602,6 +10658,7 @@
   }
   // 3.4.9 功能拓展：编辑浮窗（镜像世界因子）；从预设点开=预填短标签+完整 shop 内容，编辑后经「添加拓展」另存为自定义
   function openExtensionEditor(prefill) {
+    workshopEditingAnchor = null;
     const modal = root.querySelector('[data-xy-extension-modal]');
     if (!modal) return;
     const t = modal.querySelector('[data-xy-ext-field="title"]');
@@ -10610,6 +10667,28 @@
     if (c) c.value = prefill?.content || '';
     modal.hidden = false;
     try { (t || c)?.focus(); } catch (_) {}
+  }
+  // 3.9.0 r64 #1：角色编辑器统一开启函数，镜像 openWorldFactorEditor 的「显式赋值」模式。
+  // 旧实现（open-character-editor 内联）无条件回填持久化 character_draft ——保存过角色后再点「新建角色」，
+  // 表单原样弹出上一个角色（真机反馈）。现新建=清空草稿槽+表单+发布区；编辑入口先写好草稿再 preserveDraft 进入。
+  function openCharacterEditor(options) {
+    workshopEditingAnchor = null;
+    const modal = root.querySelector('[data-xy-character-editor-modal]');
+    if (!modal) return;
+    if (!options?.preserveDraft) {
+      writeOpeningDraft({ character_draft: {} });
+      const tEl = root.querySelector('[data-xy-charpub-title]'); if (tEl) tEl.value = '';
+      const sEl = root.querySelector('[data-xy-charpub-summary]'); if (sEl) sEl.value = '';
+      const rEl = root.querySelector('[data-xy-charpub-rating]'); if (rEl) rEl.value = 'general';
+    }
+    const cd = readCharacterDraft();
+    modal.querySelectorAll('[data-xy-char-field]').forEach(input => {
+      const k = input.dataset.xyCharField;
+      input.value = cd[k] != null ? cd[k] : '';
+    });
+    modal.hidden = false;
+    updateCharacterMediaPreviews();
+    characterEditorBaseline = characterEditorSnapshot(modal);
   }
 
   root.addEventListener('click', async event => {
@@ -10620,6 +10699,8 @@
       if (choice.hasAttribute('data-xy-wf-add')) { openWorldFactorEditor(); return; }
       // 3.4.9 功能拓展"+"新建槽 → 打开空白拓展编辑浮窗
       if (choice.hasAttribute('data-xy-ext-add')) { openExtensionEditor(); return; }
+      // 3.9.0 r64 #1：角色拓展"+"新建槽（世界因子同款气泡，取代旧「新建角色」按钮）→ 显式空白角色编辑器
+      if (choice.hasAttribute('data-xy-char-add')) { openCharacterEditor(); return; }
       const group = choice.closest('[data-xy-choice-group]');
       const checkGroup = choice.closest('[data-xy-check-group]');
       if (group) {
@@ -10816,18 +10897,7 @@
         if (modal) modal.hidden = true;
       }
       if (action === 'open-character-editor') {
-        workshopEditingPackageId = null; // 3.7.5 #4：新建角色不绑定任何已发布包，发送时按名字新建（不会误覆盖上次「编辑」的包）
-        const modal = root.querySelector('[data-xy-character-editor-modal]');
-        if (modal) {
-          const cd = readCharacterDraft();
-          modal.querySelectorAll('[data-xy-char-field]').forEach(input => {
-            const k = input.dataset.xyCharField;
-            input.value = cd[k] != null ? cd[k] : '';
-          });
-          modal.hidden = false;
-          updateCharacterMediaPreviews();
-          characterEditorBaseline = characterEditorSnapshot(modal);
-        }
+        openCharacterEditor(); // r64 #1：显式空白新建（action 保留作兼容；主入口已换成“+”气泡）
       }
       if (action === 'close-character-editor') {
         const modal = root.querySelector('[data-xy-character-editor-modal]');
@@ -11031,19 +11101,22 @@
         const cc = controlCenter();
         if (!cc?.publishPackage) throw new Error('控制中心发布 API 未就绪');
         const modal = root.querySelector('[data-xy-world-factor-modal]');
-        const title = textOf(modal?.querySelector('[data-xy-wf-field="title"]')?.value, '');
+        // 标题读入即截 120（契约上限）：让 id 派生 / pkg.title / payload.title 全链同值，超长标题不再产生不一致
+        const title = textOf(modal?.querySelector('[data-xy-wf-field="title"]')?.value, '').slice(0, 120);
         const content = textOf(modal?.querySelector('[data-xy-wf-field="content"]')?.value, '');
         if (!title) throw new Error('发布世界因子需要填写因子名称');
         if (!content) throw new Error('发布世界因子需要填写因子内容');
         const now = new Date().toISOString();
+        // r64 #4：编辑入口设锚 → 覆盖原包（改名不 fork）；无锚（新建）按标题派生 id
+        const wfAnchorId = (workshopEditingAnchor?.type === 'world_factor' && workshopEditingAnchor.id) || '';
         const pkg = {
-          packageVersion: '1.0.0', type: 'world_factor', id: 'world-factor-' + safeSlug(title, 'wf'),
+          packageVersion: '1.0.0', type: 'world_factor', id: wfAnchorId || ('world-factor-' + safeSlug(title, 'wf')),
           cardScope: 'xingyue', title: title.slice(0, 120), summary: content.slice(0, 120),
           authorName: (cc.getWorkshopIdentity?.()?.name || '未署名'), tags: ['世界因子'], rating: 'general', language: 'zh-CN',
           createdAt: now, updatedAt: now, payload: { worldFactors: [{ title, content }] },
         };
         await cc.publishPackage(pkg);
-        toast('success', '已发送世界因子到创意工坊：' + title.slice(0, 20));
+        toast('success', wfAnchorId ? ('已覆盖更新世界因子：' + title.slice(0, 20)) : ('已发送世界因子到创意工坊：' + title.slice(0, 20)));
         if (modal) modal.hidden = true;
       }
       if (action === 'remove-world-factor') {
@@ -11083,7 +11156,8 @@
         const cc = controlCenter();
         if (!cc?.publishPackage) throw new Error('控制中心发布 API 未就绪');
         const modal = root.querySelector('[data-xy-extension-modal]');
-        const title = textOf(modal?.querySelector('[data-xy-ext-field="title"]')?.value, '');
+        // 标题读入即截 120：body 前缀「标题：」与 pkg.title 同值，编辑回填的前缀去重（startsWith）在超长标题下不再失配（对抗审查 F-1）
+        const title = textOf(modal?.querySelector('[data-xy-ext-field="title"]')?.value, '').slice(0, 120);
         const content = textOf(modal?.querySelector('[data-xy-ext-field="content"]')?.value, '');
         const pubType = String(modal?.querySelector('[data-xy-ext-pubtype]')?.value || 'function');
         const type = ['shop_item', 'blueprint', 'recipe', 'skill', 'function'].includes(pubType) ? pubType : 'function';
@@ -11091,14 +11165,16 @@
         if (!content) throw new Error('发布功能拓展需要填写拓展内容');
         const now = new Date().toISOString();
         const body = title ? (title + '：' + content) : content;
+        // r64 #4：编辑入口设锚 → 覆盖原包；锚要求 type 也一致（更新时改了发布分类=按新分类新建，旧包需手动撤回/删除）
+        const extAnchorId = (workshopEditingAnchor?.type === type && workshopEditingAnchor.id) || '';
         const pkg = {
-          packageVersion: '1.0.0', type: type, id: type + '-' + safeSlug(title, 'ext'),
+          packageVersion: '1.0.0', type: type, id: extAnchorId || (type + '-' + safeSlug(title, 'ext')),
           cardScope: 'xingyue', title: title.slice(0, 120), summary: content.slice(0, 120),
           authorName: (cc.getWorkshopIdentity?.()?.name || '未署名'), tags: ['功能拓展'], rating: 'general', language: 'zh-CN',
           createdAt: now, updatedAt: now, payload: { schemaVersion: 1, worldbook: { content: body } },
         };
         await cc.publishPackage(pkg);
-        toast('success', '已发送功能拓展到创意工坊：' + title.slice(0, 20));
+        toast('success', extAnchorId ? ('已覆盖更新功能拓展：' + title.slice(0, 20)) : ('已发送功能拓展到创意工坊：' + title.slice(0, 20)));
         if (modal) modal.hidden = true;
       }
       if (action === 'remove-extension') {
@@ -11180,25 +11256,59 @@
         assertOpeningActionContext(actionContext);
         await importPackageObject(detail, [detail.type]);
       }
+      if (action === 'edit-local-character') {
+        // 3.9.0 r64 #1：本地角色的正经再编辑入口（旧版唯一“再编辑”路径是新建按钮的脏草稿泄漏，泄漏修掉后必须补上）
+        const key = String(button.dataset.key || '');
+        const pkg = packages().find(item => packageIdentity(item) === key);
+        if (!pkg || pkg.type !== 'character') throw new Error('该角色已不在本地列表，请刷新后重试');
+        writeCharacterDraft(draftFromPackage(pkg));
+        const tEl = root.querySelector('[data-xy-charpub-title]'); if (tEl) tEl.value = pkg.title || '';
+        const sEl = root.querySelector('[data-xy-charpub-summary]'); if (sEl) sEl.value = pkg.summary || '';
+        const rEl = root.querySelector('[data-xy-charpub-rating]'); if (rEl) rEl.value = pkg.rating || 'general';
+        openCharacterEditor({ preserveDraft:true });
+        // 本地包带 id 即锚定同 id：「保存」覆盖本地同名卡片、「发送到创意工坊」对云端同 id 覆盖更新（revision 自动探测）
+        workshopEditingAnchor = pkg.id ? { type:'character', id:String(pkg.id) } : null;
+      }
+      if (action === 'remove-enable-package') {
+        // 3.9.0 r64 #4b：本地列表删除（真机反馈「角色怎么删」）。仅动本地草稿；云端工坊包在「我的发布」里撤回/删除。
+        const key = String(button.dataset.key || '');
+        const pkg = packages().find(item => packageIdentity(item) === key);
+        if (!confirm('从本地列表删除「' + ((pkg && (pkg.title || pkg.id)) || '该内容') + '」？只影响当前开局的本地列表，不影响云端工坊与已发布内容。')) return;
+        const map = { ...enabledPackageMap() };
+        delete map[key];
+        saveDraft({ packages: packages().filter(item => packageIdentity(item) !== key), enabledPackages: map });
+        renderEnableLists();
+        toast('success', '已从本地列表删除');
+      }
       if (action === 'edit-my-package') {
-        // 3.4.9 #3：拉全包→回填进同一个角色编辑器（非空白），改完点「发送到创意工坊」按同名 id 覆盖更新（网关 revision +1）。
+        // 3.4.9 #3：拉全包→回填对应编辑器，改完在浮窗内「发送到创意工坊」按原 id 覆盖更新（网关 revision +1）。
+        // r64 #4：从仅角色扩展到世界因子/功能拓展（增殖根治：编辑入口设锚，改名也不 fork）。
         const actionContext = captureOpeningActionContext(root);
         const detail = await getPackageDetailFromCatalog(button.dataset.id, button.dataset.type);
         assertOpeningActionContext(actionContext);
-        writeCharacterDraft(draftFromPackage(detail));
-        workshopEditingPackageId = String(detail.id || '') || null; // 3.7.5 #4：锚定原包 id，改完「发送到创意工坊」即覆盖更新（revision 由 publishPackage 自动探测取最新）
-        const tEl = root.querySelector('[data-xy-charpub-title]'); if (tEl) tEl.value = detail.title || '';
-        const sEl = root.querySelector('[data-xy-charpub-summary]'); if (sEl) sEl.value = detail.summary || '';
-        const rEl = root.querySelector('[data-xy-charpub-rating]'); if (rEl) rEl.value = detail.rating || 'general';
-        const modal = root.querySelector('[data-xy-character-editor-modal]');
-        if (modal) {
-          const cd = readCharacterDraft();
-          modal.querySelectorAll('[data-xy-char-field]').forEach(input => { input.value = cd[input.dataset.xyCharField] != null ? cd[input.dataset.xyCharField] : ''; });
-          modal.hidden = false;
-          updateCharacterMediaPreviews();
-          characterEditorBaseline = characterEditorSnapshot(modal);
+        const anchorId = String(detail.id || '');
+        if (detail.type === 'character') {
+          writeCharacterDraft(draftFromPackage(detail));
+          const tEl = root.querySelector('[data-xy-charpub-title]'); if (tEl) tEl.value = detail.title || '';
+          const sEl = root.querySelector('[data-xy-charpub-summary]'); if (sEl) sEl.value = detail.summary || '';
+          const rEl = root.querySelector('[data-xy-charpub-rating]'); if (rEl) rEl.value = detail.rating || 'general';
+          openCharacterEditor({ preserveDraft:true });
+          workshopEditingAnchor = anchorId ? { type:'character', id:anchorId } : null;
+        } else if (detail.type === 'world_factor') {
+          const factor = Array.isArray(detail.payload?.worldFactors) ? detail.payload.worldFactors[0] : null;
+          openWorldFactorEditor({ title: factor?.title || detail.title || '', content: factor?.content || '' });
+          workshopEditingAnchor = anchorId ? { type:'world_factor', id:anchorId } : null;
+        } else {
+          // 功能拓展系（shop_item/blueprint/recipe/skill/function）：发布时 content 拼过「标题：」前缀，回填先去重
+          const wb = detail.payload?.worldbook || {};
+          const title = String(wb.title || detail.title || '');
+          let content = String(wb.content || '');
+          if (title && content.startsWith(title + '：')) content = content.slice(title.length + 1);
+          openExtensionEditor({ title, content });
+          const sel = root.querySelector('[data-xy-ext-pubtype]'); if (sel) sel.value = detail.type;
+          workshopEditingAnchor = anchorId ? { type:detail.type, id:anchorId } : null;
         }
-        toast('info', '已载入「' + (detail.title || '角色') + '」，改完点「发送到创意工坊」即更新发布');
+        toast('info', '已载入「' + (detail.title || '内容') + '」，改完点浮窗内「发送到创意工坊」即更新发布');
       }
       if (action === 'withdraw-package') {
         const cc = controlCenter();
@@ -12035,6 +12145,7 @@
     cancelWorkshopLogin,
     logout,
     getWorkshopIdentity,
+    setWorkshopIdentityName,
     importPackage,
     installPackageToWorldbook,
     inspectWorkshopPackage,

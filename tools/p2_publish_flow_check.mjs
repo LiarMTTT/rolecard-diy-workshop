@@ -532,10 +532,10 @@ async function assertCharacterUploadFlow(ownerCookie, ownerToken) {
   const upload = await request('/api/workshop/uploads/character', {
     method:'POST',
     headers:{ authorization:`Bearer ${ownerToken}` },
-    body:{ package:packageBody, assets:{ avatar:png, portraitNormal:png, portraitNude:png } },
+    body:{ package:packageBody, assets:{ avatar:png, portraitNormal:png, portraitNude:png, portraitAftermath:png } },
     expected:201,
   });
-  assert(/^xyu_[A-Za-z0-9_-]+$/.test(upload.body.uploadId || '') && Object.keys(upload.body.assets || {}).length === 3, 'character bundle staged with three validated images', upload.body.uploadId);
+  assert(/^xyu_[A-Za-z0-9_-]+$/.test(upload.body.uploadId || '') && Object.keys(upload.body.assets || {}).length === 4, 'character bundle staged with four validated images', upload.body.uploadId);
 
   const otherCookie = await devLoginCookie('character-upload-other-owner');
   const wrongOwner = await request('/api/workshop/packages', {
@@ -556,7 +556,7 @@ async function assertCharacterUploadFlow(ownerCookie, ownerToken) {
   assert(pendingAsset.status === 404, 'pending character media is not public', 'HTTP 404');
 
   const adminDetail = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`);
-  assert(Object.keys(adminDetail.body.reviewAssets || {}).length === 3, 'admin review exposes three authenticated media previews', 'avatar + two portraits');
+  assert(Object.keys(adminDetail.body.reviewAssets || {}).length === 4, 'admin review exposes four authenticated media previews', 'avatar + three portraits');
   const adminAssetPath = new URL(adminDetail.body.reviewAssets.avatar, baseUrl).pathname;
   const adminAsset = await adminRequest(adminAssetPath);
   assert(String(adminAsset.headers.get('content-type') || '').startsWith('image/png'), 'admin can inspect staged character image', 'image/png');
@@ -567,9 +567,13 @@ async function assertCharacterUploadFlow(ownerCookie, ownerToken) {
   assert(approved.body.reviewStatus === 'approved' && approved.body.revision === 2, 'approved character bundle advances revision', 'revision 2');
   const publicIndex = await request('/api/workshop/packages');
   const publicCharacter = (publicIndex.body.packages || []).find(pkg => pkg.id === id);
-  assert(Object.values(publicCharacter?.previewMedia || {}).filter(Boolean).length === 3, 'public character index exposes avatar and two portrait references', 'three preview URLs');
+  assert(Object.values(publicCharacter?.previewMedia || {}).filter(Boolean).length === 4, 'public character index exposes avatar and three portrait references', 'four preview URLs');
   const publicAsset = await request(pendingAssetPath);
   assert(String(publicAsset.headers.get('content-type') || '').startsWith('image/png'), 'approved character media is public', 'image/png');
+  // 3.9.0 热修回归锚：公开资产路由的文件名白名单曾漏 portrait-aftermath（文件存好了却 404，全部事后立绘死链）
+  const aftermathAssetPath = new URL(publicCharacter.previewMedia.portraitAftermath, baseUrl).pathname;
+  const aftermathAsset = await request(aftermathAssetPath);
+  assert(String(aftermathAsset.headers.get('content-type') || '').startsWith('image/png'), 'approved aftermath portrait is served by the public asset route', 'image/png');
 
   const retainedInput = { ...packageBody, title:'P2 Character Upload Retained', revision:2, payload:created.body.payload };
   const retainedUpload = await request('/api/workshop/uploads/character', {
@@ -579,7 +583,7 @@ async function assertCharacterUploadFlow(ownerCookie, ownerToken) {
     method:'PUT', headers:{ authorization:`Bearer ${ownerToken}`, 'x-package-revision':'2' }, body:{ ...retainedInput, uploadId:retainedUpload.body.uploadId }, expected:200,
   });
   const retainedAdmin = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`);
-  assert(Object.keys(retainedAdmin.body.reviewAssets || {}).length === 3, 'character metadata update retains all three managed media slots', 'three retained review assets');
+  assert(Object.keys(retainedAdmin.body.reviewAssets || {}).length === 4, 'character metadata update retains all four managed media slots', 'four retained review assets');
   await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`, {
     method:'POST', body:{ status:'approved', reason:'', revision:3 }, expected:200,
   });
@@ -595,11 +599,12 @@ async function assertCharacterUploadFlow(ownerCookie, ownerToken) {
     method:'PUT', headers:{ authorization:`Bearer ${ownerToken}`, 'x-package-revision':'4' }, body:{ ...partialInput, uploadId:partialUpload.body.uploadId }, expected:200,
   });
   const partialAdmin = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`);
-  assert(Object.keys(partialAdmin.body.reviewAssets || {}).length === 3, 'single-slot character update retains the other managed media slots', 'avatar replaced; portraits retained');
+  assert(Object.keys(partialAdmin.body.reviewAssets || {}).length === 4, 'single-slot character update retains the other managed media slots', 'avatar replaced; portraits retained');
   assert(
     partialUpdate.body.payload.media.avatar !== retainedUpdate.body.payload.media.avatar
       && partialUpdate.body.payload.media.portraits.normal === retainedUpdate.body.payload.media.portraits.normal
-      && partialUpdate.body.payload.media.portraits.nude === retainedUpdate.body.payload.media.portraits.nude,
+      && partialUpdate.body.payload.media.portraits.nude === retainedUpdate.body.payload.media.portraits.nude
+      && partialUpdate.body.payload.media.portraits.aftermath === retainedUpdate.body.payload.media.portraits.aftermath,
     'single-slot update changes only its public media reference',
     'portrait URLs unchanged',
   );
@@ -629,7 +634,7 @@ async function assertCharacterUploadFlow(ownerCookie, ownerToken) {
     method:'PUT', headers:{ authorization:`Bearer ${ownerToken}`, 'x-package-revision':'7' }, body:{ ...resubmitInput, uploadId:resubmitUpload.body.uploadId }, expected:200,
   });
   const resubmittedAdmin = await adminRequest(`/api/admin/review/packages/${encodeURIComponent(id)}`);
-  assert(Object.keys(resubmittedAdmin.body.reviewAssets || {}).length === 3, 'withdrawn character can be resubmitted without losing managed media', 'three review assets after resubmit');
+  assert(Object.keys(resubmittedAdmin.body.reviewAssets || {}).length === 4, 'withdrawn character can be resubmitted without losing managed media', 'four review assets after resubmit');
 }
 
 async function devLoginCookie(id) {

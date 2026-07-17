@@ -44,6 +44,12 @@ const CHARACTER_ASSET_SPECS = Object.freeze({
   portraitNude: { stem:'portrait-nude', maxBytes:8 * 1024 * 1024, maxDimension:4096, maxPixels:16 * 1024 * 1024 },
   portraitAftermath: { stem:'portrait-aftermath', maxBytes:8 * 1024 * 1024, maxDimension:4096, maxPixels:16 * 1024 * 1024 },
 });
+// 对外资产文件名白名单必须覆盖 SPECS 的全部 stem，故派生而非手写
+// （3.9.0 前手写正则漏 portrait-aftermath：文件存好了、公开路由却 404，全部事后立绘死链）。
+// 扩展名集合与 sniffImage 的产出对齐（png/jpg/webp）。gateway/tools/sync_public_packages.mjs 有同款校验，改这里要同步改它。
+const CHARACTER_ASSET_FILENAME_RE = new RegExp(
+  `^(?:${Object.values(CHARACTER_ASSET_SPECS).map(spec => spec.stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})-[a-f0-9]{16}\\.(?:png|jpg|webp)$`,
+);
 const characterUploadRateWindows = new Map();
 const activeCharacterUploadOwners = new Set();
 const CORS_ORIGIN = env.CORS_ORIGIN || '*';
@@ -1446,7 +1452,7 @@ async function route(req, res) {
     const parts = url.pathname.split('/');
     const id = decodeURIComponent(parts[4] || '');
     const filename = decodeURIComponent(parts[5] || '');
-    if (!/^(?:avatar|portrait-normal|portrait-nude)-[a-f0-9]{16}\.(?:png|jpg|webp)$/.test(filename)) return json(req, res, 404, { error:'not-found' });
+    if (!CHARACTER_ASSET_FILENAME_RE.test(filename)) return json(req, res, 404, { error:'not-found' });
     const pkg = await getPackage(id);
     if (!isPublicPackage(pkg)) return json(req, res, 404, { error:'not-found' });
     const item = Object.values(pkg.assetBundle?.files || {}).find(candidate => candidate?.filename === filename);
@@ -1531,7 +1537,9 @@ async function route(req, res) {
     if (!session) return json(req, res, 401, { error:'login-required' });
     const release = beginCharacterUploadAdmission(session.publisherId);
     try {
-      const input = JSON.parse(await readBody(req, 26 * 1024 * 1024));
+      // 上限按 base64 形态给：四槽解码后预算共 26MB，body 是 base64（×4/3≈34.7MB）+ 包 JSON——
+      // 26MB 的 body 上限会在单图校验前就 413 掉「多槽大图」的合法上传。
+      const input = JSON.parse(await readBody(req, 40 * 1024 * 1024));
       return json(req, res, 201, await createCharacterUpload(input, session.publisherId), { 'cache-control':'no-store' });
     } finally {
       release();
