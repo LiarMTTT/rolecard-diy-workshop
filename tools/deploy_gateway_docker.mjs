@@ -180,7 +180,7 @@ if docker ps -a --format '{{.Names}}' | grep -qx "$BAK_NAME"; then
 fi
 printf 'backup=.env.bak.%s\\n' "$STAMP"
 printf 'container=%s\\n' "$OLD_NAME"
-printf 'cors=%s\\n' "$CORS"
+printf 'cors=%s\\n' "$(grep -m1 '^CORS_ORIGIN=' .env | cut -d= -f2- || true)"
 printf 'health=ok\\n'
 `;
 }
