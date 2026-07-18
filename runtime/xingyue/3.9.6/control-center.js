@@ -152,7 +152,7 @@
     return { ...workshopAuth };
   }
   // r65 = 两条并行热修线合流：r64(07-17 事后立绘路由/新建角色气泡/署名持久化/更新锚定) + r64(07-18 开局页四源/兜底/token内存兜底)。
-  const GIT_RUNTIME_REVISION = '3.9.6-stability-r67-20260718';
+  const GIT_RUNTIME_REVISION = '3.9.6-stability-r68-20260718';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -214,7 +214,10 @@
       if (prev !== GIT_RUNTIME_REVISION) store.setItem(GIT_RUNTIME_REVISION_KEY, GIT_RUNTIME_REVISION);
     } catch (_) {}
   }
+  let controlCenterReadyDispatched = false;
   function dispatchControlCenterReady() {
+    if (controlCenterReadyDispatched) return;
+    controlCenterReadyDispatched = true;
     const detail = { version: VERSION, revision: GIT_RUNTIME_REVISION };
     const targets = [window];
     try {
@@ -2394,10 +2397,22 @@
     function status() {
       return { ready: !!activeRecord, chatId: activeChatId, uuid: activeUuid, originChatId: activeRecord?.originChatId || '', dirty, destroyed, ui: readUi() };
     }
+    async function ready() {
+      while (!destroyed) {
+        const current = transition;
+        try {
+          const result = await current;
+          if (current === transition) return result;
+        } catch (error) {
+          if (current === transition) throw error;
+        }
+      }
+      return null;
+    }
 
     transitionGeneration += 1;
     let transition = activate(transitionGeneration);
-    return { ready: () => transition, readDraft, replaceDraft, patchDraft, clearDraft, readUi, patchUi, flush, flushSync, switchChat, destroy: destroyService, status };
+    return { ready, readDraft, replaceDraft, patchDraft, clearDraft, readUi, patchUi, flush, flushSync, switchChat, destroy: destroyService, status };
   }
   // </opening-draft-v2-core>
   const openingDraftService = createOpeningDraftService();
@@ -12107,8 +12122,9 @@
     const generation = ++openingContextChangeGeneration;
     const roots = currentOwnedOpeningRoots();
     roots.forEach(root => { try { root.__xyOpeningFlushState?.(); } catch (_) {} });
-    await openingDraftService.switchChat();
+    const readyResult = await openingDraftService.switchChat();
     if (runtimeDestroyed || generation !== openingContextChangeGeneration) return;
+    if (readyResult && openingDraftService.status().ready) dispatchControlCenterReady();
     currentOwnedOpeningRoots().forEach(root => {
       try { root.__xyOpeningRefreshContext?.(); } catch (_) {}
       try { root.__xyOpeningRefreshPlayer?.(); } catch (_) {}
@@ -12321,7 +12337,7 @@
     getOpeningDraftStatus: () => openingDraftService.status(),
     flushOpeningDraft: () => openingDraftService.flush(),
     switchOpeningDraftChat: () => handleOpeningContextChanged(),
-    whenOpeningDraftReady: () => openingDraftReady,
+    whenOpeningDraftReady: () => openingDraftService.ready().catch(error => { lastError = error?.message || String(error); return null; }),
     previewOpeningWrites,
     writeOpeningWorldbookEntries,
     worldFactorContent,
