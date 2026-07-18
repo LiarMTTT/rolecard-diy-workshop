@@ -2,62 +2,62 @@
   "schemaVersion": "1",
   "cardScope": "xingyue",
   "runtimeVersion": "3.9.0",
-  "runtimeRevision": "3.9.0-stability-r65-20260718",
-  "publishedAt": "2026-07-18T06:26:22.689Z",
+  "runtimeRevision": "3.9.0-stability-r66-20260718",
+  "publishedAt": "2026-07-18T07:22:24.704Z",
   "modules": [
     {
       "id": "bubble-css",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.0/bubble.css",
-      "bytes": 1664,
-      "sha256": "8326478289f327e1d15818ad46995036f56b1b3e00c6ad3d3e687352fa3b17e3"
+      "bytes": 1678,
+      "sha256": "747a5db6fc69d897bb980c6eafce55d9ca5d558a67742a245dc29d5707cf7fad"
     },
     {
       "id": "control-center",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.0/control-center.js",
-      "bytes": 749111,
-      "sha256": "5c9e83cf8a61416bea0af1c1995dacd13debb4889bfe3a40f559b3e208147e03"
+      "bytes": 749110,
+      "sha256": "268551ad3c7da119cd19bedb81b2d795ee4573d6b9e560cdd38a5c52be4f0c6f"
     },
     {
       "id": "omni-analysis",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.0/omni-analysis.html",
-      "bytes": 2190,
-      "sha256": "72715326956b3ea71c32cde660f0d38845b1a1fbb73fe6c58d4a6639abded6bb"
+      "bytes": 2214,
+      "sha256": "ffabdb41d1b43108a6c7c6709103adeec784c8ad240b72940d986b11761ef8bf"
     },
     {
       "id": "omni-done",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.0/omni-done.html",
-      "bytes": 3367,
-      "sha256": "293af50efef747c28f55d63cd9d4864c12e3ade887abdc5f21cb5b96395ffc20"
+      "bytes": 3410,
+      "sha256": "8ca323d9434b2ce6db4701fb61e403575f61dcbe4cd051df92f3e49c36f455bd"
     },
     {
       "id": "omni-progress",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.0/omni-progress.html",
-      "bytes": 1766,
-      "sha256": "07b832ff68d6181a2cf75845eca488882ffd346fa89ea4c01eb4966ebc211f2a"
+      "bytes": 1790,
+      "sha256": "ce66e530bf657e04c27c4254b73f477cba1e027bc64fcfad4b50e7c807968bc8"
     },
     {
       "id": "opening-page",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.0/opening-page.html",
-      "bytes": 316471,
-      "sha256": "8ed50bd80b12ecd489358c01d73fe09c21922ac9fdb17afd77bde3f7926692b0"
+      "bytes": 317586,
+      "sha256": "78aea85fe7680dec07967a924e7d21d70cf6a8ea89df9ec3be1148b1d7d4df7a"
     },
     {
       "id": "status-bar",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.0/status-bar.html",
-      "bytes": 373411,
-      "sha256": "766e8ac8966924b86e5ecd880f8f8c9abc2fc65a98e6cba1e43b9ba7aca86cf8"
+      "bytes": 380510,
+      "sha256": "ca4497742bb90bdfc45199c7e615e290efc9d879bfc1f30952b91dcacff0592d"
     },
     {
       "id": "worldbook-editor",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.0/worldbook-editor.js",
-      "bytes": 103572,
-      "sha256": "aa7b617f4f8a0a556cd00648e403f1ad3d46715f3eb7a35ffb88357226d9e93b"
+      "bytes": 104764,
+      "sha256": "924618398de27f618139f424836982a2ee9b54be3cc91de2e460d1e5e6bebfa5"
     },
     {
       "id": "worldbook-factory-baseline",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.0/worldbook-factory-baseline.json",
-      "bytes": 173473,
-      "sha256": "6b73532664f05c2946c198897710bf74935952d2b1656f15b2fefb3e8d9f03cd"
+      "bytes": 175155,
+      "sha256": "a930f8cbbdf9d6278b628a8fcc7312c86ccbfc8ee614591db796e9503dd17f4f"
     }
   ],
   "pinnedCommit": "04484534ac6a4f9eddda0a1571d64507ea8c6a91"

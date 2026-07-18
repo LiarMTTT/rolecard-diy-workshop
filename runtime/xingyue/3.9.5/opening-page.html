@@ -545,6 +545,14 @@
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-shell{flex:1 1 auto;min-height:0;overflow:hidden;margin-top:0}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main{min-height:0;overflow:auto}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-tabs{overflow:auto}
+/* r66 工坊面板滚动补正（实机反馈：桌面版模式下方内容被吞）——滚动区行高必须 minmax(0,1fr) 锁死，
+   否则 grid 行随内容撑高、overflow:auto 永不触发、超出被 shell 的 hidden 静默剪掉；滚动条显式可见可拖。 */
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-shell{grid-template-rows:minmax(0,1fr)}
+@container (max-width:860px){.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-shell{grid-template-rows:auto minmax(0,1fr)}}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main{overflow-y:auto;touch-action:pan-y;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:rgba(239,199,133,.42) rgba(11,8,5,.34)}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main::-webkit-scrollbar{width:8px}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main::-webkit-scrollbar-track{background:rgba(11,8,5,.36);border-radius:999px}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main::-webkit-scrollbar-thumb{background:rgba(239,199,133,.5);border-radius:999px}
 .xy-opening-page .xy-pane .xy-panel>.xy-note{display:none}
 
 /* ===== 3.4.9 修正线：#5 手机端工坊可滑动 + #8 移动端开局页缩放机制 ===== */

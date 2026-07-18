@@ -152,7 +152,7 @@
     return { ...workshopAuth };
   }
   // r65 = 两条并行热修线合流：r64(07-17 事后立绘路由/新建角色气泡/署名持久化/更新锚定) + r64(07-18 开局页四源/兜底/token内存兜底)。
-  const GIT_RUNTIME_REVISION = '3.9.5-stability-r65-20260718';
+  const GIT_RUNTIME_REVISION = '3.9.5-stability-r66-20260718';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -11645,10 +11645,10 @@
   // first_mes 仅放 [data-xy-opening-remote] 短标记；控制中心 fetch 远程开局页 + 注入 + 绑定（display-only，绝不进 LLM）。
   // 整页由控制中心注入(全 bare 类) → custom- 前缀问题一并消失。fetch 失败有兜底提示、不 brick。
   // 任务2.2：opening-page 双源（cdn + testingcf 备源），与 loader 策略对称
-  const OPENING_PAGE_REVISION = '20260718-395-triple-fix-r65';
+  const OPENING_PAGE_REVISION = '20260718-395-scroll-r66';
   // 3.7.5 #3：随 opening-page.html 的容器查询修复同步更新（改了远程 HTML 必须重算此 pin，
   // 否则 verifyOpeningPageHtml 会抛「远程开局页完整性校验失败」→ 玩家的开局页直接加载不出来）。
-  const OPENING_PAGE_SHA256 = '0338cdb4256eabfeef47264ca68161254468c0707624ebdd9f2ddc4d9688df2e';
+  const OPENING_PAGE_SHA256 = '5e6367cd37a5d11f6ef86b8d5d2f5b28fb54db1292006e2b24df4ce51852cb6f';
   // r64 源策略（Bug2 修复）：
   //   ① @commit 派生对（cdn 基址 + 同 commit 的 testingcf）——与本文件必然同版（SHA 必配），
   //      免疫 jsDelivr 对 @main「分支→commit 解析」的小时级 stale 缓存（3.7.0 r57~r60 实锤，purge 无效且边缘节点互不一致）；
