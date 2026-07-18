@@ -527,7 +527,7 @@
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-hero p{font-size:12px;opacity:.82}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-shell{flex:1 1 auto;min-height:0}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main{min-height:0}
-.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-grid{align-content:start}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-grid{align-content:start;align-self:start}
 
 /* ===== 2.9.8 框架重构 pass（协议同行 + 工坊 overlay 面板） ===== */
 .xy-opening-page .xy-agreement{display:block!important;grid-template-columns:none!important}
@@ -554,6 +554,20 @@
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main::-webkit-scrollbar{width:8px}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main::-webkit-scrollbar-track{background:rgba(11,8,5,.36);border-radius:999px}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main::-webkit-scrollbar-thumb{background:rgba(239,199,133,.5);border-radius:999px}
+/* r70 手机桌面版网站：CSS 视口虽为宽屏，主输入仍是触摸；直接复用可操作的单列工坊，不再渲染被缩小的桌面双栏。 */
+@media (pointer:coarse){
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-shell{display:grid!important;grid-template-columns:1fr!important;grid-template-rows:auto minmax(0,1fr)!important}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-tabs{display:flex!important;flex-wrap:nowrap;overflow-x:auto;max-width:100%;padding:6px}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-tab{flex:0 0 auto;min-width:132px;max-width:180px}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-toolbar{grid-template-columns:1fr 1fr}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-toolbar input{grid-column:1 / -1}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-grid{grid-template-columns:1fr!important}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-package h4{font-size:17px!important}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-package p{font-size:13px}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-package-actions{gap:8px}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-package-actions button{min-height:48px!important;padding:10px 14px!important;font-size:14px!important;white-space:normal}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-package-actions [data-xy-opening-action="download-package"]{flex:1 1 220px;border-color:rgba(239,199,133,.82);background:rgba(239,199,133,.16);color:#fff;font-weight:700}
+}
 .xy-opening-page .xy-pane .xy-panel>.xy-note{display:none}
 
 /* ===== 3.4.9 修正线：#5 手机端工坊可滑动 + #8 移动端开局页缩放机制 ===== */
