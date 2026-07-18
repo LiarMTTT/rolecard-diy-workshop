@@ -546,10 +546,11 @@
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main{min-height:0;overflow:auto}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-tabs{overflow:auto}
 /* r66 工坊面板滚动补正（实机反馈：桌面版模式下方内容被吞）——滚动区行高必须 minmax(0,1fr) 锁死，
-   否则 grid 行随内容撑高、overflow:auto 永不触发、超出被 shell 的 hidden 静默剪掉；滚动条显式可见可拖。 */
+   否则 grid 行随内容撑高、overflow:auto 永不触发、超出被 shell 的 hidden 静默剪掉；滚动条显式可见可拖。
+   r69：iOS 原生触摸滚动属于滚动区基础能力，不再绑在窄容器断点；手机切桌面版网站后仍可纵向滑动。 */
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-shell{grid-template-rows:minmax(0,1fr)}
 @container (max-width:860px){.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-shell{grid-template-rows:auto minmax(0,1fr)}}
-.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main{overflow-y:auto;touch-action:pan-y;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:rgba(239,199,133,.42) rgba(11,8,5,.34)}
+.xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main{overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:rgba(239,199,133,.42) rgba(11,8,5,.34)}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main::-webkit-scrollbar{width:8px}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main::-webkit-scrollbar-track{background:rgba(11,8,5,.36);border-radius:999px}
 .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main::-webkit-scrollbar-thumb{background:rgba(239,199,133,.5);border-radius:999px}
@@ -561,7 +562,7 @@
   .xy-opening-page .xy-view[data-xy-view="workshop"]{align-items:stretch!important;justify-content:stretch!important;padding:0!important}
   .xy-opening-page .xy-view[data-xy-view="workshop"]>.xy-panel{width:100vw!important;height:100dvh!important;max-height:100dvh!important;border-radius:0!important}
   .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-shell{overflow:hidden!important;min-height:0!important}
-  .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main{overflow-y:auto!important;-webkit-overflow-scrolling:touch;min-height:0!important}
+  .xy-opening-page .xy-view[data-xy-view="workshop"] .xy-workshop-main{overflow-y:auto!important;min-height:0!important}
   /* #8：移动端开局页全局缩小字号/控件（--xy-m-scale 可调，先定 0.9 一档；真机验后再拨） */
   .xy-opening-page{--xy-m-scale:0.9}
   .xy-opening-page .xy-sub,.xy-opening-page .xy-dep-name,.xy-opening-page .xy-dep-tag,.xy-opening-page .xy-pill,.xy-opening-page .xy-note,.xy-opening-page .xy-callout,.xy-opening-page .xy-package,.xy-opening-page .xy-package h4,.xy-opening-page .xy-entry-card,.xy-opening-page .xy-choice,.xy-opening-page .xy-enable-card,.xy-opening-page button,.xy-opening-page .xy-btn,.xy-opening-page input,.xy-opening-page select,.xy-opening-page textarea,.xy-opening-page .xy-workshop-tab{font-size:calc(1em * var(--xy-m-scale,1))}
@@ -762,6 +763,8 @@
 .xy-opening-page[data-xy-focus-mode="1"] .xy-view[data-xy-view="wizard"]{height:auto!important;min-height:100%!important;max-width:none!important;overflow:visible!important}
 .xy-opening-page[data-xy-focus-mode="1"] .xy-view[data-xy-view="wizard"] .xy-pane{flex:1 1 auto;min-height:0!important;overflow:visible!important}
 .xy-opening-page[data-xy-focus-mode="1"][data-xy-opening-view="workshop"]{overflow:hidden!important}
+/* r69 手机桌面版网站：工坊焦点态需要确定高度链，否则 view 随内容撑高后被 dialog 裁掉，内部 overflow 永不成立。 */
+.xy-opening-page[data-xy-focus-mode="1"][data-xy-opening-view="workshop"] .xy-opening-shell{height:100%;min-height:0}
 .xy-opening-page[data-xy-focus-mode="1"] .xy-view[data-xy-view="workshop"]{position:relative!important;width:100%;height:100%;min-height:0;overflow:hidden;padding:0!important;background:transparent;backdrop-filter:none}
 .xy-opening-page[data-xy-focus-mode="1"] .xy-view[data-xy-view="workshop"]>.xy-panel{width:100%!important;height:100%!important;border-radius:8px!important}
 .xy-opening-page[data-xy-focus-mode="1"] .xy-workshop-main{overscroll-behavior:contain;scrollbar-gutter:stable}
