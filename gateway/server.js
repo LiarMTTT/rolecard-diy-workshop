@@ -1507,7 +1507,9 @@ async function route(req, res) {
   }
   if (url.pathname === '/api/workshop/me') {
     const session = sessionFromRequest(req);
-    return json(req, res, session ? 200 : 401, session ? { loggedIn: true, publisherId: session.publisherId } : { loggedIn: false });
+    // r64：显式 no-store——个别玩家侧代理/VPN 会缓存无 cache-control 的 GET 响应，
+    // 缓存住的旧 401 会把刚登录成功的新 token 也顶成「token 无效」。
+    return json(req, res, session ? 200 : 401, session ? { loggedIn: true, publisherId: session.publisherId } : { loggedIn: false }, { 'cache-control': 'no-store' });
   }
   if (url.pathname === '/api/workshop/logout' && req.method === 'POST') {
     // #5a：清会话 cookie（含旧名兼容），让 Bearer+Cookie 双通道都登出；无状态 Token 自身靠客户端丢弃即失效。
