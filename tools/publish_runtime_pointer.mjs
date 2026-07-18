@@ -26,6 +26,20 @@ if (dirty && !dirty.split('\n').every(line => line.includes('manifest.json'))) {
 }
 
 const mf = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+// r65 闸门（2026-07-18 现网事故复盘）：opening-page.html 改动后若忘记重钉 control-center 内的
+// OPENING_PAGE_SHA256，全网玩家开局页校验必挂——发指针前在此强制对账，宁可拒发不可带病发。
+{
+  const crypto = await import('node:crypto');
+  const ccText = fs.readFileSync('runtime/' + scope + '/' + version + '/control-center.js', 'utf8');
+  const openingText = fs.readFileSync('runtime/' + scope + '/' + version + '/opening-page.html', 'utf8');
+  const pinned = ccText.match(/const OPENING_PAGE_SHA256 = '([a-f0-9]{64})'/)?.[1] || '';
+  const actual = crypto.createHash('sha256').update(openingText.replace(/\r\n?/g, '\n'), 'utf8').digest('hex');
+  if (pinned !== actual) {
+    console.error('❌ OPENING_PAGE_SHA256 与 opening-page.html 不一致（钉 ' + pinned.slice(0, 12) + '… / 实 ' + actual.slice(0, 12) + '…）——改过 opening 必须同步重钉 CC 常量后再发指针。');
+    process.exit(3);
+  }
+  console.log('✅ opening SHA 对账通过');
+}
 if (mf.pinnedCommit === head) {
   console.log('指针已指向 HEAD，跳过写入。');
 } else {
