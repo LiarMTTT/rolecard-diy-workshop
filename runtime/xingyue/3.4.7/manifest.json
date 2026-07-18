@@ -9,13 +9,13 @@
       "id": "bubble-css",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.7/bubble.css",
       "bytes": 1664,
-      "sha256": "76db502a4e788d5b4f2feae0f250d5b51ffc78d9ab495e12a29cdd812421b8b9"
+      "sha256": "894fe1a81026f8cda5e142eede054a27d60b862f565be733856b69f19f5166b0"
     },
     {
       "id": "control-center",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.7/control-center.js",
-      "bytes": 665567,
-      "sha256": "ee07984ad06b82dfc41a6b64348e1efcbeec9c146d55764fef2f82f77f05cd81"
+      "bytes": 665377,
+      "sha256": "1ab1b0afa396a24374b66fb2445b824fc848a568c0e10544a756b649351ed805"
     },
     {
       "id": "omni-analysis",
@@ -39,25 +39,25 @@
       "id": "opening-page",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.7/opening-page.html",
       "bytes": 297744,
-      "sha256": "4e301a073635af00073bf4f87d9f6a3b81c38ca5a758378adb7289ad5158a0eb"
+      "sha256": "9df2f9820b1580641d0bcbe21c2d62e2ccd79570789f74d6c487838ac684fd78"
     },
     {
       "id": "status-bar",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.7/status-bar.html",
       "bytes": 352342,
-      "sha256": "719407f26ecf5616577742e7fd81430f31e8617e9b0a1100cd4af0fb62f6d59b"
+      "sha256": "3c729ec63fc76d10019a46ba892cdfd61b8c2f971819659d743747044c4385c1"
     },
     {
       "id": "worldbook-editor",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.7/worldbook-editor.js",
       "bytes": 103572,
-      "sha256": "c64ad0c905a971d33983d2144effd12862e57b0c58e1e331bad84fd2e29ab161"
+      "sha256": "57306efef86b55b86285636a0d2f993f9a80fa31f52e2a4986487b4c1a807c7f"
     },
     {
       "id": "worldbook-factory-baseline",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.7/worldbook-factory-baseline.json",
       "bytes": 173470,
-      "sha256": "5b27b7edcb3e4abe172744e3125ac54af3a33b97086a58ad32f770577ad53e5d"
+      "sha256": "1381f9734c047eecf92468f50d8f4054e73fc9644f9022be1a0f2fbe4a9a33bb"
     }
   ]
 }

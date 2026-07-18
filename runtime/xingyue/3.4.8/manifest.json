@@ -9,13 +9,13 @@
       "id": "bubble-css",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.8/bubble.css",
       "bytes": 1664,
-      "sha256": "76db502a4e788d5b4f2feae0f250d5b51ffc78d9ab495e12a29cdd812421b8b9"
+      "sha256": "0916d72055cc5c0df3ba9becfcdef3a65ae04fd5be3162ec3b927a868f552dc5"
     },
     {
       "id": "control-center",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.8/control-center.js",
-      "bytes": 665567,
-      "sha256": "ee07984ad06b82dfc41a6b64348e1efcbeec9c146d55764fef2f82f77f05cd81"
+      "bytes": 669806,
+      "sha256": "0be8315997f8af93b539435e7543b17ef7115dd4f883bfefbd43df8787243137"
     },
     {
       "id": "omni-analysis",
@@ -38,26 +38,26 @@
     {
       "id": "opening-page",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.8/opening-page.html",
-      "bytes": 297744,
-      "sha256": "4e301a073635af00073bf4f87d9f6a3b81c38ca5a758378adb7289ad5158a0eb"
+      "bytes": 299514,
+      "sha256": "add898d10a7ab0cfbe55bd7841465a5a9777cf5cc88695ef0efa20cbfd30ca1a"
     },
     {
       "id": "status-bar",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.8/status-bar.html",
       "bytes": 352342,
-      "sha256": "719407f26ecf5616577742e7fd81430f31e8617e9b0a1100cd4af0fb62f6d59b"
+      "sha256": "d58c017d0e794c78c8a6ff130d1dee3f5d23ce5f568d94a5c77985fd45e5ff05"
     },
     {
       "id": "worldbook-editor",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.8/worldbook-editor.js",
       "bytes": 103572,
-      "sha256": "c64ad0c905a971d33983d2144effd12862e57b0c58e1e331bad84fd2e29ab161"
+      "sha256": "2111f374653c20f8b280615d0f2bfc6f06e8954fbc2eb3ffab34570737b39356"
     },
     {
       "id": "worldbook-factory-baseline",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.4.8/worldbook-factory-baseline.json",
       "bytes": 173470,
-      "sha256": "5b27b7edcb3e4abe172744e3125ac54af3a33b97086a58ad32f770577ad53e5d"
+      "sha256": "1bdd501f6163bd5c5a169418ce440aba676260a193c87036732243f286a8dfeb"
     }
   ]
 }
