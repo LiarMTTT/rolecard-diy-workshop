@@ -14,8 +14,8 @@
     {
       "id": "control-center",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@main/runtime/xingyue/3.9.6/control-center.js",
-      "bytes": 739098,
-      "sha256": "178ced2aef94af071738943f5a81e3711fb8cc6bac527951c398df287741a291"
+      "bytes": 739100,
+      "sha256": "e4d2a86a6c330187bbf1fbb0226b09f8a838f988e1118ec64af091aa0bfa74fd"
     },
     {
       "id": "omni-analysis",

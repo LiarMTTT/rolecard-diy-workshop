@@ -12382,10 +12382,10 @@
   const wandRetryTimer = setTimeout(ensureWandEntry, 1000);
   disposers.push(() => { try { clearTimeout(wandRetryTimer); } catch (_) {} });
   // 开局页挂载只依赖 runtime 本身；聊天草稿上下文晚到或暂时不可用时也必须先结束加载圈。
-  dispatchControlCenterReady();
   ensureOpeningPageBinding();
   void openingDraftReady.then(result => {
     if (runtimeDestroyed || !result || !openingDraftService.status().ready) return;
+    dispatchControlCenterReady();
     currentOwnedOpeningRoots().forEach(root => {
       try { root.__xyOpeningRefreshContext?.(); } catch (_) {}
       try { root.__xyOpeningRefreshPlayer?.(); } catch (_) {}
