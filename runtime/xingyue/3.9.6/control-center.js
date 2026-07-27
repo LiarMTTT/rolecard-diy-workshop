@@ -9316,6 +9316,7 @@
     return true;
   }
   function exitOpeningFocusMode(options = {}) {
+    state.workshopFocusOwned = false;
     if (!openingFocusPortal) {
       try { openingFocusViewportCleanup?.(); } catch (_) {}
       openingFocusViewportCleanup = null;
@@ -9352,7 +9353,9 @@
     if (!state.previewMode && options.persist !== false) openingDraftService.patchUi({ view: nextView }, { immediate: true });
     render();
     if (options.restoreScroll !== false) restoreOpeningScroll();
-    if (leavingOwnedWorkshop) { state.workshopFocusOwned = false; exitOpeningFocusMode(); }
+    // r73：从工坊回到向导时保留 top-layer，避免重新挂回消息楼层后点击链失效。
+    // 从封面进入工坊仍按原逻辑退出；手动全屏也不被标记为工坊持有。
+    if (leavingOwnedWorkshop && nextView !== 'wizard') exitOpeningFocusMode();
   }
 
   function setStep(next, options = {}) {
@@ -10816,8 +10819,11 @@
         setView('wizard');
         setStep(1);
       }
-      if (action === 'back-boot') setView('boot');
-      if (action === 'back-entry') setView('boot');
+      if (action === 'back-boot' || action === 'back-entry') {
+        const releaseWorkshopFocus = state.workshopFocusOwned;
+        setView('boot');
+        if (releaseWorkshopFocus && openingFocusActive()) exitOpeningFocusMode();
+      }
       if (action === 'go-step') setStep(button.dataset.xyStepTarget);
       if (action === 'prev-step') setStep(state.step - 1);
       if (action === 'next-step') setStep(state.step + 1);
