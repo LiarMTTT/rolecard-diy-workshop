@@ -152,7 +152,7 @@
     return { ...workshopAuth };
   }
   // r65 = 两条并行热修线合流：r64(07-17 事后立绘路由/新建角色气泡/署名持久化/更新锚定) + r64(07-18 开局页四源/兜底/token内存兜底)。
-  const GIT_RUNTIME_REVISION = '3.9.6-stability-r72-20260724';
+  const GIT_RUNTIME_REVISION = '3.9.6-stability-r73-20260727';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
