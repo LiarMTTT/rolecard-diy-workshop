@@ -110,9 +110,9 @@ http://localhost:8766
 Useful options:
 
 ```bash
-npm run ops:takeover -- --gatewayUrl https://43-132-171-157.sslip.io
+npm run ops:takeover -- --gatewayUrl https://198-23-196-145.sslip.io
 npm run ops:takeover -- --corsOrigin http://127.0.0.1:8000
-npm run ops:takeover -- --ssh --vpsUser root --vpsHost 43.132.171.157
+npm run ops:takeover -- --ssh --vpsUser root --vpsHost 198.23.196.145
 ```
 
 The takeover check verifies:
@@ -139,12 +139,12 @@ For the current Docker deployment, rebuild the Gateway container from the reposi
 npm run deploy:gateway-docker
 ```
 
-The deploy helper reuses the existing VPS `.env`, backs it up, appends the standard local preview CORS origins if they are missing, recreates the `rolecard-workshop-gateway` container with the existing bind mounts, checks `https://43-132-171-157.sslip.io/api/workshop/health`, and automatically restores the old container if the health check fails. It does not store or print Discord secrets, admin token, session secret, hash secret, or private SSH key content.
+The deploy helper reuses the existing VPS `.env`, backs it up, appends the standard local preview CORS origins if they are missing, recreates the `rolecard-workshop-gateway` container with the existing bind mounts, checks `https://198-23-196-145.sslip.io/api/workshop/health`, and automatically restores the old container if the health check fails. It does not store or print Discord secrets, admin token, session secret, hash secret, or private SSH key content.
 
 For the current Cloudreve-root deployment, keep Gateway health under the API prefix:
 
 ```text
-https://43-132-171-157.sslip.io/api/workshop/health
+https://198-23-196-145.sslip.io/api/workshop/health
 ```
 
 If you also want `/health` to hit Gateway instead of Cloudreve, add an Nginx location equivalent to:
