@@ -173,9 +173,7 @@
 <script>
 "use strict";
 /* ---- 配置：复用 Phase 0 鉴权（与卡内 control_center.js 一致）---- */
-const GATEWAY_BASE = (location.hostname === '127.0.0.1' || location.hostname === 'localhost')
-  ? location.origin
-  : 'https://43-132-171-157.sslip.io';
+const GATEWAY_BASE = location.origin;
 const TOKEN_KEY = 'xingyue-workshop-token';          // 与卡内 setWorkshopToken 同 key
 const ATTRIBUTE_KEYS = ['格斗','平衡','反应','感知','技巧','精神']; // 与 control_center.js 同源
 const ATTR_TOTAL = 30;

@@ -86,4 +86,23 @@ for (const { relativePath, manifest } of runtimeManifests) {
   }
 }
 
+const activeRuntime = await fs.readFile(path.join(root, 'runtime', 'xingyue', '3.9.6', 'control-center.js'), 'utf8');
+assert(activeRuntime.includes("const DEFAULT_GATEWAY_URL = 'https://198-23-196-145.sslip.io';"), '3.9.6 runtime must use the RackNerd Gateway');
+assert(activeRuntime.includes('if (isLegacyGatewayUrl(merged.gatewayUrl)) merged.gatewayUrl = DEFAULT_GATEWAY_URL;'), '3.9.6 runtime must migrate the retired official Gateway setting');
+assert(!activeRuntime.includes('43-132-171-157.sslip.io'), '3.9.6 runtime must not ship the retired Gateway hostname as a request target');
+
+const workshopStudio = await fs.readFile(path.join(root, 'gateway', 'public', 'workshop-studio.html'), 'utf8');
+assert(workshopStudio.includes('const GATEWAY_BASE = location.origin;'), 'workshop studio must use its serving Gateway origin');
+assert(!workshopStudio.includes('43-132-171-157.sslip.io'), 'workshop studio must not use the retired Gateway hostname');
+
+const deployGateway = await fs.readFile(path.join(root, 'tools', 'deploy_gateway_docker.mjs'), 'utf8');
+assert(deployGateway.includes('https://198-23-196-145.sslip.io/api/workshop/health'), 'Gateway deployment fallback must target RackNerd');
+assert(!deployGateway.includes('43-132-171-157.sslip.io'), 'Gateway deployment fallback must not target Tencent');
+
+const opsTakeover = await fs.readFile(path.join(root, 'tools', 'ops_takeover.mjs'), 'utf8');
+assert(opsTakeover.includes("gatewayUrl: 'https://198-23-196-145.sslip.io'"), 'operations Gateway default must target RackNerd');
+assert(opsTakeover.includes("vpsHost: '198.23.196.145'"), 'operations VPS default must target RackNerd');
+assert(!opsTakeover.includes('43-132-171-157.sslip.io') && !opsTakeover.includes('43.132.171.157'), 'operations defaults must not target Tencent');
+console.log('[cutover] active runtime and workshop studio target RackNerd');
+
 console.log('[ok] static workshop contract validated');

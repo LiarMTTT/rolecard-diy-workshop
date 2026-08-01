@@ -23,7 +23,7 @@ const image = args.image || 'node:20-alpine';
 const port = args.port || '8787';
 const dataDir = args.dataDir || '/var/lib/rolecard-diy-workshop';
 const publicDir = args.publicDir || secretConfig?.storage?.publicPackageDir || '/usr/local/lighthouse/softwares/cloudreve/workshop-public/xingyue';
-const healthUrl = args.healthUrl || (secretConfig?.gateway?.publicBaseUrl ? `${String(secretConfig.gateway.publicBaseUrl).replace(/\/+$/, '')}/api/workshop/health` : '') || 'https://43-132-171-157.sslip.io/api/workshop/health';
+const healthUrl = args.healthUrl || (secretConfig?.gateway?.publicBaseUrl ? `${String(secretConfig.gateway.publicBaseUrl).replace(/\/+$/, '')}/api/workshop/health` : '') || 'https://198-23-196-145.sslip.io/api/workshop/health';
 const corsOriginDefault = String(args.corsOrigin || args.corsorigin || process.env.WORKSHOP_CORS_ORIGINS || '*').trim() || '*';
 let temporaryIdentityDir = '';
 

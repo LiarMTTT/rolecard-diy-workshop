@@ -11,9 +11,9 @@ const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const DEFAULTS = {
-  gatewayUrl: 'https://43-132-171-157.sslip.io',
+  gatewayUrl: 'https://198-23-196-145.sslip.io',
   pagesBaseUrl: 'https://liarmttt.github.io/rolecard-diy-workshop',
-  vpsHost: '43.132.171.157',
+  vpsHost: '198.23.196.145',
   vpsUser: 'root',
   gatewayDir: '/opt/rolecard-diy-workshop/gateway',
   gatewayContainer: 'rolecard-workshop-gateway',

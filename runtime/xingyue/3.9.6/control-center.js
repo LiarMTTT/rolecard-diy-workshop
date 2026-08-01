@@ -18,7 +18,8 @@
   const STATUS_HUD_ENTRY_MODES = ['auto', 'drawer', 'orb'];
   const STATUS_HUD_DRAWER_PLACEMENTS = ['auto', 'top', 'bottom'];
   const STATIC_INDEX_URL = 'https://liarmttt.github.io/rolecard-diy-workshop/cards/xingyue/index.json';
-  const DEFAULT_GATEWAY_URL = 'https://43-132-171-157.sslip.io';
+  const DEFAULT_GATEWAY_URL = 'https://198-23-196-145.sslip.io';
+  const LEGACY_GATEWAY_URL = 'https://' + '43-132-171-157' + '.sslip.io';
   const SUPPORTED_TYPES = ['character','user_identity','world_factor','shop_item','blueprint','recipe','skill','function'];
   const BLOCKED_TYPES = ['opening_pack','prompt_patch','ui_theme'];
   const SUPPORTED_CARD_SCOPES = ['xingyue','shared','xingyue-opening-v1'];
@@ -152,7 +153,7 @@
     return { ...workshopAuth };
   }
   // r65 = 两条并行热修线合流：r64(07-17 事后立绘路由/新建角色气泡/署名持久化/更新锚定) + r64(07-18 开局页四源/兜底/token内存兜底)。
-  const GIT_RUNTIME_REVISION = '3.9.6-stability-r73-20260727';
+  const GIT_RUNTIME_REVISION = '3.9.6-stability-r74-20260801';
   function createRuntimeOwnerId() {
     const targets = [window];
     try { const host = hostWindow(); if (host && !targets.includes(host)) targets.push(host); } catch (_) {}
@@ -420,8 +421,12 @@
   function normalizeStatusHudDrawerPlacement(placement) {
     return STATUS_HUD_DRAWER_PLACEMENTS.includes(placement) ? placement : 'auto';
   }
+  function isLegacyGatewayUrl(value) {
+    return String(value || '').trim().replace(/\/+$/, '') === LEGACY_GATEWAY_URL;
+  }
   function normalizeSettings(next) {
     const merged = { ...DEFAULT_SETTINGS, ...(next || {}) };
+    if (isLegacyGatewayUrl(merged.gatewayUrl)) merged.gatewayUrl = DEFAULT_GATEWAY_URL;
     delete merged.summaryUpdateEnabled;
     merged.statusHudEntryMode = normalizeStatusHudEntryMode(merged.statusHudEntryMode);
     merged.statusHudDrawerPlacement = normalizeStatusHudDrawerPlacement(merged.statusHudDrawerPlacement);
@@ -429,7 +434,12 @@
   }
   function readSettings() {
     try {
-      return normalizeSettings(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {});
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {};
+      const normalized = normalizeSettings(stored);
+      if (isLegacyGatewayUrl(stored?.gatewayUrl)) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized)); } catch (_) {}
+      }
+      return normalized;
     } catch (_) {
       return normalizeSettings();
     }
