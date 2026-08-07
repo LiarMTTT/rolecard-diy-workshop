@@ -28,6 +28,7 @@ assert.doesNotMatch(html, /\blocalStorage\.(?:getItem|setItem|removeItem)/, 'no 
 assert.match(html, /sessionStorage\.getItem/, 'restore token for the current tab');
 assert.match(html, /sessionStorage\.setItem/, 'persist token only for the current tab');
 assert.match(html, /sessionStorage\.removeItem/, 'clear current-tab token explicitly');
+assert.doesNotMatch(html, /b0c1f9d|下一阶段 W2|页面卸载即丢弃/, 'no stale W2 baseline copy');
 assert.doesNotMatch(html, /<script[^>]+\bsrc=/i, 'no external script dependency');
 assert.doesNotMatch(html, /@import\s+url/i, 'no external font or stylesheet dependency');
 assert.doesNotMatch(html, /\son[a-z]+\s*=/i, 'no inline event handlers');
