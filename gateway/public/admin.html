@@ -1,403 +1,1933 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Workshop Review</title>
+  <meta name="color-scheme" content="dark">
+  <title>创意工坊管理台</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f7f8fa;
-      --panel: #ffffff;
-      --line: #d9dee7;
-      --text: #18202f;
-      --muted: #667085;
-      --accent: #1f6feb;
-      --danger: #b42318;
-      --ok: #067647;
+      color-scheme: dark;
+      --bg: #050914;
+      --sidebar: #08101e;
+      --panel: #0d1728;
+      --panel-raised: #121f33;
+      --panel-hover: #17263d;
+      --line: #26364f;
+      --line-strong: #3a4f70;
+      --text: #f4f7fb;
+      --muted: #9aabc2;
+      --subtle: #71839c;
+      --primary: #3b82f6;
+      --primary-hover: #60a5fa;
+      --success: #4ade80;
+      --warning: #fbbf24;
+      --danger: #fb7185;
+      --focus: #93c5fd;
+      --shadow: 0 18px 48px rgba(0, 0, 0, .24);
+      --radius: 14px;
     }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-width: 320px;
       background: var(--bg);
-      color: var(--text);
-      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    header {
-      border-bottom: 1px solid var(--line);
-      background: var(--panel);
-    }
-    .wrap {
-      width: min(1180px, calc(100% - 32px));
-      margin: 0 auto;
-    }
-    header .wrap {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      min-height: 64px;
-    }
-    h1 {
+
+    body {
+      min-height: 100vh;
       margin: 0;
-      font-size: 20px;
-      letter-spacing: 0;
+      background:
+        radial-gradient(circle at 80% -10%, rgba(59, 130, 246, .13), transparent 34rem),
+        var(--bg);
+      color: var(--text);
+      font: 14px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    main {
-      padding: 20px 0 36px;
-    }
-    .toolbar,
-    .detail,
-    .package {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
-    }
-    .toolbar {
-      display: grid;
-      grid-template-columns: 1.1fr 160px 150px 120px auto;
-      gap: 10px;
-      padding: 12px;
-      margin-bottom: 14px;
-    }
+
+    button,
     input,
     select,
-    textarea,
-    button {
-      min-height: 36px;
+    textarea {
+      min-height: 44px;
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #fff;
+      border-radius: 10px;
+      background: #0a1424;
       color: var(--text);
       font: inherit;
     }
+
+    button {
+      padding: 9px 14px;
+      cursor: pointer;
+      transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, transform 160ms ease;
+    }
+
+    button:hover:not(:disabled) {
+      border-color: var(--line-strong);
+      background: var(--panel-hover);
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: .48;
+    }
+
     input,
     select,
     textarea {
       width: 100%;
-      padding: 7px 9px;
+      padding: 9px 11px;
     }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: #6f8097;
+    }
+
     textarea {
-      min-height: 76px;
+      min-height: 96px;
       resize: vertical;
     }
-    button {
-      padding: 7px 12px;
-      cursor: pointer;
+
+    :focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
     }
-    button.primary {
-      border-color: var(--accent);
-      background: var(--accent);
-      color: #fff;
+
+    [hidden] {
+      display: none !important;
     }
-    button.good {
-      border-color: var(--ok);
-      background: var(--ok);
-      color: #fff;
+
+    .skip-link {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 100;
+      transform: translateY(-160%);
+      border-radius: 8px;
+      background: #fff;
+      color: #08101e;
+      padding: 10px 14px;
+      text-decoration: none;
     }
-    button.danger {
-      border-color: var(--danger);
-      background: var(--danger);
-      color: #fff;
+
+    .skip-link:focus {
+      transform: translateY(0);
     }
-    .layout {
+
+    .app-shell {
       display: grid;
-      grid-template-columns: 390px minmax(0, 1fr);
-      gap: 14px;
-      align-items: start;
+      grid-template-columns: 248px minmax(0, 1fr);
+      min-height: 100vh;
     }
-    .list {
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      border-right: 1px solid var(--line);
+      background: rgba(8, 16, 30, .94);
+      padding: 22px 16px;
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
       display: grid;
-      gap: 10px;
+      gap: 4px;
+      margin: 0 8px 26px;
     }
-    .package {
+
+    .brand strong {
+      font-size: 17px;
+      letter-spacing: -.01em;
+    }
+
+    .eyebrow {
+      color: var(--subtle);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .sidebar nav {
       display: grid;
       gap: 6px;
-      padding: 12px;
-      text-align: left;
     }
-    .package[aria-selected="true"] {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-    .title {
+
+    .nav-button {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
-      font-weight: 700;
-    }
-    .meta,
-    .small {
+      gap: 10px;
+      width: 100%;
+      border-color: transparent;
+      background: transparent;
       color: var(--muted);
-      font-size: 12px;
+      text-align: left;
     }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      min-height: 22px;
+
+    .nav-button[aria-current="page"] {
+      border-color: #315281;
+      background: #12233d;
+      color: #fff;
+    }
+
+    .nav-badge {
+      min-width: 23px;
       border: 1px solid var(--line);
       border-radius: 999px;
-      padding: 2px 8px;
-      background: #f9fafb;
+      padding: 1px 7px;
+      color: var(--muted);
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .scope-note {
+      position: absolute;
+      right: 16px;
+      bottom: 20px;
+      left: 16px;
+      border-top: 1px solid var(--line);
+      padding: 16px 8px 0;
+      color: var(--subtle);
+      font-size: 12px;
+    }
+
+    .workspace {
+      min-width: 0;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      min-height: 78px;
+      border-bottom: 1px solid var(--line);
+      padding: 14px clamp(18px, 3vw, 40px);
+      background: rgba(5, 9, 20, .72);
+      backdrop-filter: blur(18px);
+    }
+
+    .topbar h1 {
+      margin: 2px 0 0;
+      font-size: clamp(21px, 3vw, 28px);
+      line-height: 1.15;
+      letter-spacing: -.025em;
+    }
+
+    .connection-badge,
+    .status-pill,
+    .kind-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 10px;
+      background: #0a1424;
       color: var(--muted);
       font-size: 12px;
       white-space: nowrap;
     }
-    .detail {
-      min-height: 360px;
-      padding: 14px;
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--subtle);
+      box-shadow: 0 0 0 3px rgba(113, 131, 156, .12);
     }
-    .detail h2 {
-      margin: 0 0 4px;
-      font-size: 18px;
-      letter-spacing: 0;
+
+    .connection-badge[data-state="online"] .status-dot {
+      background: var(--success);
+      box-shadow: 0 0 0 3px rgba(74, 222, 128, .13);
     }
-    .actions {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin: 12px 0;
+
+    .connection-badge[data-state="error"] .status-dot {
+      background: var(--danger);
+      box-shadow: 0 0 0 3px rgba(251, 113, 133, .13);
     }
-    pre {
-      overflow: auto;
-      max-height: 460px;
-      margin: 12px 0 0;
-      padding: 12px;
+
+    main {
+      width: min(1480px, 100%);
+      margin: 0 auto;
+      padding: 24px clamp(16px, 3vw, 40px) 48px;
+    }
+
+    .panel {
       border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #101828;
-      color: #f8fafc;
-      font-size: 12px;
+      border-radius: var(--radius);
+      background: rgba(13, 23, 40, .94);
+      box-shadow: var(--shadow);
     }
-    .notice {
-      min-height: 24px;
-      margin: 10px 0 0;
+
+    .auth-panel {
+      display: grid;
+      grid-template-columns: minmax(220px, .8fr) minmax(380px, 1.4fr);
+      gap: 22px;
+      margin-bottom: 18px;
+      padding: 18px;
+    }
+
+    .auth-copy h2,
+    .section-heading h2,
+    .detail h2 {
+      margin: 0;
+      letter-spacing: -.02em;
+    }
+
+    .auth-copy p,
+    .section-heading p {
+      margin: 5px 0 0;
       color: var(--muted);
     }
-    .notice.error { color: var(--danger); }
-    .notice.ok { color: var(--ok); }
-    .review-media { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
-    .review-media figure { margin: 0; display: grid; gap: 6px; min-width: 0; }
-    .review-media img { display: block; width: 100%; height: 260px; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #101828; }
-    .review-media figcaption { color: var(--muted); font-size: 12px; text-align: center; }
-    @media (max-width: 850px) {
-      .toolbar,
-      .layout {
+
+    .auth-form {
+      display: grid;
+      grid-template-columns: minmax(200px, 1fr) auto auto;
+      gap: 9px;
+      align-items: end;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .field label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .button-primary {
+      border-color: #3b82f6;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .button-primary:hover:not(:disabled) {
+      border-color: var(--primary-hover);
+      background: #357df0;
+    }
+
+    .button-success {
+      border-color: #1f9d5a;
+      background: #147a45;
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .button-danger {
+      border-color: #c2415b;
+      background: #9f2942;
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .security-note {
+      grid-column: 1 / -1;
+      margin: -7px 0 0;
+      color: var(--subtle);
+      font-size: 12px;
+    }
+
+    .global-notice {
+      min-height: 22px;
+      margin: 0 2px 16px;
+      color: var(--muted);
+    }
+
+    .global-notice[data-kind="success"] {
+      color: var(--success);
+    }
+
+    .global-notice[data-kind="error"] {
+      color: var(--danger);
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .section-heading h2 {
+      font-size: 20px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .metric {
+      min-height: 132px;
+      padding: 17px;
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .metric-value {
+      display: block;
+      margin: 12px 0 5px;
+      font-size: clamp(24px, 4vw, 34px);
+      font-weight: 760;
+      letter-spacing: -.04em;
+      line-height: 1;
+    }
+
+    .metric-detail {
+      color: var(--subtle);
+      font-size: 12px;
+    }
+
+    .overview-grid {
+      display: grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 12px;
+    }
+
+    .overview-card {
+      padding: 18px;
+    }
+
+    .overview-card h3,
+    .queue-panel h3 {
+      margin: 0 0 12px;
+      font-size: 15px;
+    }
+
+    .check-list,
+    .endpoint-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .check-list li,
+    .endpoint-list li {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid rgba(38, 54, 79, .65);
+      padding-bottom: 9px;
+    }
+
+    .check-list li:last-child,
+    .endpoint-list li:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .text-success {
+      color: var(--success);
+    }
+
+    .text-warning {
+      color: var(--warning);
+    }
+
+    .text-danger {
+      color: var(--danger);
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: 180px 190px minmax(180px, 1fr) auto;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding: 12px;
+    }
+
+    .toolbar .field label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .capability-note {
+      margin-bottom: 12px;
+      border: 1px solid #6b571b;
+      border-radius: 12px;
+      background: rgba(117, 84, 13, .2);
+      padding: 14px 16px;
+      color: #f4d77c;
+    }
+
+    .queue-layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 390px) minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .queue-panel {
+      min-width: 0;
+      padding: 12px;
+    }
+
+    .queue-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 3px 3px 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .package-list {
+      display: grid;
+      gap: 8px;
+      max-height: calc(100vh - 330px);
+      overflow: auto;
+      padding: 2px;
+    }
+
+    .package-button {
+      display: grid;
+      gap: 7px;
+      width: 100%;
+      padding: 13px;
+      text-align: left;
+    }
+
+    .package-button[aria-selected="true"] {
+      border-color: var(--primary-hover);
+      background: #132746;
+      box-shadow: inset 3px 0 0 var(--primary-hover);
+    }
+
+    .package-title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .package-title {
+      overflow-wrap: anywhere;
+      font-weight: 720;
+    }
+
+    .package-meta,
+    .muted,
+    .detail-meta {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .package-summary {
+      display: -webkit-box;
+      overflow: hidden;
+      color: var(--subtle);
+      font-size: 12px;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .status-pill[data-status="approved"] {
+      border-color: rgba(74, 222, 128, .45);
+      color: var(--success);
+    }
+
+    .status-pill[data-status="pending"] {
+      border-color: rgba(251, 191, 36, .45);
+      color: var(--warning);
+    }
+
+    .status-pill[data-status="rejected"] {
+      border-color: rgba(251, 113, 133, .45);
+      color: var(--danger);
+    }
+
+    .detail {
+      min-height: 520px;
+      padding: 18px;
+    }
+
+    .detail-empty {
+      display: grid;
+      min-height: 420px;
+      place-items: center;
+      color: var(--subtle);
+      text-align: center;
+    }
+
+    .detail-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .detail h2 {
+      margin-bottom: 5px;
+      font-size: 21px;
+      overflow-wrap: anywhere;
+    }
+
+    .detail-summary {
+      margin: 13px 0;
+      color: #d6deeb;
+      white-space: pre-wrap;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 11px 0;
+    }
+
+    .kind-pill {
+      min-height: 24px;
+      padding: 2px 8px;
+    }
+
+    .review-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      margin: 16px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      padding: 14px 0;
+    }
+
+    .reason-field {
+      margin: 12px 0;
+    }
+
+    .review-media {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin: 14px 0;
+    }
+
+    .review-media figure {
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+      margin: 0;
+    }
+
+    .review-media img,
+    .media-empty {
+      display: block;
+      width: 100%;
+      height: 240px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #070c16;
+      object-fit: contain;
+    }
+
+    .media-empty {
+      display: grid;
+      place-items: center;
+      padding: 12px;
+      color: var(--subtle);
+      text-align: center;
+    }
+
+    .review-media figcaption {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    details {
+      margin-top: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #091321;
+    }
+
+    summary {
+      min-height: 44px;
+      padding: 11px 13px;
+      cursor: pointer;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    pre {
+      overflow: auto;
+      max-height: 520px;
+      margin: 0;
+      border-top: 1px solid var(--line);
+      padding: 14px;
+      background: #050a12;
+      color: #dbe7f7;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      tab-size: 2;
+      white-space: pre;
+    }
+
+    .file-table-wrap {
+      overflow-x: auto;
+      margin-top: 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+
+    .file-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 620px;
+    }
+
+    .file-table th,
+    .file-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 11px;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    .file-table th {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .file-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .file-choice {
+      min-height: 36px;
+      padding: 5px 8px;
+      background: transparent;
+      color: #bfdbfe;
+      text-align: left;
+    }
+
+    .file-preview {
+      margin-top: 10px;
+    }
+
+    .file-preview-meta {
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .system-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    code {
+      color: #bfdbfe;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    dialog {
+      width: min(520px, calc(100% - 28px));
+      border: 1px solid var(--line-strong);
+      border-radius: 14px;
+      background: var(--panel-raised);
+      color: var(--text);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, .55);
+      padding: 0;
+    }
+
+    dialog::backdrop {
+      background: rgba(0, 0, 0, .72);
+      backdrop-filter: blur(3px);
+    }
+
+    .dialog-body {
+      padding: 20px;
+    }
+
+    .dialog-body h2 {
+      margin: 0 0 8px;
+      font-size: 19px;
+    }
+
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 9px;
+      border-top: 1px solid var(--line);
+      padding: 14px 20px;
+      background: #0a1424;
+    }
+
+    @media (max-width: 1120px) {
+      .metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .auth-panel {
         grid-template-columns: 1fr;
       }
-      .review-media { grid-template-columns: 1fr; }
+
+      .auth-form {
+        grid-template-columns: minmax(220px, 1fr) auto auto;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .app-shell {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .sidebar {
+        position: static;
+        z-index: 5;
+        min-width: 0;
+        width: 100%;
+        max-width: 100%;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        padding: 14px 16px;
+      }
+
+      .brand {
+        margin: 0 0 12px;
+      }
+
+      .sidebar nav {
+        min-width: 0;
+        width: 100%;
+        max-width: 100%;
+        grid-auto-columns: 145px;
+        grid-auto-flow: column;
+        grid-template-columns: none;
+        overflow-x: auto;
+        padding-bottom: 2px;
+      }
+
+      .scope-note {
+        display: none;
+      }
+
+      .topbar {
+        position: static;
+      }
+
+      .queue-layout,
+      .overview-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .package-list {
+        max-height: 430px;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .topbar {
+        align-items: flex-start;
+        min-height: auto;
+        padding: 15px 16px;
+      }
+
+      main {
+        padding-top: 16px;
+      }
+
+      .auth-form,
+      .toolbar,
+      .metrics,
+      .system-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .auth-form button,
+      .toolbar button {
+        width: 100%;
+      }
+
+      .section-heading,
+      .detail-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .review-media {
+        grid-template-columns: 1fr;
+      }
+
+      .review-media img,
+      .media-empty {
+        height: min(70vw, 340px);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+      }
     }
   </style>
 </head>
 <body>
-  <header>
-    <div class="wrap">
-      <h1>Workshop Review</h1>
-      <span class="small">No Discord profile fields are displayed or stored here.</span>
-    </div>
-  </header>
-  <main class="wrap">
-    <section class="toolbar" aria-label="Review filters">
-      <input id="adminToken" type="password" autocomplete="off" placeholder="Admin token">
-      <select id="status">
-        <option value="pending">pending</option>
-        <option value="approved">approved</option>
-        <option value="rejected">rejected</option>
-        <option value="withdrawn">withdrawn</option>
-        <option value="all">all</option>
-      </select>
-      <select id="type">
-        <option value="">all types</option>
-        <option value="character">character</option>
-        <option value="user_identity">user_identity</option>
-        <option value="world_factor">world_factor</option>
-        <option value="shop_item">shop_item</option>
-        <option value="blueprint">blueprint</option>
-        <option value="recipe">recipe</option>
-        <option value="skill">skill</option>
-        <option value="function">function</option>
-      </select>
-      <input id="query" type="search" placeholder="Search">
-      <button id="refresh" class="primary" type="button">Refresh</button>
-    </section>
-    <section class="layout">
-      <div>
-        <div id="list" class="list" aria-live="polite"></div>
-        <div id="notice" class="notice"></div>
+  <a class="skip-link" href="#mainContent">跳到主要内容</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="管理台导航">
+      <div class="brand">
+        <span class="eyebrow">RPN Operations</span>
+        <strong>创意工坊管理台</strong>
       </div>
-      <article id="detail" class="detail">
-        <h2>Select a package</h2>
-        <p class="meta">Pending packages are hidden from the public index until approved.</p>
-      </article>
-    </section>
-  </main>
-  <script>
-    const state = {
-      packages: [],
-      selected: null,
-      mediaObjectUrls: [],
-    };
-    const $ = id => document.getElementById(id);
-    const savedToken = localStorage.getItem('xyWorkshopAdminToken') || '';
-    $('adminToken').value = savedToken;
+      <nav>
+        <button class="nav-button" type="button" data-view="overview" aria-current="page">
+          <span>运行概览</span>
+          <span class="nav-badge" id="navHealthBadge">—</span>
+        </button>
+        <button class="nav-button" type="button" data-view="packages">
+          <span>内容包审核</span>
+          <span class="nav-badge" id="navPackageBadge">—</span>
+        </button>
+        <button class="nav-button" type="button" data-view="components">
+          <span>组件包审核</span>
+          <span class="nav-badge" id="navComponentBadge">—</span>
+        </button>
+        <button class="nav-button" type="button" data-view="system">
+          <span>系统与安全</span>
+          <span class="nav-badge">只读</span>
+        </button>
+      </nav>
+      <p class="scope-note">管理页不读取、不展示 Discord 原始资料。公开玩家 API 与 CORS 合同不在此页面中修改。</p>
+    </aside>
 
-    function setNotice(message, kind = '') {
-      $('notice').textContent = message || '';
-      $('notice').className = `notice ${kind}`.trim();
+    <div class="workspace">
+      <header class="topbar">
+        <div>
+          <span class="eyebrow" id="pageEyebrow">Operations overview</span>
+          <h1 id="pageTitle">运行概览</h1>
+        </div>
+        <span class="connection-badge" id="connectionBadge" data-state="idle">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="connectionText">未连接</span>
+        </span>
+      </header>
+
+      <main id="mainContent" tabindex="-1">
+        <section class="panel auth-panel" aria-labelledby="authTitle">
+          <div class="auth-copy">
+            <h2 id="authTitle">连接管理接口</h2>
+            <p>令牌只保存在当前标签页的 sessionStorage 中；刷新保留，关闭标签页后由浏览器清除。</p>
+          </div>
+          <form class="auth-form" id="authForm" autocomplete="off">
+            <div class="field">
+              <label for="adminToken">管理令牌</label>
+              <input id="adminToken" name="workshop-admin-token" type="password" autocomplete="off" spellcheck="false" placeholder="输入 ADMIN_TOKEN">
+            </div>
+            <button class="button-primary" id="connectButton" type="submit" data-async>连接并刷新</button>
+            <button id="clearTokenButton" type="button" data-async>清除令牌</button>
+          </form>
+          <p class="security-note">令牌仅写入当前标签页的 sessionStorage，不写入 localStorage、URL、日志或剪贴板。管理请求仅通过 <code>Authorization: Bearer</code> 发送。</p>
+        </section>
+
+        <div class="global-notice" id="globalNotice" role="status" aria-live="polite" aria-atomic="true"></div>
+
+        <section id="viewOverview" class="view">
+          <div class="section-heading">
+            <div>
+              <h2>服务与队列</h2>
+              <p>先确认 Gateway 在线和审核接口可用，再执行任何状态变更。</p>
+            </div>
+            <span class="muted" id="lastChecked">尚未检查</span>
+          </div>
+
+          <div class="metrics">
+            <article class="panel metric">
+              <span class="metric-label">Gateway</span>
+              <strong class="metric-value" id="metricGateway">未知</strong>
+              <span class="metric-detail" id="metricGatewayDetail">等待连接</span>
+            </article>
+            <article class="panel metric">
+              <span class="metric-label">内容包待审</span>
+              <strong class="metric-value" id="metricPackages">—</strong>
+              <span class="metric-detail">普通工坊发布队列</span>
+            </article>
+            <article class="panel metric">
+              <span class="metric-label">组件包待审</span>
+              <strong class="metric-value" id="metricComponents">—</strong>
+              <span class="metric-detail" id="metricComponentsDetail">等待能力探测</span>
+            </article>
+            <article class="panel metric">
+              <span class="metric-label">令牌驻留</span>
+              <strong class="metric-value">内存</strong>
+              <span class="metric-detail">页面卸载即丢弃</span>
+            </article>
+          </div>
+
+          <div class="overview-grid">
+            <article class="panel overview-card">
+              <h3>上线边界</h3>
+              <ul class="check-list">
+                <li><span>普通内容包审核</span><strong id="ordinaryCapability">等待连接</strong></li>
+                <li><span>组件包审核</span><strong id="componentCapability">等待探测</strong></li>
+                <li><span>审核日志只读接口</span><strong class="text-warning">下一阶段 W2</strong></li>
+                <li><span>图床管理</span><strong>独立 Chevereto 后台</strong></li>
+              </ul>
+            </article>
+            <article class="panel overview-card">
+              <h3>当前固定基线</h3>
+              <ul class="endpoint-list">
+                <li><span>工坊提交</span><code>b0c1f9d</code></li>
+                <li><span>管理令牌</span><span>当前标签页会话</span></li>
+                <li><span>组件接口</span><span>运行时探测</span></li>
+                <li><span>写操作</span><span>逐次确认</span></li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section id="viewQueue" class="view" hidden>
+          <div class="section-heading">
+            <div>
+              <h2 id="queueTitle">内容包审核</h2>
+              <p id="queueDescription">审核普通工坊发布包；待审内容不会进入公开索引。</p>
+            </div>
+            <span class="kind-pill" id="queueKind">ordinary packages</span>
+          </div>
+
+          <div class="capability-note" id="queueUnavailable" role="status" hidden>
+            当前 Gateway 尚未部署组件工坊管理接口。页面已完成兼容，但不会把 404 伪装成空队列；需要先单独冻结并验收组件后端。
+          </div>
+
+          <section class="panel toolbar" id="queueToolbar" aria-label="审核筛选">
+            <div class="field">
+              <label for="statusFilter">审核状态</label>
+              <select id="statusFilter" aria-label="审核状态">
+                <option value="pending">待审核</option>
+                <option value="approved">已通过</option>
+                <option value="rejected">已拒绝</option>
+                <option value="withdrawn">已撤回</option>
+                <option value="all">全部状态</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="typeFilter" id="typeFilterLabel">内容类型</label>
+              <select id="typeFilter" aria-label="内容类型"></select>
+            </div>
+            <div class="field">
+              <label for="queryFilter">搜索</label>
+              <input id="queryFilter" type="search" placeholder="按标题、ID、摘要或标签搜索">
+            </div>
+            <button class="button-primary" id="refreshQueueButton" type="button" data-async>刷新队列</button>
+          </section>
+
+          <div class="queue-layout" id="queueLayout">
+            <section class="panel queue-panel" aria-labelledby="queueListTitle">
+              <div class="queue-summary">
+                <strong id="queueListTitle">审核列表</strong>
+                <span id="queueCount">0 项</span>
+              </div>
+              <div class="package-list" id="packageList" aria-live="polite"></div>
+            </section>
+
+            <article class="panel detail" id="packageDetail">
+              <div class="detail-empty">
+                <div>
+                  <strong>尚未选择条目</strong>
+                  <p class="muted">从左侧列表选择一个包以查看审核数据。</p>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="viewSystem" class="view" hidden>
+          <div class="section-heading">
+            <div>
+              <h2>系统与安全</h2>
+              <p>这一页只显示接口能力，不读取服务器文件、环境变量或原始审计日志。</p>
+            </div>
+            <span class="kind-pill">read only</span>
+          </div>
+          <div class="system-grid">
+            <article class="panel overview-card">
+              <h3>接口状态</h3>
+              <ul class="endpoint-list">
+                <li><code>GET /health</code><strong id="systemHealth">未检查</strong></li>
+                <li><code>/api/admin/review/packages</code><strong id="systemOrdinary">未检查</strong></li>
+                <li><code>/api/admin/review/component-workshop/packages</code><strong id="systemComponent">未检查</strong></li>
+                <li><span>审计日志 HTTP 投影</span><strong class="text-warning">尚未定义</strong></li>
+              </ul>
+            </article>
+            <article class="panel overview-card">
+              <h3>安全约束</h3>
+              <ul class="check-list">
+                <li><span>令牌持久化</span><strong class="text-success">禁止</strong></li>
+                <li><span>危险操作</span><strong class="text-success">二次确认</strong></li>
+                <li><span>Discord 原始字段</span><strong class="text-success">不展示</strong></li>
+                <li><span>玩家 API / CORS</span><strong class="text-success">不改动</strong></li>
+              </ul>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmDescription">
+    <div class="dialog-body">
+      <h2 id="confirmTitle">确认审核操作</h2>
+      <p id="confirmDescription" class="muted"></p>
+    </div>
+    <div class="dialog-actions">
+      <button id="cancelConfirmButton" type="button">取消</button>
+      <button class="button-primary" id="confirmActionButton" type="button" data-async>确认</button>
+    </div>
+  </dialog>
+
+  <script>
+    const ENDPOINTS = Object.freeze({
+      health: '/health',
+      packages: '/api/admin/review/packages',
+      components: '/api/admin/review/component-workshop/packages',
+    });
+
+    const STATUS_LABELS = Object.freeze({
+      pending: '待审核',
+      approved: '已通过',
+      rejected: '已拒绝',
+      withdrawn: '已撤回',
+    });
+
+    const TYPE_OPTIONS = Object.freeze({
+      packages: [
+        ['', '全部类型'],
+        ['character', '角色'],
+        ['user_identity', '用户身份'],
+        ['world_factor', '世界要素'],
+        ['shop_item', '商店物品'],
+        ['blueprint', '蓝图'],
+        ['recipe', '配方'],
+        ['skill', '技能'],
+        ['function', '功能'],
+      ],
+      components: [
+        ['', '全部阶段'],
+        ['variable_core', '变量核心'],
+        ['component_assembly', '组件组装'],
+        ['release', '发布阶段'],
+      ],
+    });
+
+    const ADMIN_TOKEN_SESSION_KEY = 'xyWorkshopAdminToken';
+
+    function readStoredToken() {
+      try {
+        return window.sessionStorage.getItem(ADMIN_TOKEN_SESSION_KEY) || '';
+      } catch (error) {
+        return '';
+      }
     }
 
-    function tokenHeaders() {
-      const token = $('adminToken').value.trim();
-      if (token) localStorage.setItem('xyWorkshopAdminToken', token);
+    function storeToken(token) {
+      try {
+        window.sessionStorage.setItem(ADMIN_TOKEN_SESSION_KEY, token);
+      } catch (error) {
+        // 浏览器禁用会话存储时退回当前页面内存，不影响审核请求。
+      }
+    }
+
+    function clearStoredToken() {
+      try {
+        window.sessionStorage.removeItem(ADMIN_TOKEN_SESSION_KEY);
+      } catch (error) {
+        // 会话存储不可用时无需额外清理。
+      }
+    }
+
+    const state = {
+      token: '',
+      connected: false,
+      gatewayOnline: false,
+      ordinaryAvailable: false,
+      componentAvailable: null,
+      view: 'overview',
+      kind: 'packages',
+      queues: {
+        packages: [],
+        components: [],
+      },
+      pendingCounts: {
+        packages: null,
+        components: null,
+      },
+      selected: null,
+      mediaObjectUrls: [],
+      pendingReview: null,
+      busy: false,
+    };
+
+    const $ = function (id) {
+      return document.getElementById(id);
+    };
+
+    class ApiError extends Error {
+      constructor(message, status, payload) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+        this.payload = payload;
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
+        return {
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        }[character];
+      });
+    }
+
+    function byteLength(value) {
+      if (typeof TextEncoder === 'function') {
+        return new TextEncoder().encode(String(value == null ? '' : value)).length;
+      }
+      return String(value == null ? '' : value).length;
+    }
+
+    function formatBytes(value) {
+      const bytes = Number(value || 0);
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KiB';
+      return (bytes / 1024 / 1024).toFixed(2) + ' MiB';
+    }
+
+    function setNotice(message, kind) {
+      const notice = $('globalNotice');
+      notice.textContent = message || '';
+      notice.dataset.kind = kind || '';
+      notice.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+    }
+
+    function setConnection(label, stateName) {
+      $('connectionText').textContent = label;
+      $('connectionBadge').dataset.state = stateName || 'idle';
+    }
+
+    function setBusy(isBusy) {
+      state.busy = Boolean(isBusy);
+      document.querySelectorAll('[data-async], .nav-button, #adminToken, #statusFilter, #typeFilter, #queryFilter').forEach(function (control) {
+        control.disabled = state.busy;
+        control.setAttribute('aria-busy', state.busy ? 'true' : 'false');
+      });
+    }
+
+    async function requestJson(path, options, requestOptions) {
+      const init = options || {};
+      const settings = requestOptions || {};
+      const useAuth = settings.auth !== false;
+      if (useAuth && !state.token) {
+        throw new ApiError('请先输入管理令牌并连接。', 0, {});
+      }
+      const headers = Object.assign(
+        { accept: 'application/json' },
+        useAuth ? { authorization: 'Bearer ' + state.token } : {},
+        init.body ? { 'content-type': 'application/json' } : {},
+        init.headers || {}
+      );
+      const response = await fetch(path, Object.assign({}, init, {
+        headers: headers,
+        cache: 'no-store',
+      }));
+      const payload = await response.json().catch(function () {
+        return {};
+      });
+      if (!response.ok) {
+        throw new ApiError(payload.error || ('请求失败：HTTP ' + response.status), response.status, payload);
+      }
+      return payload;
+    }
+
+    function normalizeRecord(record, kind) {
+      if (kind === 'components') {
+        const componentPackage = record && record.package ? record.package : {};
+        return {
+          id: componentPackage.id || '',
+          title: componentPackage.title || componentPackage.id || '未命名组件',
+          summary: componentPackage.summary || '',
+          type: componentPackage.workflowStage || 'component',
+          scope: componentPackage.compatibility && componentPackage.compatibility.libraryVersion
+            ? 'library ' + componentPackage.compatibility.libraryVersion
+            : 'component library',
+          rating: componentPackage.license || '',
+          status: record.reviewStatus || 'pending',
+          revision: Number(record.revision || 0),
+          updatedAt: record.updatedAt || '',
+          tags: Array.isArray(componentPackage.tags) ? componentPackage.tags : [],
+          raw: record,
+          value: componentPackage,
+        };
+      }
       return {
-        authorization: `Bearer ${token}`,
+        id: record.id || '',
+        title: record.title || record.id || '未命名内容包',
+        summary: record.summary || '',
+        type: record.type || '',
+        scope: record.cardScope || '',
+        rating: record.rating || '',
+        status: record.reviewStatus || 'pending',
+        revision: Number(record.revision || 0),
+        updatedAt: record.updatedAt || '',
+        tags: Array.isArray(record.tags) ? record.tags : [],
+        raw: record,
+        value: record,
       };
     }
 
-    async function api(path, options = {}) {
-      const res = await fetch(path, {
-        ...options,
-        headers: {
-          ...tokenHeaders(),
-          ...(options.body ? { 'content-type': 'application/json' } : {}),
-          ...(options.headers || {}),
-        },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `request failed: ${res.status}`);
-      return data;
+    function endpointFor(kind, id) {
+      const base = kind === 'components' ? ENDPOINTS.components : ENDPOINTS.packages;
+      return id ? base + '/' + encodeURIComponent(id) : base;
     }
 
-    function esc(value) {
-      return String(value ?? '').replace(/[&<>"']/g, ch => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;',
-      }[ch]));
+    function setCapabilityText(elementId, text, className) {
+      const node = $(elementId);
+      node.textContent = text;
+      node.className = className || '';
     }
 
-    function renderList() {
-      const list = $('list');
-      if (!state.packages.length) {
-        list.innerHTML = '<div class="package"><strong>No packages</strong><span class="meta">Adjust filters or refresh.</span></div>';
+    function renderOverview() {
+      $('metricGateway').textContent = state.gatewayOnline ? '在线' : (state.connected ? '异常' : '未知');
+      $('metricGatewayDetail').textContent = state.gatewayOnline ? 'GET /health 返回正常' : '等待管理连接';
+      $('metricPackages').textContent = state.connected ? String(state.pendingCounts.packages == null ? 0 : state.pendingCounts.packages) : '—';
+      $('metricComponents').textContent = state.componentAvailable === true
+        ? String(state.pendingCounts.components == null ? 0 : state.pendingCounts.components)
+        : (state.componentAvailable === false ? '未部署' : '—');
+      $('metricComponentsDetail').textContent = state.componentAvailable === true
+        ? '组件工坊审核队列'
+        : (state.componentAvailable === false ? 'Gateway 返回 404，未伪装为空队列' : '等待能力探测');
+      $('navHealthBadge').textContent = state.gatewayOnline ? '在线' : '—';
+      $('navPackageBadge').textContent = state.connected ? String(state.pendingCounts.packages == null ? 0 : state.pendingCounts.packages) : '—';
+      $('navComponentBadge').textContent = state.componentAvailable === true
+        ? String(state.pendingCounts.components == null ? 0 : state.pendingCounts.components)
+        : (state.componentAvailable === false ? '未部署' : '—');
+
+      setCapabilityText(
+        'ordinaryCapability',
+        state.ordinaryAvailable ? '可用' : (state.connected ? '异常' : '等待连接'),
+        state.ordinaryAvailable ? 'text-success' : (state.connected ? 'text-danger' : '')
+      );
+      setCapabilityText(
+        'componentCapability',
+        state.componentAvailable === true ? '可用' : (state.componentAvailable === false ? '尚未部署' : '等待探测'),
+        state.componentAvailable === true ? 'text-success' : (state.componentAvailable === false ? 'text-warning' : '')
+      );
+      setCapabilityText('systemHealth', state.gatewayOnline ? '在线' : '未检查', state.gatewayOnline ? 'text-success' : '');
+      setCapabilityText('systemOrdinary', state.ordinaryAvailable ? '可用' : '未检查', state.ordinaryAvailable ? 'text-success' : '');
+      setCapabilityText(
+        'systemComponent',
+        state.componentAvailable === true ? '可用' : (state.componentAvailable === false ? '未部署' : '未检查'),
+        state.componentAvailable === true ? 'text-success' : (state.componentAvailable === false ? 'text-warning' : '')
+      );
+    }
+
+    async function detectCapabilities() {
+      const health = await requestJson(ENDPOINTS.health, {}, { auth: false });
+      state.gatewayOnline = health.ok === true;
+
+      const ordinary = await requestJson(ENDPOINTS.packages + '?status=pending');
+      state.queues.packages = Array.isArray(ordinary.packages) ? ordinary.packages : [];
+      state.pendingCounts.packages = state.queues.packages.length;
+      state.ordinaryAvailable = true;
+
+      try {
+        const components = await requestJson(ENDPOINTS.components + '?status=pending');
+        state.queues.components = Array.isArray(components.packages) ? components.packages : [];
+        state.pendingCounts.components = state.queues.components.length;
+        state.componentAvailable = true;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          state.queues.components = [];
+          state.pendingCounts.components = null;
+          state.componentAvailable = false;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    async function connect() {
+      const token = $('adminToken').value.trim();
+      if (!token) {
+        setNotice('管理令牌不能为空。', 'error');
+        $('adminToken').focus();
         return;
       }
-      list.innerHTML = state.packages.map(pkg => `
-        <button class="package" type="button" data-id="${esc(pkg.id)}" aria-selected="${state.selected?.id === pkg.id}">
-          <span class="title">
-            <span>${esc(pkg.title)}</span>
-            <span class="pill">${esc(pkg.reviewStatus)}</span>
-          </span>
-          <span class="meta">${esc(pkg.id)}</span>
-          <span class="meta">${esc(pkg.type)} · ${esc(pkg.cardScope)} · ${esc(pkg.rating)} · rev ${esc(pkg.revision || 0)}</span>
-          <span class="small">${esc(pkg.summary || '')}</span>
-        </button>
-      `).join('');
-      list.querySelectorAll('button[data-id]').forEach(button => {
-        button.addEventListener('click', () => selectPackage(button.dataset.id));
-      });
+      state.token = token;
+      state.connected = false;
+      state.gatewayOnline = false;
+      state.ordinaryAvailable = false;
+      state.componentAvailable = null;
+      setConnection('连接中', 'idle');
+      setNotice('正在验证 Gateway 与管理接口。');
+      setBusy(true);
+      try {
+        await detectCapabilities();
+        state.connected = true;
+        storeToken(state.token);
+        $('lastChecked').textContent = '最近检查：' + new Intl.DateTimeFormat('zh-CN', {
+          dateStyle: 'short',
+          timeStyle: 'medium',
+        }).format(new Date());
+        setConnection('已连接', 'online');
+        renderOverview();
+        setNotice(
+          state.componentAvailable
+            ? '管理接口已连接，普通包与组件包队列均可用。'
+            : '管理接口已连接；普通包可用，组件包接口尚未部署。',
+          'success'
+        );
+        showView('overview');
+      } catch (error) {
+        clearStoredToken();
+        state.connected = false;
+        state.gatewayOnline = false;
+        state.ordinaryAvailable = false;
+        state.componentAvailable = null;
+        setConnection('连接失败', 'error');
+        renderOverview();
+        setNotice(error.message || '连接失败。', 'error');
+      } finally {
+        setBusy(false);
+      }
     }
 
-    function renderDetail(pkg) {
-      state.selected = pkg;
-      renderList();
-      if (!pkg) return;
-      const disabled = pkg.reviewStatus === 'withdrawn' ? 'disabled' : '';
-      $('detail').innerHTML = `
-        <h2>${esc(pkg.title)}</h2>
-        <div class="meta">${esc(pkg.id)} · ${esc(pkg.type)} · ${esc(pkg.cardScope)} · rev ${esc(pkg.revision || 0)}</div>
-        <p>${esc(pkg.summary || '')}</p>
-        <div class="meta">rating: ${esc(pkg.rating)} · language: ${esc(pkg.language)} · updated: ${esc(pkg.updatedAt || '')}</div>
-        <div class="meta">tags: ${(pkg.tags || []).map(tag => `<span class="pill">${esc(tag)}</span>`).join(' ') || 'none'}</div>
-        <div class="actions">
-          <button id="approve" class="good" type="button" ${disabled}>Approve</button>
-          <button id="reject" class="danger" type="button" ${disabled}>Reject</button>
-          <button id="copyId" type="button">Copy ID</button>
-        </div>
-        <div id="reviewMedia" class="review-media" hidden></div>
-        <textarea id="reason" placeholder="Reject reason"></textarea>
-        <pre>${esc(JSON.stringify(pkg, null, 2))}</pre>
-      `;
-      $('approve').addEventListener('click', () => review(pkg.id, pkg.revision, 'approved'));
-      $('reject').addEventListener('click', () => review(pkg.id, pkg.revision, 'rejected', $('reason').value));
-      $('copyId').addEventListener('click', async () => {
-        await navigator.clipboard.writeText(pkg.id);
-        setNotice('Package ID copied.', 'ok');
+    function clearMediaUrls() {
+      state.mediaObjectUrls.forEach(function (url) {
+        URL.revokeObjectURL(url);
       });
-      void renderReviewMedia(pkg);
-    }
-
-    async function renderReviewMedia(pkg) {
-      state.mediaObjectUrls.forEach(url => URL.revokeObjectURL(url));
       state.mediaObjectUrls = [];
+    }
+
+    function clearSession() {
+      clearMediaUrls();
+      state.token = '';
+      clearStoredToken();
+      state.connected = false;
+      state.gatewayOnline = false;
+      state.ordinaryAvailable = false;
+      state.componentAvailable = null;
+      state.queues.packages = [];
+      state.queues.components = [];
+      state.pendingCounts.packages = null;
+      state.pendingCounts.components = null;
+      state.selected = null;
+      $('adminToken').value = '';
+      $('lastChecked').textContent = '尚未检查';
+      setConnection('未连接', 'idle');
+      setNotice('当前标签页会话中的管理令牌已清除。', 'success');
+      renderOverview();
+      renderQueue();
+      $('adminToken').focus();
+    }
+
+    function configureQueue(kind) {
+      state.kind = kind;
+      const isComponent = kind === 'components';
+      $('queueTitle').textContent = isComponent ? '组件包审核' : '内容包审核';
+      $('queueDescription').textContent = isComponent
+        ? '组件源码只作为文本审查，不在管理页面中执行。'
+        : '审核普通工坊发布包；待审内容不会进入公开索引。';
+      $('queueKind').textContent = isComponent ? 'component packages' : 'ordinary packages';
+      $('typeFilterLabel').textContent = isComponent ? '工作流阶段' : '内容类型';
+      $('typeFilter').setAttribute('aria-label', isComponent ? '工作流阶段' : '内容类型');
+      $('typeFilter').innerHTML = TYPE_OPTIONS[kind].map(function (item) {
+        return '<option value="' + escapeHtml(item[0]) + '">' + escapeHtml(item[1]) + '</option>';
+      }).join('');
+      $('queryFilter').placeholder = isComponent
+        ? '按标题、ID、作者、摘要或标签搜索'
+        : '按标题、ID、摘要或标签搜索';
+      $('queueUnavailable').hidden = !(isComponent && state.componentAvailable === false);
+      $('queueToolbar').hidden = isComponent && state.componentAvailable === false;
+      $('queueLayout').hidden = isComponent && state.componentAvailable === false;
+      state.selected = null;
+      renderQueue();
+    }
+
+    function queueRecords() {
+      const source = state.queues[state.kind] || [];
+      if (state.kind !== 'components') return source;
+      const query = $('queryFilter').value.trim().toLowerCase();
+      const stage = $('typeFilter').value;
+      return source.filter(function (record) {
+        const item = normalizeRecord(record, 'components');
+        if (stage && item.type !== stage) return false;
+        if (!query) return true;
+        return [
+          item.id,
+          item.title,
+          item.summary,
+          item.type,
+          item.value.authorName || '',
+        ].concat(item.tags).join('\n').toLowerCase().includes(query);
+      });
+    }
+
+    function emptyDetail() {
+      $('packageDetail').innerHTML = [
+        '<div class="detail-empty"><div>',
+        '<strong>尚未选择条目</strong>',
+        '<p class="muted">从左侧列表选择一个包以查看审核数据。</p>',
+        '</div></div>',
+      ].join('');
+    }
+
+    function renderQueue() {
+      const list = $('packageList');
+      const records = queueRecords();
+      $('queueCount').textContent = records.length + ' 项';
+      if (!state.connected) {
+        list.innerHTML = '<div class="package-button"><strong>尚未连接</strong><span class="package-meta">输入管理令牌后加载队列。</span></div>';
+        emptyDetail();
+        return;
+      }
+      if (!records.length) {
+        list.innerHTML = '<div class="package-button"><strong>当前没有条目</strong><span class="package-meta">可调整筛选条件后刷新。</span></div>';
+        emptyDetail();
+        return;
+      }
+      list.innerHTML = records.map(function (record) {
+        const item = normalizeRecord(record, state.kind);
+        const selected = state.selected && normalizeRecord(state.selected, state.kind).id === item.id;
+        return [
+          '<button class="package-button" type="button" data-package-id="', escapeHtml(item.id),
+          '" aria-selected="', selected ? 'true' : 'false', '">',
+          '<span class="package-title-row"><span class="package-title">', escapeHtml(item.title),
+          '</span><span class="status-pill" data-status="', escapeHtml(item.status), '">',
+          escapeHtml(STATUS_LABELS[item.status] || item.status), '</span></span>',
+          '<span class="package-meta">', escapeHtml(item.id), '</span>',
+          '<span class="package-meta">', escapeHtml(item.type), ' · ', escapeHtml(item.scope),
+          ' · rev ', escapeHtml(item.revision), '</span>',
+          '<span class="package-summary">', escapeHtml(item.summary || '无摘要'), '</span>',
+          '</button>',
+        ].join('');
+      }).join('');
+      list.querySelectorAll('[data-package-id]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          selectRecord(button.dataset.packageId);
+        });
+      });
+    }
+
+    function compactComponentRecord(record) {
+      const copy = Object.assign({}, record);
+      const componentPackage = Object.assign({}, record.package || {});
+      componentPackage.files = (componentPackage.files || []).map(function (file) {
+        return Object.assign({}, file, {
+          text: '[在文件审查区逐项查看，' + formatBytes(byteLength(file.text || '')) + ']',
+        });
+      });
+      copy.package = componentPackage;
+      return copy;
+    }
+
+    function renderComponentFiles(record) {
+      const files = record.package && Array.isArray(record.package.files) ? record.package.files : [];
+      if (!files.length) return '';
+      return [
+        '<div class="file-table-wrap"><table class="file-table">',
+        '<thead><tr><th>文件</th><th>媒体类型</th><th>大小</th><th>SHA-256</th></tr></thead><tbody>',
+        files.map(function (file, index) {
+          const hash = file.sha256 ? String(file.sha256).slice(0, 12) + '…' : '未提供';
+          return [
+            '<tr><td><button class="file-choice" type="button" data-file-index="', index, '">',
+            escapeHtml(file.path || ('文件 ' + (index + 1))), '</button></td>',
+            '<td>', escapeHtml(file.mediaType || ''), '</td>',
+            '<td>', escapeHtml(formatBytes(byteLength(file.text || ''))), '</td>',
+            '<td><code>', escapeHtml(hash), '</code></td></tr>',
+          ].join('');
+        }).join(''),
+        '</tbody></table></div>',
+        '<div class="file-preview"><div class="file-preview-meta" id="filePreviewMeta">选择文件查看纯文本内容；页面不会执行源码。</div>',
+        '<pre id="filePreview" tabindex="0">尚未选择文件</pre></div>',
+      ].join('');
+    }
+
+    function bindComponentFiles(record) {
+      const files = record.package && Array.isArray(record.package.files) ? record.package.files : [];
+      document.querySelectorAll('[data-file-index]').forEach(function (button) {
+        button.addEventListener('click', function () {
+          const index = Number(button.dataset.fileIndex);
+          const file = files[index];
+          if (!file) return;
+          $('filePreviewMeta').textContent = (file.path || ('文件 ' + (index + 1)))
+            + ' · ' + (file.mediaType || 'unknown')
+            + ' · ' + formatBytes(byteLength(file.text || ''));
+          $('filePreview').textContent = file.text || '';
+          $('filePreview').focus();
+        });
+      });
+    }
+
+    function renderDetail(record) {
+      state.selected = record;
+      renderQueue();
+      const item = normalizeRecord(record, state.kind);
+      const isComponent = state.kind === 'components';
+      const withdrawn = item.status === 'withdrawn';
+      const tags = item.tags.length
+        ? item.tags.map(function (tag) {
+          return '<span class="kind-pill">' + escapeHtml(tag) + '</span>';
+        }).join('')
+        : '<span class="muted">无标签</span>';
+      const reviewReason = record.rejectionReason || item.value.rejectionReason || '';
+      const rawPreview = isComponent ? compactComponentRecord(record) : record;
+      const componentFiles = isComponent ? renderComponentFiles(record) : '<div id="reviewMedia" class="review-media" hidden></div>';
+
+      $('packageDetail').innerHTML = [
+        '<div class="detail-head"><div><h2>', escapeHtml(item.title), '</h2>',
+        '<div class="detail-meta">', escapeHtml(item.id), ' · ', escapeHtml(item.type),
+        ' · rev ', escapeHtml(item.revision), '</div></div>',
+        '<span class="status-pill" data-status="', escapeHtml(item.status), '">',
+        escapeHtml(STATUS_LABELS[item.status] || item.status), '</span></div>',
+        '<p class="detail-summary">', escapeHtml(item.summary || '无摘要'), '</p>',
+        '<div class="detail-meta">范围：', escapeHtml(item.scope || '未标注'),
+        ' · 分级/许可：', escapeHtml(item.rating || '未标注'),
+        ' · 更新：', escapeHtml(item.updatedAt || '未知'), '</div>',
+        '<div class="tag-row">', tags, '</div>',
+        '<div class="review-actions">',
+        '<button class="button-success" id="approveButton" type="button" data-async ',
+        withdrawn || item.status === 'approved' ? 'disabled' : '', '>通过</button>',
+        '<button class="button-danger" id="rejectButton" type="button" data-async ',
+        withdrawn || item.status === 'rejected' ? 'disabled' : '', '>拒绝</button>',
+        '<button id="copyIdButton" type="button">复制包 ID</button>',
+        '</div>',
+        '<div class="field reason-field"><label for="reviewReason">拒绝原因</label>',
+        '<textarea id="reviewReason" maxlength="600" placeholder="拒绝时必填；最多 600 字">',
+        escapeHtml(reviewReason), '</textarea></div>',
+        componentFiles,
+        '<details><summary>查看审核记录 JSON</summary><pre tabindex="0">',
+        escapeHtml(JSON.stringify(rawPreview, null, 2)), '</pre></details>',
+      ].join('');
+
+      $('approveButton').addEventListener('click', function () {
+        openReviewConfirmation('approved');
+      });
+      $('rejectButton').addEventListener('click', function () {
+        openReviewConfirmation('rejected');
+      });
+      $('copyIdButton').addEventListener('click', function () {
+        copyPackageId(item.id);
+      });
+
+      if (isComponent) {
+        bindComponentFiles(record);
+      } else {
+        renderReviewMedia(record);
+      }
+    }
+
+    async function renderReviewMedia(record) {
+      clearMediaUrls();
       const host = $('reviewMedia');
-      const entries = Object.entries(pkg.reviewAssets || {});
-      if (!host || !entries.length) return;
-      const labels = { avatar:'Avatar', portraitNormal:'Normal portrait', portraitNude:'Nude portrait', portraitAftermath:'Aftermath portrait' };
-      const cards = await Promise.all(entries.map(async ([slot, url]) => {
+      if (!host) return;
+      const entries = Object.entries(record.reviewAssets || {});
+      if (!entries.length) return;
+      const labels = {
+        avatar: '头像',
+        portraitNormal: '普通立绘',
+        portraitNude: '裸露立绘',
+        portraitAftermath: '事后立绘',
+      };
+      const cards = await Promise.all(entries.map(async function (entry) {
+        const slot = entry[0];
+        const url = entry[1];
         try {
-          const res = await fetch(url, { headers:tokenHeaders(), cache:'no-store' });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const objectUrl = URL.createObjectURL(await res.blob());
+          const assetUrl = new URL(url, window.location.origin);
+          if (assetUrl.origin !== window.location.origin
+              || !assetUrl.pathname.startsWith('/api/admin/review/packages/')) {
+            throw new Error('不安全的媒体地址');
+          }
+          const response = await fetch(assetUrl.href, {
+            headers: { authorization: 'Bearer ' + state.token },
+            cache: 'no-store',
+          });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          const objectUrl = URL.createObjectURL(await response.blob());
           state.mediaObjectUrls.push(objectUrl);
-          return `<figure><img src="${esc(objectUrl)}" alt="${esc(labels[slot] || slot)}"><figcaption>${esc(labels[slot] || slot)}</figcaption></figure>`;
+          return [
+            '<figure><img src="', escapeHtml(objectUrl), '" alt="', escapeHtml(labels[slot] || slot),
+            '"><figcaption>', escapeHtml(labels[slot] || slot), '</figcaption></figure>',
+          ].join('');
         } catch (error) {
-          return `<figure><div class="empty">Preview unavailable</div><figcaption>${esc(labels[slot] || slot)} · ${esc(error.message)}</figcaption></figure>`;
+          return [
+            '<figure><div class="media-empty">预览不可用</div><figcaption>',
+            escapeHtml(labels[slot] || slot), ' · ', escapeHtml(error.message), '</figcaption></figure>',
+          ].join('');
         }
       }));
       host.innerHTML = cards.join('');
       host.hidden = false;
     }
 
-    async function selectPackage(id) {
+    async function selectRecord(id) {
+      if (!state.connected) {
+        setNotice('请先连接管理接口。', 'error');
+        return;
+      }
+      setBusy(true);
+      setNotice('正在加载 ' + id + '。');
       try {
-        const data = await api(`/api/admin/review/packages/${encodeURIComponent(id)}`);
-        renderDetail(data);
+        const record = await requestJson(endpointFor(state.kind, id));
+        renderDetail(record);
+        setNotice('已加载 ' + id + '。', 'success');
       } catch (error) {
-        setNotice(error.message, 'error');
+        setNotice(error.message || '加载失败。', 'error');
+      } finally {
+        setBusy(false);
       }
     }
 
-    async function refresh() {
+    async function loadQueue() {
+      if (!state.connected) {
+        setNotice('请先输入管理令牌并连接。', 'error');
+        $('adminToken').focus();
+        return;
+      }
+      if (state.kind === 'components' && state.componentAvailable === false) {
+        setNotice('组件包管理接口尚未部署，当前不发起写请求。', 'error');
+        return;
+      }
       const params = new URLSearchParams();
-      params.set('status', $('status').value);
-      if ($('type').value) params.set('type', $('type').value);
-      if ($('query').value.trim()) params.set('q', $('query').value.trim());
+      params.set('status', $('statusFilter').value);
+      if (state.kind === 'packages') {
+        if ($('typeFilter').value) params.set('type', $('typeFilter').value);
+        if ($('queryFilter').value.trim()) params.set('q', $('queryFilter').value.trim());
+      }
+      setBusy(true);
+      setNotice('正在刷新审核队列。');
       try {
-        const data = await api(`/api/admin/review/packages?${params}`);
-        state.packages = data.packages || [];
+        const payload = await requestJson(endpointFor(state.kind) + '?' + params.toString());
+        state.queues[state.kind] = Array.isArray(payload.packages) ? payload.packages : [];
         state.selected = null;
-        renderList();
-        $('detail').innerHTML = '<h2>Select a package</h2><p class="meta">Choose one item to inspect payload and review metadata.</p>';
-        setNotice(`${state.packages.length} package(s) loaded.`, 'ok');
+        renderQueue();
+        renderOverview();
+        setNotice('审核队列已刷新，共 ' + queueRecords().length + ' 项。', 'success');
       } catch (error) {
-        setNotice(error.message, 'error');
+        if (state.kind === 'components' && error instanceof ApiError && error.status === 404) {
+          state.componentAvailable = false;
+          configureQueue('components');
+          renderOverview();
+          setNotice('组件包管理接口返回 404，已标记为尚未部署。', 'error');
+        } else {
+          setNotice(error.message || '刷新失败。', 'error');
+        }
+      } finally {
+        setBusy(false);
       }
     }
 
-    async function review(id, revision, status, reason = '') {
+    async function copyPackageId(id) {
       try {
-        const data = await api(`/api/admin/review/packages/${encodeURIComponent(id)}`, {
-          method: 'POST',
-          body: JSON.stringify({ status, reason, revision }),
-        });
-        setNotice(`${id} is now ${data.reviewStatus}.`, 'ok');
-        await refresh();
-        await selectPackage(id);
-      } catch (error) {
-        setNotice(error.message, 'error');
+        await navigator.clipboard.writeText(id);
+        setNotice('包 ID 已复制。', 'success');
+      } catch (_) {
+        setNotice('浏览器未授予剪贴板权限，请手动复制：' + id, 'error');
       }
     }
 
-    $('refresh').addEventListener('click', refresh);
-    $('status').addEventListener('change', refresh);
-    $('type').addEventListener('change', refresh);
-    $('query').addEventListener('keydown', event => {
-      if (event.key === 'Enter') refresh();
+    async function refreshPendingCounts() {
+      const ordinary = await requestJson(ENDPOINTS.packages + '?status=pending');
+      state.pendingCounts.packages = Array.isArray(ordinary.packages) ? ordinary.packages.length : 0;
+      if (state.componentAvailable === true) {
+        const components = await requestJson(ENDPOINTS.components + '?status=pending');
+        state.pendingCounts.components = Array.isArray(components.packages) ? components.packages.length : 0;
+      }
+    }
+
+    function openReviewConfirmation(status) {
+      if (!state.selected) return;
+      const item = normalizeRecord(state.selected, state.kind);
+      const reason = $('reviewReason').value.trim();
+      if (status === 'rejected' && !reason) {
+        setNotice('拒绝操作必须填写原因。', 'error');
+        $('reviewReason').focus();
+        return;
+      }
+      state.pendingReview = {
+        id: item.id,
+        revision: item.revision,
+        status: status,
+        reason: reason,
+        kind: state.kind,
+      };
+      $('confirmTitle').textContent = status === 'approved' ? '确认通过' : '确认拒绝';
+      $('confirmDescription').textContent = (status === 'approved' ? '通过' : '拒绝')
+        + ' “' + item.title + '”（' + item.id + '）？该操作会写入审核状态并推进 revision。';
+      $('confirmActionButton').textContent = status === 'approved' ? '确认通过' : '确认拒绝';
+      $('confirmActionButton').className = status === 'approved' ? 'button-success' : 'button-danger';
+      if (typeof $('confirmDialog').showModal === 'function') {
+        $('confirmDialog').showModal();
+      } else {
+        setNotice('当前浏览器不支持确认对话框，已阻止写操作。', 'error');
+      }
+    }
+
+    async function performReview() {
+      const action = state.pendingReview;
+      if (!action || state.busy) return;
+      $('confirmDialog').close();
+      const headers = action.kind === 'components'
+        ? { 'x-package-revision': String(action.revision) }
+        : {};
+      setBusy(true);
+      setNotice('正在提交审核结果。');
+      try {
+        await requestJson(endpointFor(action.kind, action.id), {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({
+            status: action.status,
+            reason: action.reason,
+            revision: action.revision,
+          }),
+        });
+        state.pendingReview = null;
+        await refreshPendingCounts();
+        renderOverview();
+        await loadQueue();
+        await selectRecord(action.id);
+        setNotice(
+          action.id + ' 已' + (action.status === 'approved' ? '通过' : '拒绝') + '。',
+          'success'
+        );
+      } catch (error) {
+        setNotice(error.message || '审核提交失败。', 'error');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function showView(view) {
+      state.view = view;
+      document.querySelectorAll('.nav-button').forEach(function (button) {
+        if (button.dataset.view === view) {
+          button.setAttribute('aria-current', 'page');
+        } else {
+          button.removeAttribute('aria-current');
+        }
+      });
+      $('viewOverview').hidden = view !== 'overview';
+      $('viewQueue').hidden = view !== 'packages' && view !== 'components';
+      $('viewSystem').hidden = view !== 'system';
+
+      const titles = {
+        overview: ['Operations overview', '运行概览'],
+        packages: ['Content review', '内容包审核'],
+        components: ['Component review', '组件包审核'],
+        system: ['System and security', '系统与安全'],
+      };
+      $('pageEyebrow').textContent = titles[view][0];
+      $('pageTitle').textContent = titles[view][1];
+      if (view === 'packages' || view === 'components') {
+        configureQueue(view);
+        if (state.connected && !(view === 'components' && state.componentAvailable === false)) {
+          loadQueue();
+        } else if (view === 'components' && state.componentAvailable === false) {
+          setNotice('组件包管理接口尚未部署；当前页面只显示能力边界，不发起写请求。', 'error');
+        }
+      }
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
+
+    $('authForm').addEventListener('submit', function (event) {
+      event.preventDefault();
+      connect();
     });
+    $('clearTokenButton').addEventListener('click', clearSession);
+    $('refreshQueueButton').addEventListener('click', loadQueue);
+    $('statusFilter').addEventListener('change', loadQueue);
+    $('typeFilter').addEventListener('change', function () {
+      if (state.kind === 'components') {
+        renderQueue();
+      } else {
+        loadQueue();
+      }
+    });
+    $('queryFilter').addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (state.kind === 'components') {
+          renderQueue();
+        } else {
+          loadQueue();
+        }
+      }
+    });
+    $('queryFilter').addEventListener('input', function () {
+      if (state.kind === 'components') renderQueue();
+    });
+    $('cancelConfirmButton').addEventListener('click', function () {
+      state.pendingReview = null;
+      $('confirmDialog').close();
+    });
+    $('confirmActionButton').addEventListener('click', performReview);
+    $('confirmDialog').addEventListener('close', function () {
+      if (!state.busy) state.pendingReview = null;
+    });
+    document.querySelectorAll('.nav-button').forEach(function (button) {
+      button.addEventListener('click', function () {
+        showView(button.dataset.view);
+      });
+    });
+    window.addEventListener('pagehide', function () {
+      clearMediaUrls();
+    });
+
+    configureQueue('packages');
+    renderOverview();
+    const restoredToken = readStoredToken();
+    if (restoredToken) {
+      $('adminToken').value = restoredToken;
+      connect();
+    }
   </script>
 </body>
 </html>
