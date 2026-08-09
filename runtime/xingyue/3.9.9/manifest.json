@@ -15,8 +15,8 @@
     {
       "id": "control-center",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@9cf222471b13f18838c13b652507e03d61c883bd/runtime/xingyue/3.9.9/control-center.js",
-      "bytes": 1129011,
-      "sha256": "6d89912906cbb35b31e8a32a60a3c230b8ad70d4fe28dcddaa4bfc422c1ae57a"
+      "bytes": 1129701,
+      "sha256": "9c0cb09400ef763db5928b81efb3b8f15acaff6724685797ef8f8211624059ad"
     },
     {
       "id": "omni-analysis",
@@ -45,8 +45,8 @@
     {
       "id": "phone-bridge",
       "url": "https://cdn.jsdelivr.net/gh/LiarMTTT/rolecard-diy-workshop@9cf222471b13f18838c13b652507e03d61c883bd/runtime/xingyue/3.9.9/phone-bridge.js",
-      "bytes": 45001,
-      "sha256": "5f0a8481f0a990e363ea40f98af9cf96a59dde33f2118eff4b9b2f83aa21eec3"
+      "bytes": 45324,
+      "sha256": "cb9a17618cba2c33e11fc7fcb426361a7f6dfa32881a6c66008ccc27391f69af"
     },
     {
       "id": "phone-hud",

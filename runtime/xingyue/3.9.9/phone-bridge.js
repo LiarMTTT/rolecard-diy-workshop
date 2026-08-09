@@ -747,10 +747,15 @@ function createRuntime(ctx) {
   let hudHtmlCache = '';
   async function loadHudHtml() {
     if (hudHtmlCache) return hudHtmlCache;
-    if (!integrity || typeof integrity.fetchText !== 'function') throw new Error('runtime integrity 尚未就绪，无法加载小手机前端');
-    const text = await integrity.fetchText('phone-hud', { timeoutMs: 12000 });
-    hudHtmlCache = String(text || '');
-    return hudHtmlCache;
+    if (integrity && typeof integrity.fetchText === 'function') {
+      const text = await integrity.fetchText('phone-hud', { timeoutMs: 12000 });
+      hudHtmlCache = String(text || '');
+      return hudHtmlCache;
+    }
+    // 卡内兜底：离线回退时从 loader 嵌入的 phone-hud 副本读
+    const embedded = (() => { try { return hostWindow.__xyPhoneHudEmbedded || helperWindow.__xyPhoneHudEmbedded || ''; } catch (_) { return ''; } })();
+    if (embedded) { hudHtmlCache = String(embedded); return hudHtmlCache; }
+    throw new Error('runtime integrity 尚未就绪，无法加载小手机前端');
   }
   async function mount() {
     if (runtime.destroyed) throw new Error('小手机桥已销毁');

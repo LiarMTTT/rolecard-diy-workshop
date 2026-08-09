@@ -4846,9 +4846,18 @@
   async function loadPhoneBridgeModule() {
     if (phoneBridgeModulePromise) return phoneBridgeModulePromise;
     phoneBridgeModulePromise = (async () => {
-      if (!runtimeIntegrity) throw new Error('当前为离线安全回退，小手机暂不可用');
-      const module = await runtimeIntegrity.importModule('phone-bridge', { timeoutMs: 12000 });
-      if (module?.VERSION !== '3.9.9' || typeof module?.mountPhone !== 'function') throw new Error('小手机桥版本或导出契约不匹配');
+      if (runtimeIntegrity) {
+        const module = await runtimeIntegrity.importModule('phone-bridge', { timeoutMs: 12000 });
+        if (module?.VERSION !== '3.9.9' || typeof module?.mountPhone !== 'function') throw new Error('小手机桥版本或导出契约不匹配');
+        return module;
+      }
+      // 卡内兜底：离线回退时从 loader 嵌入的 phone-bridge 副本加载
+      const embedded = (() => { try { return window.__xyPhoneBridgeEmbedded || (window.parent && window.parent.__xyPhoneBridgeEmbedded) || ''; } catch (_) { return ''; } })();
+      if (!embedded) throw new Error('当前为离线安全回退，小手机暂不可用');
+      const blobUrl = URL.createObjectURL(new Blob([embedded], { type: 'text/javascript' }));
+      let module = null;
+      try { module = await import(blobUrl); } finally { try { URL.revokeObjectURL(blobUrl); } catch (_) {} }
+      if (module?.VERSION !== '3.9.9' || typeof module?.mountPhone !== 'function') throw new Error('卡内小手机桥副本契约不匹配');
       return module;
     })().catch(error => { phoneBridgeModulePromise = null; throw error; });
     return phoneBridgeModulePromise;
