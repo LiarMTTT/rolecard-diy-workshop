@@ -4830,18 +4830,6 @@
   }
   async function openWorldbookManager() { return ensureWorldbookManagerUi().open(); }
   function closeWorldbookManager() { worldbookManagerUi?.close(); }
-  let worldbookEditorModulePromise = null;
-  let worldbookEditor = null;
-  async function loadWorldbookEditorModule() {
-    if (worldbookEditorModulePromise) return worldbookEditorModulePromise;
-    worldbookEditorModulePromise = (async () => {
-      if (!runtimeIntegrity) throw new Error('当前为离线安全回退，世界书编辑器暂不可用');
-      const module = await runtimeIntegrity.importModule('worldbook-editor', { timeoutMs:12000 });
-      if (module?.WORLDBOOK_EDITOR_VERSION !== '0.2.0' || module?.WORLDBOOK_EDITOR_BUILD !== 'xingyue-p7-r1' || typeof module?.createWorldbookEditor !== 'function') throw new Error('P7 编辑器版本或导出契约不匹配');
-      return module;
-    })().catch(error => { worldbookEditorModulePromise = null; throw error; });
-    return worldbookEditorModulePromise;
-  }
   let phoneBridgeModulePromise = null;
   async function loadPhoneBridgeModule() {
     if (phoneBridgeModulePromise) return phoneBridgeModulePromise;
@@ -4861,6 +4849,18 @@
       return module;
     })().catch(error => { phoneBridgeModulePromise = null; throw error; });
     return phoneBridgeModulePromise;
+  }
+  let worldbookEditorModulePromise = null;
+  let worldbookEditor = null;
+  async function loadWorldbookEditorModule() {
+    if (worldbookEditorModulePromise) return worldbookEditorModulePromise;
+    worldbookEditorModulePromise = (async () => {
+      if (!runtimeIntegrity) throw new Error('当前为离线安全回退，世界书编辑器暂不可用');
+      const module = await runtimeIntegrity.importModule('worldbook-editor', { timeoutMs:12000 });
+      if (module?.WORLDBOOK_EDITOR_VERSION !== '0.2.0' || module?.WORLDBOOK_EDITOR_BUILD !== 'xingyue-p7-r1' || typeof module?.createWorldbookEditor !== 'function') throw new Error('P7 编辑器版本或导出契约不匹配');
+      return module;
+    })().catch(error => { worldbookEditorModulePromise = null; throw error; });
+    return worldbookEditorModulePromise;
   }
   function focusCurrentChatOpeningEditor() {
     const doc = hostDocument();
