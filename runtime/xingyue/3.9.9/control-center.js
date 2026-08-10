@@ -1132,14 +1132,15 @@
     const generation = ++workshopLoginGeneration;
     const base = gatewayBaseUrl();
     if (!base) throw new Error('创意工坊登录地址未就绪');
-    const popup = hostWindow().open('about:blank', 'xy-workshop-login', 'width=520,height=720');
-    if (!popup) throw new Error('浏览器阻止了登录窗口，请允许弹窗后重试');
+    // Tauri/移动端等环境 window.open 可能被拦截：进入手动链接模式（轮询照常，不依赖 popup 回跳）
+    let popup = null;
+    try { popup = hostWindow().open('about:blank', 'xy-workshop-login', 'width=520,height=720'); } catch (_) { popup = null; }
     // 3.4.9 #4：弹窗开出即写加载占位页，消除 about:blank 在「挑战+login-handoff/start 握手」期间的白屏（移动端网络慢时尤明显）；随后 popup.location.replace 到真实登录页会覆盖它。
-    try { popup.document.write('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>正在连接创意工坊…</title></head><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0d0a07;color:#e4d6c3;font-family:system-ui,\'Microsoft YaHei\',sans-serif"><div style="text-align:center;padding:24px"><div style="width:34px;height:34px;margin:0 auto 14px;border:3px solid rgba(224,178,123,.3);border-top-color:#e0b27b;border-radius:50%;animation:xyspin .8s linear infinite"></div><div>正在连接创意工坊…</div><div style="font-size:12px;color:#8a7d6a;margin-top:8px">正在准备 Discord 登录，请稍候</div></div><style>@keyframes xyspin{to{transform:rotate(360deg)}}</style></body></html>'); popup.document.close(); } catch (_) {}
+    if (popup) { try { popup.document.write('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>正在连接创意工坊…</title></head><body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#0d0a07;color:#e4d6c3;font-family:system-ui,\'Microsoft YaHei\',sans-serif"><div style="text-align:center;padding:24px"><div style="width:34px;height:34px;margin:0 auto 14px;border:3px solid rgba(224,178,123,.3);border-top-color:#e0b27b;border-radius:50%;animation:xyspin .8s linear infinite"></div><div>正在连接创意工坊…</div><div style="font-size:12px;color:#8a7d6a;margin-top:8px">正在准备 Discord 登录，请稍候</div></div><style>@keyframes xyspin{to{transform:rotate(360deg)}}</style></body></html>'); popup.document.close(); } catch (_) {} }
     const { handoffId, secret } = createWorkshopHandoffCredentials();
     const poll = { handoffId, secret, popup, generation, deadlineAt:0, timer:null, inFlight:false, wakePending:false, run:null };
     workshopLoginPoll = poll;
-    emitWorkshopLoginState('waiting', { message:'正在准备 Discord 登录…' });
+    emitWorkshopLoginState('waiting', { message: popup ? '正在准备 Discord 登录…' : '正在准备 Discord 登录（当前环境拦截弹窗，将显示手动链接）…' });
     const pollOnce = async () => {
       if (workshopLoginPoll !== poll || poll.generation !== workshopLoginGeneration || runtimeDestroyed) return;
       if (poll.inFlight) { poll.wakePending = true; return; }
@@ -1193,7 +1194,12 @@
         poll.deadlineAt = Date.now() + expiresInMs;
         emitWorkshopLoginState('waiting', { deadlineAt:poll.deadlineAt, expiresInMs });
         const loginUrl = workshopLoginUrl(handoffId);
-        try { popup.location.replace(loginUrl); } catch (_) { popup.location.href = loginUrl; }
+        if (popup) {
+          try { popup.location.replace(loginUrl); } catch (_) { popup.location.href = loginUrl; }
+        } else {
+          // 手动链接模式：把登录链接交给 UI 展示，用户在系统浏览器完成登录，卡片轮询拿 token
+          emitWorkshopLoginState('waiting', { deadlineAt:poll.deadlineAt, expiresInMs, loginUrl, popupBlocked:true, message:'当前环境拦截了登录窗口，请点下方链接手动打开完成 Discord 登录' });
+        }
         poll.timer = setTimeout(pollOnce, 500);
       } catch (error) {
         if (workshopLoginPoll !== poll || poll.generation !== workshopLoginGeneration || runtimeDestroyed) return;
@@ -8618,6 +8624,8 @@
       const detail = event?.detail || {};
       state.workshopLoginStatus = String(detail.status || '');
       state.workshopLoginDeadlineAt = Number(detail.deadlineAt) || 0;
+      state.workshopLoginManualUrl = String(detail.loginUrl || '');
+      state.workshopLoginPopupBlocked = detail.popupBlocked === true;
       if (detail.status === 'error' || detail.status === 'timeout') state.lastWorkshopError = String(detail.message || 'Discord 登录失败');
       if (detail.status === 'ready') {
         state.lastWorkshopError = '';
@@ -9475,6 +9483,13 @@
       button.disabled = waiting;
     });
     root.querySelectorAll('[data-xy-login-cancel]').forEach(button => { button.hidden = state.workshopLoginStatus !== 'waiting'; });
+    // 弹窗被拦截（Tauri/移动端）时展示手动登录链接
+    root.querySelectorAll('[data-xy-login-manual]').forEach(node => {
+      const show = state.workshopLoginStatus === 'waiting' && state.workshopLoginPopupBlocked && !!state.workshopLoginManualUrl;
+      node.hidden = !show;
+      const link = node.querySelector('a');
+      if (show && link) link.href = state.workshopLoginManualUrl;
+    });
     // 3.9.9 r64 #3：署名输入框回填持久化值（正在输入时不覆盖）
     const signature = root.querySelector('[data-xy-workshop-signature]');
     if (signature && (root.ownerDocument || document).activeElement !== signature) {

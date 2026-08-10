@@ -1020,7 +1020,7 @@ function aiFetchModels(){
   if(!aiDraft.key&&!aiDraft.hasKey){aiFailure(new Error('请填写 API Key'));render();return}
   aiBusy=true;aiTipBad=false;aiTipText='正在拉取模型列表…';render();var task;
   try{task=Promise.resolve(bridge.fetchModels({apiurl:aiDraft.apiurl,key:aiDraft.key}))}catch(error){task=Promise.reject(error)}
-  task.then(function(models){if(!alive)return;aiDraft.models=Array.isArray(models)?models.map(String).filter(Boolean):[];if(!aiDraft.models.length)throw new Error('API 未返回可用模型');if(aiDraft.models.indexOf(aiDraft.model)<0)aiDraft.model='';try{aiStateApply(bridge.getState())}catch(e){}if(aiDraft.key)aiDraft.hasKey=true;aiTipText='已拉取 '+aiDraft.models.length+' 个模型，请选择一个后保存';aiTipBad=false},function(error){if(alive)aiFailure(error)}).then(function(){if(!alive)return;aiBusy=false;render()},function(error){if(!alive)return;aiFailure(error);aiBusy=false;render()});
+  task.then(function(models){if(!alive)return;aiDraft.models=Array.isArray(models)?models.map(String).filter(Boolean):[];if(!aiDraft.models.length)throw new Error('API 未返回可用模型');if(aiDraft.models.indexOf(aiDraft.model)<0)aiDraft.model='';try{var st=bridge.getState();aiDraft.hasKey=!!(st&&st.hasKey)}catch(e){}if(aiDraft.key)aiDraft.hasKey=true;aiTipText='已拉取 '+aiDraft.models.length+' 个模型，请选择一个后保存';aiTipBad=false},function(error){if(alive)aiFailure(error)}).then(function(){if(!alive)return;aiBusy=false;render()},function(error){if(!alive)return;aiFailure(error);aiBusy=false;render()});
 }
 function aiSave(){
   if(aiBusy){aiFailure(new Error('上一次 API 请求仍在进行，请稍候'));render();return}var bridge=aiBridge();if(!bridge){aiFailure(new Error('酒馆助手 API 桥尚未就绪'));render();return}
