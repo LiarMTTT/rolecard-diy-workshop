@@ -152,7 +152,7 @@
     return { ...workshopAuth };
   }
   // 4.0.0 r1：所有可执行远程模块与注入型 HTML 统一走 loader 的 manifest + bytes + SHA-256 完整性计划。
-  const GIT_RUNTIME_REVISION = '4.0.0-workshop-contract-r1-20260812';
+  const GIT_RUNTIME_REVISION = '4.0.0-stability-r1-20260812';
   const RUNTIME_SECURITY_EPOCH = 'manifest-integrity-v1';
   const runtimeIntegrity = (() => {
     const candidates = [];
